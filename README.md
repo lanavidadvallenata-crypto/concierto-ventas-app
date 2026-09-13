@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sistema de venta — La Navidad Vallenata
 
-## Getting Started
+Reemplaza el sistema anterior (Artifacts de Claude) por infraestructura propia del evento, para que ningún miembro del equipo necesite cuenta de Claude. Venta sigue siendo 100% manual por WhatsApp normal — esta app es donde el equipo registra la venta, verifica el pago y genera el QR.
 
-First, run the development server:
+## Stack (fase 1, sin Kommo ni WhatsApp Business API)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+| Pieza | Para qué | Cuenta necesaria |
+|---|---|---|
+| Next.js | Código de la app | No (ya está aquí) |
+| GitHub | Guarda el código | Sí — con el correo oficial |
+| Vercel | Aloja y despliega la app | Sí — con el correo oficial (login "Continue with GitHub") |
+| Supabase | Base de datos + login del equipo | Sí — con el correo oficial |
+| Resend | Envío del correo con QR | Sí — con el correo oficial |
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Estado actual
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- [x] Proyecto Next.js + TypeScript + Tailwind inicializado
+- [x] Dependencias de Supabase, Resend, QR instaladas
+- [x] `supabase/schema.sql` — schema completo (eventos, mesas VIP, sillas, reservas, tickets, accesos, roles)
+- [x] Helpers de conexión a Supabase (`src/lib/supabase/`) y generación segura de QR (`src/lib/qr.ts`)
+- [ ] Credenciales reales conectadas (bloqueado hasta que existan las cuentas)
+- [ ] Páginas de la app (login, ventas, finanzas, acceso) — se construyen en cuanto haya credenciales para probar contra datos reales
+- [ ] Despliegue en Vercel
+- [ ] Prueba end-to-end
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Qué necesito de Anita para continuar
 
-## Learn More
+1. **Supabase**: crear proyecto → Project Settings → API → copiar `Project URL`, `anon public key`, `service_role key` (esta última nunca se sube a GitHub, solo se guarda como variable de entorno en Vercel)
+2. **Resend**: crear cuenta → API Keys → generar una → copiar el valor (empieza con `re_`)
+3. **GitHub**: crear un repositorio vacío (privado) → dar acceso o generar un Personal Access Token de solo ese repo para poder subir el código desde aquí
+4. **Vercel**: conectar el repositorio de GitHub cuando ya tenga código — el despliegue automático se activa solo
 
-To learn more about Next.js, take a look at the following resources:
+## Nota de seguridad
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Ninguna de estas claves debe compartirse por WhatsApp en texto plano si se puede evitar — mejor un gestor de contraseñas o el chat directo aquí. La `service_role key` de Supabase se salta todos los permisos (RLS) — trátala como una contraseña maestra.
