@@ -23,7 +23,7 @@ export default async function FinanzasPage() {
   const { data: pendientes } = await service
     .from("tickets")
     .select(
-      "id, comprador_nombre, comprador_telefono, tipo, precio, moneda, metodo_pago, referencia_pago, vendido_por, created_at, perfiles!tickets_vendido_por_fkey(nombre), sillas_vip(numero, mesas_vip(numero))"
+      "id, comprador_nombre, comprador_telefono, tipo, precio, moneda, metodo_pago, referencia_pago, vendido_por, created_at, perfiles!tickets_vendido_por_fkey(nombre), sillas_vip(numero, mesas_vip(numero, fila))"
     )
     .eq("estado_pago", "pendiente")
     .order("created_at", { ascending: true });
@@ -39,8 +39,8 @@ export default async function FinanzasPage() {
     referenciaPago: t.referencia_pago as string | null,
     vendedorNombre: (t as unknown as { perfiles: { nombre: string } | null }).perfiles?.nombre ?? "—",
     asiento: (() => {
-      const s = (t as unknown as { sillas_vip: { numero: number; mesas_vip: { numero: number } } | null }).sillas_vip;
-      return s ? `Mesa ${s.mesas_vip?.numero} · Silla ${s.numero}` : null;
+      const s = (t as unknown as { sillas_vip: { numero: number; mesas_vip: { numero: number; fila: string } } | null }).sillas_vip;
+      return s ? `Fila ${s.mesas_vip?.fila} · Mesa ${s.mesas_vip?.numero} · Silla ${s.numero}` : null;
     })(),
   }));
 

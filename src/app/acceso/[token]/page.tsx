@@ -15,17 +15,17 @@ export default async function ValidarAccesoPage({
     .update({ qr_usado: true, qr_usado_en: new Date().toISOString() })
     .eq("qr_token", token)
     .eq("qr_usado", false)
-    .select("id, comprador_nombre, tipo, sillas_vip(numero, mesas_vip(numero))")
+    .select("id, comprador_nombre, tipo, sillas_vip(numero, mesas_vip(numero, fila))")
     .maybeSingle();
 
   if (marcado) {
     await service.from("accesos").insert({ ticket_id: marcado.id, resultado: "valido" });
-    const silla = (marcado as unknown as { sillas_vip: { numero: number; mesas_vip: { numero: number } } | null }).sillas_vip;
+    const silla = (marcado as unknown as { sillas_vip: { numero: number; mesas_vip: { numero: number; fila: string } } | null }).sillas_vip;
     return (
       <Resultado
         color="green"
         titulo="VÁLIDO"
-        detalle={`${marcado.comprador_nombre} · ${marcado.tipo === "vip" ? `Mesa ${silla?.mesas_vip?.numero} · Silla ${silla?.numero}` : "General"}`}
+        detalle={`${marcado.comprador_nombre} · ${marcado.tipo === "vip" ? `Fila ${silla?.mesas_vip?.fila} · Mesa ${silla?.mesas_vip?.numero} · Silla ${silla?.numero}` : "General"}`}
       />
     );
   }

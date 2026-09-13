@@ -3,12 +3,20 @@
 import { useState, useTransition } from "react";
 import { registrarVenta } from "./actions";
 
-type Silla = { id: string; numero: number; mesaNumero: number };
+type Silla = { id: string; numero: number; mesaNumero: number; fila: string };
+
+const PRECIO_SUGERIDO: Record<"vip" | "general", number> = { vip: 120, general: 30 };
 
 export default function VentaForm({ sillas }: { sillas: Silla[] }) {
   const [tipo, setTipo] = useState<"vip" | "general">("general");
+  const [precio, setPrecio] = useState<number>(PRECIO_SUGERIDO.general);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [pending, startTransition] = useTransition();
+
+  function cambiarTipo(t: "vip" | "general") {
+    setTipo(t);
+    setPrecio(PRECIO_SUGERIDO[t]);
+  }
 
   function onSubmit(formData: FormData) {
     setMensaje(null);
@@ -30,7 +38,7 @@ export default function VentaForm({ sillas }: { sillas: Silla[] }) {
           <button
             key={t}
             type="button"
-            onClick={() => setTipo(t)}
+            onClick={() => cambiarTipo(t)}
             className={`flex-1 rounded-md py-2 text-sm font-medium border ${
               tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
             }`}
@@ -48,7 +56,7 @@ export default function VentaForm({ sillas }: { sillas: Silla[] }) {
             <option value="">Selecciona una silla disponible</option>
             {sillas.map((s) => (
               <option key={s.id} value={s.id}>
-                Mesa {s.mesaNumero} · Silla {s.numero}
+                Fila {s.fila} · Mesa {s.mesaNumero} · Silla {s.numero}
               </option>
             ))}
           </select>
@@ -87,7 +95,15 @@ export default function VentaForm({ sillas }: { sillas: Silla[] }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-sm font-medium mb-1">Precio (USD)</label>
-          <input name="precio" type="number" step="0.01" required className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm" />
+          <input
+            name="precio"
+            type="number"
+            step="0.01"
+            required
+            value={precio}
+            onChange={(e) => setPrecio(Number(e.target.value))}
+            className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Método de pago</label>

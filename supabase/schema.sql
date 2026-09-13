@@ -27,13 +27,14 @@ create table public.eventos (
   created_at timestamptz not null default now()
 );
 
--- Mapa VIP: mesas numeradas
+-- Mapa VIP: filas (A, B, C...) con mesas numeradas 1-10 repetidas por fila
 create table public.mesas_vip (
   id uuid primary key default gen_random_uuid(),
   evento_id uuid not null references public.eventos(id) on delete cascade,
+  fila text not null,
   numero int not null,
   sillas_total int not null default 10,
-  unique (evento_id, numero)
+  unique (evento_id, fila, numero)
 );
 
 create table public.sillas_vip (

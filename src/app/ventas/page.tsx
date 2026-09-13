@@ -12,7 +12,7 @@ export default async function VentasPage() {
 
   const { data: sillasDisponibles } = await service
     .from("sillas_vip")
-    .select("id, numero, mesa_id, mesas_vip(numero)")
+    .select("id, numero, mesa_id, mesas_vip(numero, fila)")
     .eq("estado", "disponible")
     .order("numero");
 
@@ -35,11 +35,17 @@ export default async function VentasPage() {
     .order("created_at", { ascending: false })
     .limit(8);
 
-  const sillas = (sillasDisponibles ?? []).map((s) => ({
-    id: s.id as string,
-    numero: s.numero as number,
-    mesaNumero: (s as unknown as { mesas_vip: { numero: number } }).mesas_vip?.numero ?? 0,
-  }));
+  const sillas = (sillasDisponibles ?? [])
+    .map((s) => {
+      const mesa = (s as unknown as { mesas_vip: { numero: number; fila: string } | null }).mesas_vip;
+      return {
+        id: s.id as string,
+        numero: s.numero as number,
+        mesaNumero: mesa?.numero ?? 0,
+        fila: mesa?.fila ?? "",
+      };
+    })
+    .sort((a, b) => a.fila.localeCompare(b.fila) || a.mesaNumero - b.mesaNumero || a.numero - b.numero);
 
   const cupoGeneralRestante = (evento?.aforo_general_total ?? 4500) - (generalVendidos ?? 0);
 
