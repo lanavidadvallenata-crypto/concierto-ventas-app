@@ -49,7 +49,7 @@ export default async function VentasPage() {
           </p>
         </div>
 
-        <VentaForm mesas={mesas} />
+        <VentaForm mesas={mesas} cupoGeneralRestante={cupoGeneralRestante} />
 
         {misVentasHoy && misVentasHoy.length > 0 && (
           <div>

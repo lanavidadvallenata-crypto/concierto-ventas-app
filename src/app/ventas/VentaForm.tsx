@@ -4,19 +4,18 @@ import { useState, useTransition } from "react";
 import { registrarVenta } from "./actions";
 import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
+import { calcularTotal } from "@/lib/precios";
 
-const PRECIO_SUGERIDO: Record<"vip" | "general", number> = { vip: 120, general: 30 };
-
-export default function VentaForm({ mesas }: { mesas: MesaMapa[] }) {
+export default function VentaForm({ mesas, cupoGeneralRestante }: { mesas: MesaMapa[]; cupoGeneralRestante?: number }) {
   const [tipo, setTipo] = useState<"vip" | "general">("general");
-  const [precio, setPrecio] = useState<number>(PRECIO_SUGERIDO.general);
+  const [precio, setPrecio] = useState<number>(calcularTotal("general").total);
   const [sillaElegida, setSillaElegida] = useState<SillaElegida | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function cambiarTipo(t: "vip" | "general") {
     setTipo(t);
-    setPrecio(PRECIO_SUGERIDO[t]);
+    setPrecio(calcularTotal(t).total);
     if (t === "general") setSillaElegida(null);
   }
 
@@ -63,7 +62,12 @@ export default function VentaForm({ mesas }: { mesas: MesaMapa[] }) {
         <div>
           <label className="block text-sm font-medium mb-1">Silla</label>
           <input type="hidden" name="sillaId" value={sillaElegida?.id ?? ""} />
-          <MapaVip mesas={mesas} sillaSeleccionadaId={sillaElegida?.id ?? null} onSeleccionar={setSillaElegida} />
+          <MapaVip
+            mesas={mesas}
+            sillaSeleccionadaId={sillaElegida?.id ?? null}
+            onSeleccionar={setSillaElegida}
+            cupoGeneralRestante={cupoGeneralRestante}
+          />
           <p className="text-xs text-neutral-500 mt-2">
             {sillaElegida
               ? `Elegida: Fila ${sillaElegida.fila} · Mesa ${sillaElegida.mesaNumero} · Silla ${sillaElegida.numero}`
@@ -103,7 +107,7 @@ export default function VentaForm({ mesas }: { mesas: MesaMapa[] }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-sm font-medium mb-1">Precio (USD)</label>
+          <label className="block text-sm font-medium mb-1">Precio total (USD) — incluye 10% fee</label>
           <input
             name="precio"
             type="number"
@@ -113,6 +117,9 @@ export default function VentaForm({ mesas }: { mesas: MesaMapa[] }) {
             onChange={(e) => setPrecio(Number(e.target.value))}
             className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
           />
+          <p className="text-xs text-neutral-400 mt-1">
+            Base ${calcularTotal(tipo).base} + ${calcularTotal(tipo).fee} de fee (10%) = ${calcularTotal(tipo).total}. Editable si negociaste otro precio.
+          </p>
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Método de pago</label>

@@ -22,10 +22,12 @@ export default function MapaVip({
   mesas,
   onSeleccionar,
   sillaSeleccionadaId,
+  cupoGeneralRestante,
 }: {
   mesas: MesaMapa[];
   onSeleccionar: (silla: SillaElegida) => void;
   sillaSeleccionadaId?: string | null;
+  cupoGeneralRestante?: number;
 }) {
   const [mesaActivaId, setMesaActivaId] = useState<string | null>(null);
 
@@ -75,6 +77,9 @@ export default function MapaVip({
 
       <div className="bg-neutral-50 text-neutral-400 text-center text-[11px] font-medium py-5 rounded-lg border border-dashed border-neutral-300">
         ZONA GENERAL (sin asiento asignado)
+        {typeof cupoGeneralRestante === "number" && (
+          <span className="block mt-0.5">{cupoGeneralRestante} cupos disponibles</span>
+        )}
       </div>
 
       {mesaActiva && (
