@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getPerfilActual } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
+import { obtenerMapaVip } from "@/lib/mapa-vip";
 import Nav from "@/components/Nav";
 import VentaForm from "./VentaForm";
 
@@ -10,11 +11,11 @@ export default async function VentasPage() {
 
   const service = createServiceClient();
 
-  const { data: sillasDisponibles } = await service
-    .from("sillas_vip")
-    .select("id, numero, mesa_id, mesas_vip(numero, fila)")
-    .eq("estado", "disponible")
-    .order("numero");
+  const mesas = await obtenerMapaVip(service);
+  const sillasVipDisponibles = mesas.reduce(
+    (total, m) => total + m.sillas.filter((s) => s.estado === "disponible").length,
+    0
+  );
 
   const { count: generalVendidos } = await service
     .from("tickets")
@@ -35,18 +36,6 @@ export default async function VentasPage() {
     .order("created_at", { ascending: false })
     .limit(8);
 
-  const sillas = (sillasDisponibles ?? [])
-    .map((s) => {
-      const mesa = (s as unknown as { mesas_vip: { numero: number; fila: string } | null }).mesas_vip;
-      return {
-        id: s.id as string,
-        numero: s.numero as number,
-        mesaNumero: mesa?.numero ?? 0,
-        fila: mesa?.fila ?? "",
-      };
-    })
-    .sort((a, b) => a.fila.localeCompare(b.fila) || a.mesaNumero - b.mesaNumero || a.numero - b.numero);
-
   const cupoGeneralRestante = (evento?.aforo_general_total ?? 4500) - (generalVendidos ?? 0);
 
   return (
@@ -56,11 +45,11 @@ export default async function VentasPage() {
         <div>
           <h1 className="text-lg font-semibold">Registrar venta</h1>
           <p className="text-sm text-neutral-500">
-            {sillas.length} sillas VIP disponibles · {cupoGeneralRestante} cupos generales restantes
+            {sillasVipDisponibles} sillas VIP disponibles · {cupoGeneralRestante} cupos generales restantes
           </p>
         </div>
 
-        <VentaForm sillas={sillas} />
+        <VentaForm mesas={mesas} />
 
         {misVentasHoy && misVentasHoy.length > 0 && (
           <div>

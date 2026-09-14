@@ -2,24 +2,30 @@
 
 import { useState, useTransition } from "react";
 import { registrarVenta } from "./actions";
-
-type Silla = { id: string; numero: number; mesaNumero: number; fila: string };
+import MapaVip, { type SillaElegida } from "@/components/MapaVip";
+import type { MesaMapa } from "@/lib/mapa-vip";
 
 const PRECIO_SUGERIDO: Record<"vip" | "general", number> = { vip: 120, general: 30 };
 
-export default function VentaForm({ sillas }: { sillas: Silla[] }) {
+export default function VentaForm({ mesas }: { mesas: MesaMapa[] }) {
   const [tipo, setTipo] = useState<"vip" | "general">("general");
   const [precio, setPrecio] = useState<number>(PRECIO_SUGERIDO.general);
+  const [sillaElegida, setSillaElegida] = useState<SillaElegida | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
   function cambiarTipo(t: "vip" | "general") {
     setTipo(t);
     setPrecio(PRECIO_SUGERIDO[t]);
+    if (t === "general") setSillaElegida(null);
   }
 
   function onSubmit(formData: FormData) {
     setMensaje(null);
+    if (tipo === "vip" && !sillaElegida) {
+      setMensaje({ tipo: "error", texto: "Toca una mesa y elige una silla en el mapa antes de registrar la venta." });
+      return;
+    }
     startTransition(async () => {
       const res = await registrarVenta(formData);
       if (res.ok) {
@@ -28,6 +34,7 @@ export default function VentaForm({ sillas }: { sillas: Silla[] }) {
           texto: res.avisoEmail || "Venta registrada — le llegó un correo de bienvenida al comprador. Pasa a Finanzas para verificar el pago.",
         });
         (document.getElementById("venta-form") as HTMLFormElement)?.reset();
+        setSillaElegida(null);
       } else {
         setMensaje({ tipo: "error", texto: res.error });
       }
@@ -55,14 +62,13 @@ export default function VentaForm({ sillas }: { sillas: Silla[] }) {
       {tipo === "vip" ? (
         <div>
           <label className="block text-sm font-medium mb-1">Silla</label>
-          <select name="sillaId" required className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm">
-            <option value="">Selecciona una silla disponible</option>
-            {sillas.map((s) => (
-              <option key={s.id} value={s.id}>
-                Fila {s.fila} · Mesa {s.mesaNumero} · Silla {s.numero}
-              </option>
-            ))}
-          </select>
+          <input type="hidden" name="sillaId" value={sillaElegida?.id ?? ""} />
+          <MapaVip mesas={mesas} sillaSeleccionadaId={sillaElegida?.id ?? null} onSeleccionar={setSillaElegida} />
+          <p className="text-xs text-neutral-500 mt-2">
+            {sillaElegida
+              ? `Elegida: Fila ${sillaElegida.fila} · Mesa ${sillaElegida.mesaNumero} · Silla ${sillaElegida.numero}`
+              : "Toca una mesa en el mapa para ver sus sillas."}
+          </p>
         </div>
       ) : (
         <div>
