@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal } from "@/lib/precios";
+import { convertirABs } from "@/lib/tasa";
 import { METODOS_PAGO, INSTRUCCIONES_PAGO, type MetodoPago } from "@/lib/pagos";
 import { iniciarCheckoutPublico, confirmarCheckoutPublico } from "./actions";
 
@@ -13,10 +14,12 @@ export default function CheckoutForm({
   mesas,
   sillasVipDisponibles,
   cupoGeneralRestante,
+  tasaEurVes,
 }: {
   mesas: MesaMapa[];
   sillasVipDisponibles: number;
   cupoGeneralRestante: number;
+  tasaEurVes: number | null;
 }) {
   const [fase, setFase] = useState<Fase>("seleccion");
   const [tipo, setTipo] = useState<"vip" | "general">("general");
@@ -122,6 +125,8 @@ export default function CheckoutForm({
     const minutos = Math.floor(segundosRestantes / 60);
     const segundos = segundosRestantes % 60;
     const expirado = segundosRestantes <= 0;
+    const enBolivares = metodo.moneda === "VES";
+    const montoBs = enBolivares && tasaEurVes ? convertirABs(total, tasaEurVes) : null;
     return (
       <div className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between">
@@ -137,6 +142,13 @@ export default function CheckoutForm({
           </p>
         )}
         <p className="text-2xl font-bold">${total.toFixed(2)}</p>
+        {enBolivares && (
+          <p className="text-sm text-neutral-600 -mt-2">
+            {montoBs !== null
+              ? `≈ Bs ${montoBs.toLocaleString("es-VE")} a la tasa de hoy`
+              : "Tasa del día no disponible todavía — confirma el monto en bolívares por WhatsApp antes de pagar."}
+          </p>
+        )}
 
         {expirado ? (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">

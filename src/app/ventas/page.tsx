@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getPerfilActual } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerMapaVip } from "@/lib/mapa-vip";
+import { obtenerTasaActual } from "@/lib/tasa";
 import Nav from "@/components/Nav";
 import VentaForm from "./VentaForm";
 
@@ -12,6 +13,7 @@ export default async function VentasPage() {
   const service = createServiceClient();
 
   const mesas = await obtenerMapaVip(service);
+  const tasaEurVes = await obtenerTasaActual(service);
   const sillasVipDisponibles = mesas.reduce(
     (total, m) => total + m.sillas.filter((s) => s.estado === "disponible").length,
     0
@@ -49,7 +51,7 @@ export default async function VentasPage() {
           </p>
         </div>
 
-        <VentaForm mesas={mesas} cupoGeneralRestante={cupoGeneralRestante} />
+        <VentaForm mesas={mesas} cupoGeneralRestante={cupoGeneralRestante} tasaEurVes={tasaEurVes} />
 
         {misVentasHoy && misVentasHoy.length > 0 && (
           <div>

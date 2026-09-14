@@ -5,13 +5,26 @@ import { registrarVenta } from "./actions";
 import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal } from "@/lib/precios";
+import { convertirABs } from "@/lib/tasa";
 
-export default function VentaForm({ mesas, cupoGeneralRestante }: { mesas: MesaMapa[]; cupoGeneralRestante?: number }) {
+export default function VentaForm({
+  mesas,
+  cupoGeneralRestante,
+  tasaEurVes,
+}: {
+  mesas: MesaMapa[];
+  cupoGeneralRestante?: number;
+  tasaEurVes: number | null;
+}) {
   const [tipo, setTipo] = useState<"vip" | "general">("general");
   const [precio, setPrecio] = useState<number>(calcularTotal("general").total);
   const [sillaElegida, setSillaElegida] = useState<SillaElegida | null>(null);
+  const [metodoPago, setMetodoPago] = useState<"pago_movil" | "transferencia" | "zelle" | "binance">("pago_movil");
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const enBolivares = metodoPago === "pago_movil" || metodoPago === "transferencia";
+  const montoBs = enBolivares && tasaEurVes ? convertirABs(precio, tasaEurVes) : null;
 
   function cambiarTipo(t: "vip" | "general") {
     setTipo(t);
@@ -123,12 +136,25 @@ export default function VentaForm({ mesas, cupoGeneralRestante }: { mesas: MesaM
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Método de pago</label>
-          <select name="metodoPago" required className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm">
+          <select
+            name="metodoPago"
+            required
+            value={metodoPago}
+            onChange={(e) => setMetodoPago(e.target.value as typeof metodoPago)}
+            className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
+          >
             <option value="pago_movil">Pago móvil</option>
             <option value="transferencia">Transferencia</option>
             <option value="zelle">Zelle</option>
             <option value="binance">Binance</option>
           </select>
+          {enBolivares && (
+            <p className="text-xs text-neutral-500 mt-1">
+              {montoBs !== null
+                ? `≈ Bs ${montoBs.toLocaleString("es-VE")} (tasa del día)`
+                : "Tasa del día aún no disponible — usa el monto en USD como referencia."}
+            </p>
+          )}
         </div>
       </div>
 

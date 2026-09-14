@@ -1,11 +1,13 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerMapaVip } from "@/lib/mapa-vip";
+import { obtenerTasaActual } from "@/lib/tasa";
 import CheckoutForm from "./CheckoutForm";
 
 export default async function ComprarPage() {
   const service = createServiceClient();
 
   const mesas = await obtenerMapaVip(service);
+  const tasaEurVes = await obtenerTasaActual(service);
   const sillasVipDisponibles = mesas.reduce(
     (total, m) => total + m.sillas.filter((s) => s.estado === "disponible").length,
     0
@@ -38,6 +40,7 @@ export default async function ComprarPage() {
         mesas={mesas}
         sillasVipDisponibles={sillasVipDisponibles}
         cupoGeneralRestante={cupoGeneralRestante}
+        tasaEurVes={tasaEurVes}
       />
     </main>
   );
