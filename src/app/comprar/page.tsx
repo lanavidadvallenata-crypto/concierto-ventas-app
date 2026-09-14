@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerMapaVip } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
 import CheckoutForm from "./CheckoutForm";
+import { HeroEvento, SobreElEvento, PreciosExplicados, ComoComprar, PreguntasFrecuentes } from "./SeccionesVenta";
 
 export default async function ComprarPage() {
   const service = createServiceClient();
@@ -28,20 +29,29 @@ export default async function ComprarPage() {
   const cupoGeneralRestante = (evento?.aforo_general_total ?? 4500) - (generalVendidos ?? 0);
 
   return (
-    <main className="max-w-lg mx-auto w-full px-4 py-8 flex flex-col gap-6">
-      <div className="text-center">
-        <h1 className="text-xl font-bold">{evento?.nombre ?? "La Navidad Vallenata"}</h1>
-        <p className="text-sm text-neutral-500">
-          {evento?.venue ?? "Hangar Grano de Oro"} · {evento?.ciudad ?? "Maracaibo"}
-        </p>
+    <main className="max-w-lg mx-auto w-full px-4 py-8 flex flex-col gap-8">
+      <HeroEvento
+        nombre={evento?.nombre ?? "La Navidad Vallenata"}
+        fecha={evento?.fecha ?? null}
+        venue={evento?.venue ?? "Hangar Grano de Oro"}
+        ciudad={evento?.ciudad ?? "Maracaibo"}
+      />
+
+      <SobreElEvento />
+      <PreciosExplicados />
+      <ComoComprar />
+
+      <div id="comprar" className="scroll-mt-6">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">Elige tu entrada</h2>
+        <CheckoutForm
+          mesas={mesas}
+          sillasVipDisponibles={sillasVipDisponibles}
+          cupoGeneralRestante={cupoGeneralRestante}
+          tasaEurVes={tasaEurVes}
+        />
       </div>
 
-      <CheckoutForm
-        mesas={mesas}
-        sillasVipDisponibles={sillasVipDisponibles}
-        cupoGeneralRestante={cupoGeneralRestante}
-        tasaEurVes={tasaEurVes}
-      />
+      <PreguntasFrecuentes />
     </main>
   );
 }
