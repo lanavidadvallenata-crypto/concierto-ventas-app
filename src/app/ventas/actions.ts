@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { enviarCorreoPendiente } from "@/lib/enviar-qr";
 
 const ventaSchema = z.object({
   tipo: z.enum(["vip", "general"]),
@@ -17,7 +18,7 @@ const ventaSchema = z.object({
   referenciaPago: z.string().optional(),
 });
 
-export type RegistrarVentaResult = { ok: true } | { ok: false; error: string };
+export type RegistrarVentaResult = { ok: true; avisoEmail?: string } | { ok: false; error: string };
 
 export async function registrarVenta(formData: FormData): Promise<RegistrarVentaResult> {
   const supabase = await createClient();
@@ -75,5 +76,16 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
 
   revalidatePath("/ventas");
   revalidatePath("/finanzas");
-  return { ok: true };
+
+  let avisoEmail: string | undefined;
+  try {
+    await enviarCorreoPendiente({
+      destinatario: v.compradorEmail,
+      nombreComprador: v.compradorNombre,
+    });
+  } catch {
+    avisoEmail = "La venta quedó registrada, pero el correo de bienvenida no se pudo enviar — avísale al comprador por WhatsApp que su pago está en verificación.";
+  }
+
+  return { ok: true, avisoEmail };
 }

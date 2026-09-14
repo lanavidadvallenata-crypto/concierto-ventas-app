@@ -23,7 +23,10 @@ export default function VentaForm({ sillas }: { sillas: Silla[] }) {
     startTransition(async () => {
       const res = await registrarVenta(formData);
       if (res.ok) {
-        setMensaje({ tipo: "ok", texto: "Venta registrada — pasa a Finanzas para verificar el pago." });
+        setMensaje({
+          tipo: res.avisoEmail ? "error" : "ok",
+          texto: res.avisoEmail || "Venta registrada — le llegó un correo de bienvenida al comprador. Pasa a Finanzas para verificar el pago.",
+        });
         (document.getElementById("venta-form") as HTMLFormElement)?.reset();
       } else {
         setMensaje({ tipo: "error", texto: res.error });
