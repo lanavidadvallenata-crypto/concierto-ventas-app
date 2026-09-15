@@ -6,6 +6,7 @@ import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
+import { METODOS_PAGO, type MetodoPago } from "@/lib/pagos";
 
 export default function VentaForm({
   mesas,
@@ -19,7 +20,7 @@ export default function VentaForm({
   const [tipo, setTipo] = useState<"vip" | "general">("general");
   const [precio, setPrecio] = useState<number>(calcularTotal("general").total);
   const [sillaElegida, setSillaElegida] = useState<SillaElegida | null>(null);
-  const [metodoPago, setMetodoPago] = useState<"pago_movil" | "transferencia" | "zelle" | "binance">("pago_movil");
+  const [metodoPago, setMetodoPago] = useState<MetodoPago>("transferencia");
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -140,13 +141,15 @@ export default function VentaForm({
             name="metodoPago"
             required
             value={metodoPago}
-            onChange={(e) => setMetodoPago(e.target.value as typeof metodoPago)}
+            onChange={(e) => setMetodoPago(e.target.value as MetodoPago)}
             className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
           >
-            <option value="pago_movil">Pago móvil</option>
-            <option value="transferencia">Transferencia</option>
-            <option value="zelle">Zelle</option>
-            <option value="binance">Binance</option>
+            {METODOS_PAGO.map((m) => (
+              <option key={m.valor} value={m.valor} disabled={!m.activo}>
+                {m.etiqueta}
+                {!m.activo ? " — muy pronto" : ""}
+              </option>
+            ))}
           </select>
           {enBolivares && (
             <p className="text-xs text-neutral-500 mt-1">

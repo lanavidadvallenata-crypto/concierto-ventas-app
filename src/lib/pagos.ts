@@ -1,17 +1,34 @@
 export type MetodoPago = "pago_movil" | "transferencia" | "zelle" | "binance";
 
-export const METODOS_PAGO: { valor: MetodoPago; etiqueta: string; moneda: "USD" | "VES" }[] = [
-  { valor: "pago_movil", etiqueta: "Pago móvil", moneda: "VES" },
-  { valor: "transferencia", etiqueta: "Transferencia bancaria", moneda: "VES" },
-  { valor: "zelle", etiqueta: "Zelle", moneda: "USD" },
-  { valor: "binance", etiqueta: "Binance", moneda: "USD" },
+export const METODOS_PAGO: {
+  valor: MetodoPago;
+  etiqueta: string;
+  moneda: "USD" | "VES";
+  activo: boolean;
+}[] = [
+  // Pago móvil: pendiente — Anita confirmó (14 sept) que está en configuración.
+  // Es el método más usado, así que se deja visible pero deshabilitado en vez de
+  // ocultarlo, para que la gente sepa que viene pronto. Activar apenas lleguen
+  // los datos reales (banco, cédula/RIF, teléfono) reemplazando INSTRUCCIONES_PAGO.pago_movil.
+  { valor: "pago_movil", etiqueta: "Pago móvil", moneda: "VES", activo: false },
+  { valor: "transferencia", etiqueta: "Transferencia bancaria", moneda: "VES", activo: true },
+  { valor: "zelle", etiqueta: "Zelle", moneda: "USD", activo: true },
+  { valor: "binance", etiqueta: "Binance", moneda: "USD", activo: true },
 ];
 
-// TODO(Anita): reemplazar con los datos reales — mientras tanto el checkout público
-// muestra este texto de aviso en vez de datos falsos o inventados.
+export const METODOS_PAGO_ACTIVOS = METODOS_PAGO.filter((m) => m.activo);
+
+// Datos reales confirmados por Anita (14 sept) — cuentas a nombre de Baspartu 2025.
 export const INSTRUCCIONES_PAGO: Record<MetodoPago, string> = {
-  pago_movil: "Datos de pago móvil pendientes de cargar — no actives ventas por este medio hasta reemplazar este texto en src/lib/pagos.ts.",
-  transferencia: "Datos de transferencia bancaria pendientes de cargar — no actives ventas por este medio hasta reemplazar este texto en src/lib/pagos.ts.",
-  zelle: "Correo Zelle pendiente de cargar — no actives ventas por este medio hasta reemplazar este texto en src/lib/pagos.ts.",
-  binance: "ID/correo Binance pendiente de cargar — no actives ventas por este medio hasta reemplazar este texto en src/lib/pagos.ts.",
+  pago_movil:
+    "Pago móvil próximamente — está en configuración. Por ahora paga por Transferencia, Zelle o Binance.",
+  transferencia:
+    "Transferencia BNC a nombre de:\nBASPARTU 2025, C.A. — RIF J-507237133\nCuenta: 0191-0316-14-2100172759\n\nTransfiere el monto exacto en bolívares (arriba) y anota el número de referencia.",
+  zelle:
+    "Zelle a nombre de:\nBaspartu 2025 LLC\nCorreo: Pagosbpt@gmail.com\nBanco: Chase Bank\n\nEnvía el Zelle y anota el número de confirmación que te da tu banco.",
+  binance:
+    "Binance Pay\nID: 818097513 · Usuario: Pagosbpt\n\nEscanea el código QR con tu app de Binance o busca el ID/usuario, y anota el número de orden que te da Binance al confirmar.",
 };
+
+// Mostrado como apoyo visual junto a las instrucciones cuando se elige Binance.
+export const BINANCE_QR_URL = "/pago-binance-qr.jpg";

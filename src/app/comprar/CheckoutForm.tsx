@@ -5,7 +5,7 @@ import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
-import { METODOS_PAGO, INSTRUCCIONES_PAGO, type MetodoPago } from "@/lib/pagos";
+import { METODOS_PAGO, INSTRUCCIONES_PAGO, BINANCE_QR_URL, type MetodoPago } from "@/lib/pagos";
 import { iniciarCheckoutPublico, confirmarCheckoutPublico } from "./actions";
 
 type Fase = "seleccion" | "pago" | "confirmado";
@@ -28,7 +28,7 @@ export default function CheckoutForm({
   const [nombre, setNombre] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
-  const [metodoPago, setMetodoPago] = useState<MetodoPago>("pago_movil");
+  const [metodoPago, setMetodoPago] = useState<MetodoPago>("transferencia");
   const [honeypot, setHoneypot] = useState("");
 
   const [referencia, setReferencia] = useState("");
@@ -155,9 +155,19 @@ export default function CheckoutForm({
             Se venció el tiempo para pagar{tipo === "vip" ? " y tu silla se liberó" : ""}. Vuelve a intentarlo.
           </div>
         ) : (
-          <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-sm text-neutral-700 whitespace-pre-line">
-            <p className="font-semibold mb-1">{metodo.etiqueta} ({metodo.moneda})</p>
-            {INSTRUCCIONES_PAGO[metodoPago]}
+          <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-sm text-neutral-700 whitespace-pre-line flex flex-col gap-3">
+            <div>
+              <p className="font-semibold mb-1">{metodo.etiqueta} ({metodo.moneda})</p>
+              {INSTRUCCIONES_PAGO[metodoPago]}
+            </div>
+            {metodoPago === "binance" && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={BINANCE_QR_URL}
+                alt="Código QR de Binance Pay para pagar"
+                className="w-40 h-40 object-contain self-center rounded-md border border-neutral-200 bg-white"
+              />
+            )}
           </div>
         )}
 
@@ -179,7 +189,7 @@ export default function CheckoutForm({
           <button
             type="button"
             onClick={volverAElegir}
-            className="bg-neutral-900 text-white rounded-md py-2 text-sm font-medium"
+            className="bg-marca-secundario text-white rounded-md py-2 text-sm font-medium"
           >
             Volver a elegir
           </button>
@@ -188,7 +198,7 @@ export default function CheckoutForm({
             type="button"
             disabled={cargando}
             onClick={confirmarPago}
-            className="bg-neutral-900 text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
+            className="bg-marca-secundario text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
           >
             {cargando ? "Confirmando…" : "Ya pagué — confirmar"}
           </button>
@@ -209,7 +219,7 @@ export default function CheckoutForm({
               if (t === "general") setSillaElegida(null);
             }}
             className={`flex-1 rounded-md py-2 text-sm font-medium border ${
-              tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
+              tipo === t ? "bg-marca-secundario text-white border-marca-secundario" : "border-neutral-300 text-neutral-600"
             }`}
           >
             {t === "vip" ? `VIP · $${calcularTotal("vip").total}` : `General · $${calcularTotal("general").total}`}
@@ -260,8 +270,8 @@ export default function CheckoutForm({
           className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
         >
           {METODOS_PAGO.map((m) => (
-            <option key={m.valor} value={m.valor}>
-              {m.etiqueta} ({m.moneda})
+            <option key={m.valor} value={m.valor} disabled={!m.activo}>
+              {m.etiqueta} ({m.moneda}){!m.activo ? " — muy pronto" : ""}
             </option>
           ))}
         </select>
@@ -285,7 +295,7 @@ export default function CheckoutForm({
         type="button"
         disabled={cargando}
         onClick={irAPago}
-        className="bg-neutral-900 text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
+        className="bg-marca-secundario text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
       >
         {cargando ? "Reservando…" : `Continuar — $${total.toFixed(2)}`}
       </button>
