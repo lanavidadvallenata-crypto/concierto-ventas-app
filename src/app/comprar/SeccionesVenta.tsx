@@ -22,33 +22,54 @@ export function HeroEvento({
     ? new Date(fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric" })
     : null;
 
-  return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-marca-secundario via-marca-secundario to-marca-principal text-white px-6 py-10 flex flex-col items-center text-center gap-2">
-      {FLYER_URL && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={FLYER_URL} alt={nombre} className="absolute inset-0 w-full h-full object-cover opacity-30" />
-      )}
-      <div className="relative flex flex-col items-center gap-3">
-        <a href="/" aria-label="6.18 Producciones">
+  if (FLYER_URL) {
+    // Afiche real del evento (branding_4.pdf): ya trae título, fecha y line-up
+    // como arte final. No se le superpone texto — el afiche es la pieza, y los
+    // datos operativos (venue/fecha/CTA) van debajo, en bloque aparte.
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="rounded-2xl overflow-hidden border border-neutral-200">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-618-white.png" alt="6.18 Producciones" className="h-6 w-auto opacity-90" />
-        </a>
-        <div className="flex flex-col items-center gap-2">
-          <span className="text-xs uppercase tracking-widest text-marca-acento/80">
-            Venta oficial de entradas
-          </span>
-          <h1 className="text-2xl sm:text-3xl font-bold">{nombre}</h1>
+          <img src={FLYER_URL} alt={nombre} className="w-full h-auto block" />
+        </div>
+        <div className="flex flex-col items-center text-center gap-2 bg-evento-principal text-white rounded-2xl px-6 py-5">
+          <a href="/" aria-label="6.18 Producciones">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-618-white.png" alt="6.18 Producciones" className="h-5 w-auto opacity-80" />
+          </a>
           {fechaFormateada && <p className="text-sm text-marca-acento/90">{fechaFormateada}</p>}
           <p className="text-sm text-marca-acento/90">
             {venue} · {ciudad}
           </p>
           <a
             href="#comprar"
-            className="mt-2 bg-marca-acento text-marca-secundario rounded-md px-5 py-2 text-sm font-semibold"
+            className="mt-2 bg-evento-acento text-white rounded-md px-6 py-2.5 text-sm font-semibold"
           >
             Comprar entradas
           </a>
         </div>
+      </div>
+    );
+  }
+
+  // Fallback sin afiche (evento futuro sin arte todavía): mismo tratamiento
+  // de marca del evento, pero con título tipográfico en vez de imagen.
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-evento-secundario to-evento-principal text-white px-6 py-10 flex flex-col items-center text-center gap-3 min-h-[16rem] justify-center">
+      <a href="/" aria-label="6.18 Producciones">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo-618-white.png" alt="6.18 Producciones" className="h-6 w-auto opacity-90" />
+      </a>
+      <div className="flex flex-col items-center gap-2">
+        <span className="text-xs uppercase tracking-widest text-marca-acento/80">Venta oficial de entradas</span>
+        <h1 className="font-display text-4xl sm:text-5xl uppercase leading-[0.95] tracking-wide">{nombre}</h1>
+        {fechaFormateada && <p className="text-sm text-marca-acento/90">{fechaFormateada}</p>}
+        <p className="text-sm text-marca-acento/90">
+          {venue} · {ciudad}
+        </p>
+        <a href="#comprar" className="mt-2 bg-evento-acento text-white rounded-md px-5 py-2 text-sm font-semibold">
+          Comprar entradas
+        </a>
       </div>
     </div>
   );
@@ -81,7 +102,7 @@ export function PreciosExplicados() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-marca-secundario">VIP</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-evento-secundario">VIP</p>
         <p className="text-xl font-bold">${vip.total}</p>
         <p className="text-xs text-neutral-500">Silla numerada en mesa, zona preferencial frente a la tarima.</p>
       </div>
@@ -106,7 +127,7 @@ export function ComoComprar() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {pasos.map((p, i) => (
           <div key={p.titulo} className="flex flex-col gap-1">
-            <span className="text-xs font-bold text-marca-secundario">{i + 1}</span>
+            <span className="text-xs font-bold text-evento-secundario">{i + 1}</span>
             <p className="text-sm font-semibold">{p.titulo}</p>
             <p className="text-xs text-neutral-500">{p.texto}</p>
           </div>

@@ -4,12 +4,19 @@
   --background: #ffffff;
   --foreground: #171717;
 
-  /* 6.18 Producciones — paleta de marca (branding_1.pdf) */
+  /* 6.18 Producciones — paleta de marca de la productora (branding_1.pdf) */
   --marca-principal: #303030;
   --marca-secundario: #3f0a62;
   --marca-acento: #f1ece2;
   --marca-neutro-1: #898477;
   --marca-neutro-2: #8a8782;
+
+  /* La Navidad Vallenata — paleta propia del evento (branding_4.pdf).
+     Se usa solo en /comprar (hero, precios, cómo comprar), donde vive el
+     afiche real del evento — el resto de la app sigue con la marca 6.18. */
+  --evento-principal: #3d0507;
+  --evento-secundario: #680f15;
+  --evento-acento: #ce0100;
 }
 
 @theme inline {
@@ -20,7 +27,11 @@
   --color-marca-acento: var(--marca-acento);
   --color-marca-neutro-1: var(--marca-neutro-1);
   --color-marca-neutro-2: var(--marca-neutro-2);
+  --color-evento-principal: var(--evento-principal);
+  --color-evento-secundario: var(--evento-secundario);
+  --color-evento-acento: var(--evento-acento);
   --font-sans: var(--font-poppins);
+  --font-display: var(--font-bebas);
 }
 
 @media (prefers-color-scheme: dark) {
