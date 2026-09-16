@@ -8,6 +8,18 @@ import { NextResponse, type NextRequest } from "next/server";
 const PROTEGIDAS = ["/ventas", "/finanzas", "/admin"];
 
 export async function middleware(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const esProtegida = PROTEGIDAS.some((p) => path.startsWith(p));
+
+  // El 100% del tráfico público (/, /comprar) pasaba por aquí y disparaba una
+  // llamada a Supabase Auth por cada visita, aunque esas rutas no la necesitan.
+  // En una venta con pico de tráfico ("hora cero") eso multiplica innecesariamente
+  // la carga sobre Supabase justo cuando más importa que aguante. Si la ruta no
+  // está protegida ni es /login, no tocamos Supabase para nada.
+  if (!esProtegida && path !== "/login") {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -30,9 +42,6 @@ export async function middleware(request: NextRequest) {
   );
 
   const { data: { user } } = await supabase.auth.getUser();
-
-  const path = request.nextUrl.pathname;
-  const esProtegida = PROTEGIDAS.some((p) => path.startsWith(p));
 
   if (esProtegida && !user) {
     const url = request.nextUrl.clone();

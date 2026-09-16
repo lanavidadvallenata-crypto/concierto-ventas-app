@@ -4,6 +4,16 @@ import { obtenerTasaActual } from "@/lib/tasa";
 import CheckoutForm from "./CheckoutForm";
 import { HeroEvento, SobreElEvento, PreciosExplicados, ComoComprar, PreguntasFrecuentes } from "./SeccionesVenta";
 
+// Sin esto, cada visita a esta página (la de más tráfico de todo el sitio el
+// día de venta) dispara ~6 consultas a Supabase sin ninguna caché de por medio
+// — con miles de personas entrando a la misma hora, eso multiplica la carga
+// real sobre la base de datos por el número de visitantes. Con un caché corto
+// de 5s absorbemos ese pico casi por completo; confirmarCheckoutPublico y
+// actualizarTasaManual ya llaman revalidatePath("/comprar") para refrescar al
+// instante después de cada compra o cambio de tasa real, así que la frescura
+// de los datos importantes no se resiente.
+export const revalidate = 5;
+
 export default async function ComprarPage() {
   const service = createServiceClient();
 

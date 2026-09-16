@@ -36,8 +36,19 @@ export default function CheckoutForm({
   const [segundosRestantes, setSegundosRestantes] = useState(0);
 
   const [cargando, setCargando] = useState(false);
+  const [tardando, setTardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [avisoEmail, setAvisoEmail] = useState<string | null>(null);
+
+  // Si el servidor tarda más de lo normal en responder (ej. mucho tráfico a la vez),
+  // avisamos en vez de dejar el botón "Confirmando…" sin explicación — es la causa
+  // más común de que alguien sienta que la página "se quedó pegada" y reintente
+  // por su cuenta, generando reportes duplicados.
+  useEffect(() => {
+    if (!cargando) return;
+    const aviso = setTimeout(() => setTardando(true), 8000);
+    return () => clearTimeout(aviso);
+  }, [cargando]);
 
   const { base, fee, total } = calcularTotal(tipo);
 
@@ -65,6 +76,7 @@ export default function CheckoutForm({
     setCargando(true);
     const res = await iniciarCheckoutPublico({ tipo, sillaId: sillaElegida?.id });
     setCargando(false);
+    setTardando(false);
     if (!res.ok) {
       setError(res.error);
       return;
@@ -92,6 +104,7 @@ export default function CheckoutForm({
       honeypot,
     });
     setCargando(false);
+    setTardando(false);
     if (!res.ok) {
       setError(res.error);
       return;
@@ -197,6 +210,11 @@ export default function CheckoutForm({
         )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {cargando && tardando && (
+          <p className="text-xs text-amber-700">
+            Esto está tardando más de lo normal — no cierres esta pantalla ni vuelvas a tocar el botón, tu compra se está procesando.
+          </p>
+        )}
 
         {expirado ? (
           <button
@@ -312,6 +330,11 @@ export default function CheckoutForm({
       />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {cargando && tardando && (
+        <p className="text-xs text-amber-700 text-center">
+          Esto está tardando más de lo normal — no cierres esta pantalla, ya casi.
+        </p>
+      )}
 
       <p className="text-[11px] text-neutral-400 text-center -mb-1">
         Precio base ${base.toFixed(2)} + fee de servicio (10%) — verás el total desglosado en el siguiente paso.

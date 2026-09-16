@@ -117,6 +117,22 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     }
   }
 
+  // Idempotencia: si esta misma persona ya reportó esta misma referencia de pago
+  // hace poco (doble clic, red lenta que hace reintentar el navegador, usuario
+  // que recarga y vuelve a mandar el formulario), no crear un segundo ticket —
+  // devolvemos éxito sobre el que ya existe en vez de duplicar la venta.
+  const { data: ticketExistente } = await service
+    .from("tickets")
+    .select("id")
+    .eq("comprador_email", v.compradorEmail)
+    .eq("referencia_pago", v.referenciaPago)
+    .gte("created_at", new Date(Date.now() - 30 * 60_000).toISOString())
+    .maybeSingle();
+
+  if (ticketExistente) {
+    return { ok: true };
+  }
+
   if (v.tipo === "vip") {
     if (!v.sillaId || !v.expiraEnEsperado) {
       return { ok: false, error: "Falta la silla seleccionada — vuelve a intentarlo desde el mapa." };
