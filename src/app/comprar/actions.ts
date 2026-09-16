@@ -7,6 +7,7 @@ import { enviarCorreoPendiente } from "@/lib/enviar-qr";
 import { liberarSillasVencidas } from "@/lib/mapa-vip";
 import { calcularTotal } from "@/lib/precios";
 import { METODOS_PAGO, type MetodoPago } from "@/lib/pagos";
+import { verificarLimite } from "@/lib/rate-limit";
 
 const MINUTOS_BLOQUEO = 10;
 
@@ -26,6 +27,10 @@ export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarChe
   const v = parsed.data;
 
   const service = createServiceClient();
+
+  const limite = await verificarLimite(service, "iniciar");
+  if (!limite.ok) return { ok: false, error: limite.error };
+
   const total = calcularTotal(v.tipo).total;
 
   if (v.tipo === "vip") {
@@ -86,11 +91,31 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
 
   const service = createServiceClient();
 
-  const { data: evento } = await service.from("eventos").select("id").limit(1).single();
+  const limite = await verificarLimite(service, "confirmar");
+  if (!limite.ok) return { ok: false, error: limite.error };
+
+  const { data: evento } = await service.from("eventos").select("id, aforo_general_total").limit(1).single();
   if (!evento) return { ok: false, error: "No se encontró el evento en la base de datos." };
 
   const precioTotal = calcularTotal(v.tipo).total;
   const metodo = METODOS_PAGO.find((m) => m.valor === (v.metodoPago as MetodoPago));
+
+  if (v.tipo === "general") {
+    // A diferencia de VIP (que bloquea una silla puntual), General no tenía
+    // ninguna revalidación server-side del cupo — solo se mostraba en
+    // pantalla. Se vuelve a contar justo antes de insertar para no vender
+    // más entradas generales de las que caben.
+    const { count: generalVendidos } = await service
+      .from("tickets")
+      .select("id", { count: "exact", head: true })
+      .eq("tipo", "general")
+      .neq("estado_pago", "rechazado");
+
+    const cupoRestante = evento.aforo_general_total - (generalVendidos ?? 0);
+    if (cupoRestante <= 0) {
+      return { ok: false, error: "Se agotaron los cupos generales — ya no quedan entradas de este tipo." };
+    }
+  }
 
   if (v.tipo === "vip") {
     if (!v.sillaId || !v.expiraEnEsperado) {
