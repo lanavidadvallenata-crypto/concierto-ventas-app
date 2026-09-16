@@ -17,17 +17,21 @@ function escapeHtml(texto: string) {
 // Encabezado compartido por ambos correos — identidad de la CASA
 // PRODUCTORA (6.18 Producciones), separado a propósito del banner del
 // evento de abajo: el remitente institucional es 6.18, el evento puntual
-// que se vende es La Navidad Vallenata. Tabla + estilos inline a propósito:
-// es lo único que se renderiza igual en Gmail, Outlook y Apple Mail sin
-// depender de CSS externo ni de que carguen las fuentes de la marca.
+// que se vende es La Navidad Vallenata. El morado (#3F0A62) es el color
+// protagonista aquí a propósito — es el mismo tratamiento que usa el
+// bloque "Bienvenido a 6.18" del home (ProductoraHome.tsx): el gris
+// (#303030) es el color de chrome/UI (nav, footer), pero el morado es la
+// identidad visual reconocible de la marca. Tabla + estilos inline a
+// propósito: es lo único que se renderiza igual en Gmail, Outlook y Apple
+// Mail sin depender de CSS externo ni de que carguen las fuentes de la marca.
 function encabezadoCorreo() {
   return `
     <tr>
-      <td style="background-color:#303030;padding:0;">
+      <td style="background-color:#3F0A62;padding:0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-          <tr><td style="height:4px;background-color:#3F0A62;font-size:0;line-height:0;">&nbsp;</td></tr>
+          <tr><td style="height:4px;background-color:#303030;font-size:0;line-height:0;">&nbsp;</td></tr>
           <tr>
-            <td align="center" style="padding:22px 24px 20px;">
+            <td align="center" style="padding:24px 24px 22px;">
               <img src="${LOGO_URL}" width="108" alt="6.18 Producciones" style="display:block;width:108px;height:auto;border:0;margin:0 auto;">
             </td>
           </tr>
