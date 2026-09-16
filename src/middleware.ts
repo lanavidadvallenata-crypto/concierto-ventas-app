@@ -2,10 +2,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Protege /ventas, /finanzas, /acceso, /admin — sin sesión, redirige a /login.
-// /acceso/[token] (la página que abre el QR en la puerta) NO requiere login a propósito:
-// el token largo y aleatorio ya es la prueba de validez, y el personal de acceso
-// no debería tener que iniciar sesión parado en la entrada del evento.
-const PROTEGIDAS = ["/ventas", "/finanzas", "/admin"];
+// /acceso/[token] (la página que abre el QR en la puerta) SÍ requiere login:
+// el token aleatorio prueba que el TICKET es válido, pero no prueba que quien
+// lo está escaneando es parte del equipo — sin este gate, cualquiera que
+// consiga ver/fotografiar el QR de otra persona (por ejemplo, en la fila)
+// podría abrir el link él mismo y "quemar" esa entrada antes de que su dueño
+// llegue a la puerta. El personal de acceso inicia sesión UNA vez (antes de
+// que abran las puertas, con buena señal) y la sesión queda guardada en su
+// teléfono para todo el evento — no tiene que volver a loguearse entre cada
+// escaneo.
+const PROTEGIDAS = ["/ventas", "/finanzas", "/admin", "/acceso"];
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;

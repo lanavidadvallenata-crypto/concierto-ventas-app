@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import { getPerfilActual } from "@/lib/perfil";
 
 export default async function ValidarAccesoPage({
   params,
@@ -6,6 +7,23 @@ export default async function ValidarAccesoPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+
+  // El middleware ya exige sesión iniciada para llegar hasta acá. Este chequeo
+  // adicional de rol es lo que de verdad separa "personal de acceso" de
+  // "cualquiera con una cuenta en el sistema" (por ejemplo, alguien de Ventas
+  // no debería poder validar entradas en la puerta). No se ejecuta el UPDATE
+  // que marca el ticket como usado si el rol no es el correcto.
+  const perfil = await getPerfilActual();
+  if (!perfil || (perfil.rol !== "acceso" && perfil.rol !== "admin")) {
+    return (
+      <Resultado
+        color="red"
+        titulo="SIN PERMISO"
+        detalle="Esta cuenta no tiene rol de acceso. Pídele a Anita que te lo asigne."
+      />
+    );
+  }
+
   const service = createServiceClient();
 
   // Update atómico: solo marca como usado si todavía no lo estaba.
