@@ -14,24 +14,44 @@ function escapeHtml(texto: string) {
     .replace(/"/g, "&quot;");
 }
 
-// Encabezado compartido por ambos correos — misma identidad visual que
-// /comprar (paleta rojo navideño del evento + logo de 6.18 Producciones).
-// Tabla + estilos inline a propósito: es lo único que se renderiza igual
-// en Gmail, Outlook y Apple Mail sin depender de CSS externo ni de que
-// carguen las fuentes de la marca (Bebas Neue/Poppins no cargan en la
-// mayoría de los clientes de correo, así que el "display" se simula con
-// un sans-serif en mayúsculas y bien cargado de peso).
+// Encabezado compartido por ambos correos — identidad de la CASA
+// PRODUCTORA (6.18 Producciones), separado a propósito del banner del
+// evento de abajo: el remitente institucional es 6.18, el evento puntual
+// que se vende es La Navidad Vallenata. Tabla + estilos inline a propósito:
+// es lo único que se renderiza igual en Gmail, Outlook y Apple Mail sin
+// depender de CSS externo ni de que carguen las fuentes de la marca.
 function encabezadoCorreo() {
+  return `
+    <tr>
+      <td style="background-color:#303030;padding:0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr><td style="height:4px;background-color:#3F0A62;font-size:0;line-height:0;">&nbsp;</td></tr>
+          <tr>
+            <td align="center" style="padding:22px 24px 20px;">
+              <img src="${LOGO_URL}" width="108" alt="6.18 Producciones" style="display:block;width:108px;height:auto;border:0;margin:0 auto;">
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  `;
+}
+
+// Mini banner del EVENTO — va dentro del cuerpo, justo debajo del
+// encabezado de 6.18. Así conviven las dos marcas sin mezclarse: 6.18
+// como productora (encabezado, arriba) y La Navidad Vallenata como el
+// evento puntual que se está comprando (este banner, con su propia
+// paleta roja navideña).
+function bannerEvento() {
   return `
     <tr>
       <td style="background-color:#3D0507;padding:0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-          <tr><td style="height:4px;background-color:#CE0100;font-size:0;line-height:0;">&nbsp;</td></tr>
+          <tr><td style="height:3px;background-color:#CE0100;font-size:0;line-height:0;">&nbsp;</td></tr>
           <tr>
-            <td align="center" style="padding:28px 24px 24px;">
-              <img src="${LOGO_URL}" width="120" alt="6.18 Producciones" style="display:block;width:120px;height:auto;border:0;margin:0 auto 18px;">
-              <div style="font-family:Helvetica,Arial,sans-serif;font-weight:800;font-size:26px;line-height:1.15;letter-spacing:1px;color:#F1ECE2;text-transform:uppercase;">La Navidad Vallenata</div>
-              <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13px;color:#D9BDB9;margin-top:8px;">4 de diciembre de 2026 · Hangar Grano de Oro, Maracaibo</div>
+            <td align="center" style="padding:20px 24px;">
+              <div style="font-family:Helvetica,Arial,sans-serif;font-weight:800;font-size:24px;line-height:1.15;letter-spacing:1px;color:#F1ECE2;text-transform:uppercase;">La Navidad Vallenata</div>
+              <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13px;color:#D9BDB9;margin-top:6px;">4 de diciembre de 2026 · Hangar Grano de Oro, Maracaibo</div>
             </td>
           </tr>
         </table>
@@ -60,6 +80,7 @@ function envolverCorreo(contenido: string) {
             <td align="center">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#FFFFFF;border-radius:12px;overflow:hidden;font-family:'Poppins',Helvetica,Arial,sans-serif;">
                 ${encabezadoCorreo()}
+                ${bannerEvento()}
                 ${contenido}
                 ${pieCorreo()}
               </table>
