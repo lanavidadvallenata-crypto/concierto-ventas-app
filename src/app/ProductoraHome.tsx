@@ -8,7 +8,7 @@ export function ProductoraHome({ evento }: { evento: Evento }) {
   const fechaFormateada = evento?.fecha
     ? new Date(evento.fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric" })
     : null;
-  const desde = evento ? calcularTotal("general").total : null;
+  const desde = evento ? calcularTotal("general").base : null;
 
   return (
     <main className="min-h-screen flex flex-col bg-marca-acento">
@@ -67,7 +67,7 @@ export function ProductoraHome({ evento }: { evento: Evento }) {
             href="/comprar"
             className="group relative overflow-hidden rounded-2xl bg-white shadow-lg ring-1 ring-black/5 flex flex-col hover:shadow-xl transition-shadow"
           >
-            <div className="relative h-36 bg-gradient-to-br from-marca-secundario to-marca-principal flex items-start justify-between">
+            <div className="relative aspect-[1200/630] bg-gradient-to-br from-marca-secundario to-marca-principal flex items-start justify-between">
               {FLYER_URL && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={FLYER_URL} alt="" className="absolute inset-0 w-full h-full object-cover" />
@@ -90,7 +90,8 @@ export function ProductoraHome({ evento }: { evento: Evento }) {
               <div className="flex items-center justify-between mt-3">
                 {desde !== null && (
                   <span className="text-xs text-marca-neutro-1">
-                    Desde <strong className="text-marca-principal text-sm">${desde}</strong>
+                    Desde <strong className="text-marca-principal text-sm">${desde}</strong>{" "}
+                    <span className="opacity-60">+ fee</span>
                   </span>
                 )}
                 <span className="bg-marca-secundario text-white rounded-md px-4 py-2 text-sm font-semibold group-hover:opacity-90 transition-opacity">

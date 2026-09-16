@@ -39,7 +39,7 @@ export default function CheckoutForm({
   const [error, setError] = useState<string | null>(null);
   const [avisoEmail, setAvisoEmail] = useState<string | null>(null);
 
-  const total = calcularTotal(tipo).total;
+  const { base, fee, total } = calcularTotal(tipo);
 
   useEffect(() => {
     if (fase !== "pago" || !expiraEn) return;
@@ -141,7 +141,20 @@ export default function CheckoutForm({
             Fila {sillaElegida.fila} · Mesa {sillaElegida.mesaNumero} · Silla {sillaElegida.numero}
           </p>
         )}
-        <p className="text-2xl font-bold">${total.toFixed(2)}</p>
+        <div className="flex flex-col gap-1.5 border-y border-neutral-200 py-3">
+          <div className="flex items-center justify-between text-sm text-neutral-500">
+            <span>Precio base</span>
+            <span>${base.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm text-neutral-500">
+            <span>Fee de servicio (10%)</span>
+            <span>${fee.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center justify-between text-base font-bold text-neutral-900 pt-1">
+            <span>Total a pagar</span>
+            <span>${total.toFixed(2)}</span>
+          </div>
+        </div>
         {enBolivares && (
           <p className="text-sm text-neutral-600 -mt-2">
             {montoBs !== null
@@ -210,21 +223,30 @@ export default function CheckoutForm({
   return (
     <div className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
       <div className="flex gap-2">
-        {(["general", "vip"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => {
-              setTipo(t);
-              if (t === "general") setSillaElegida(null);
-            }}
-            className={`flex-1 rounded-md py-2 text-sm font-medium border ${
-              tipo === t ? "bg-marca-secundario text-white border-marca-secundario" : "border-neutral-300 text-neutral-600"
-            }`}
-          >
-            {t === "vip" ? `VIP · $${calcularTotal("vip").total}` : `General · $${calcularTotal("general").total}`}
-          </button>
-        ))}
+        {(["general", "vip"] as const).map((t) => {
+          const precioTipo = calcularTotal(t);
+          const activo = tipo === t;
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
+                setTipo(t);
+                if (t === "general") setSillaElegida(null);
+              }}
+              className={`flex-1 rounded-md py-2 text-sm font-medium border flex flex-col items-center leading-tight ${
+                activo ? "bg-marca-secundario text-white border-marca-secundario" : "border-neutral-300 text-neutral-600"
+              }`}
+            >
+              <span>
+                {t === "vip" ? "VIP" : "General"} · ${precioTipo.base}
+              </span>
+              <span className={`text-[10px] font-normal ${activo ? "text-white/75" : "text-neutral-400"}`}>
+                + fee de servicio
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {tipo === "vip" ? (
@@ -291,13 +313,17 @@ export default function CheckoutForm({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
+      <p className="text-[11px] text-neutral-400 text-center -mb-1">
+        Precio base ${base.toFixed(2)} + fee de servicio (10%) — verás el total desglosado en el siguiente paso.
+      </p>
+
       <button
         type="button"
         disabled={cargando}
         onClick={irAPago}
         className="bg-marca-secundario text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
       >
-        {cargando ? "Reservando…" : `Continuar — $${total.toFixed(2)}`}
+        {cargando ? "Reservando…" : `Continuar — $${base.toFixed(2)}`}
       </button>
     </div>
   );

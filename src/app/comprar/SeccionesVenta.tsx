@@ -103,13 +103,15 @@ export function PreciosExplicados() {
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-evento-secundario">VIP</p>
-        <p className="text-xl font-bold">${vip.total}</p>
-        <p className="text-xs text-neutral-500">Silla numerada en mesa, zona preferencial frente a la tarima.</p>
+        <p className="text-xl font-bold">${vip.base}</p>
+        <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>
+        <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa, zona preferencial frente a la tarima.</p>
       </div>
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">General</p>
-        <p className="text-xl font-bold">${general.total}</p>
-        <p className="text-xs text-neutral-500">Acceso a zona general, sin asiento asignado.</p>
+        <p className="text-xl font-bold">${general.base}</p>
+        <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>
+        <p className="text-xs text-neutral-500 mt-1">Acceso a zona general, sin asiento asignado.</p>
       </div>
     </div>
   );
@@ -117,19 +119,26 @@ export function PreciosExplicados() {
 
 export function ComoComprar() {
   const pasos = [
-    { titulo: "Elige tu entrada", texto: "Selecciona VIP (con mapa de sillas) o General." },
-    { titulo: "Paga en 10 minutos", texto: "Tu selección queda reservada mientras completas el pago." },
-    { titulo: "Recibe tu entrada", texto: "Te llega un correo con tu QR de acceso al confirmarse el pago." },
+    { titulo: "Elige tu entrada", texto: "Selecciona VIP (con mapa de sillas) o General.", icono: "🎟️" },
+    { titulo: "Paga en 10 minutos", texto: "Tu selección queda reservada mientras completas el pago.", icono: "⏱️" },
+    { titulo: "Recibe tu entrada", texto: "Te llega un correo con tu QR de acceso al confirmarse el pago.", icono: "📩" },
   ];
   return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">Cómo comprar</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div className="flex flex-col gap-5">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 text-center">Cómo comprar</h2>
+      <div className="relative flex flex-col sm:flex-row sm:justify-center gap-6 sm:gap-4">
+        <div
+          aria-hidden="true"
+          className="hidden sm:block absolute top-7 left-[16.6%] right-[16.6%] h-0.5 bg-evento-secundario/20"
+        />
         {pasos.map((p, i) => (
-          <div key={p.titulo} className="flex flex-col gap-1">
-            <span className="text-xs font-bold text-evento-secundario">{i + 1}</span>
+          <div key={p.titulo} className="relative flex flex-col items-center text-center gap-1.5 sm:flex-1 sm:max-w-[13rem] sm:mx-auto">
+            <div className="relative z-10 w-14 h-14 rounded-full bg-evento-secundario/10 border-2 border-evento-secundario flex items-center justify-center text-2xl">
+              {p.icono}
+            </div>
+            <span className="text-[11px] font-bold text-evento-secundario tracking-wide">PASO {i + 1}</span>
             <p className="text-sm font-semibold">{p.titulo}</p>
-            <p className="text-xs text-neutral-500">{p.texto}</p>
+            <p className="text-xs text-neutral-500 max-w-[14rem]">{p.texto}</p>
           </div>
         ))}
       </div>
