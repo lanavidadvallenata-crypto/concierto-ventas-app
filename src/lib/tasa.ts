@@ -61,3 +61,18 @@ export async function actualizarTasaDesdeAPI(service: SupabaseClient): Promise<A
 
   return { ok: true, valor: json.promedio, fecha: json.fechaActualizacion ?? new Date().toISOString() };
 }
+
+// Actualización manual (Finanzas) — para cuando el cron de las 8am todavía no
+// corrió, o hay que corregir/adelantar la tasa del día a mano.
+export async function guardarTasaManual(service: SupabaseClient, valor: number): Promise<ActualizarTasaResultado> {
+  if (!Number.isFinite(valor) || valor <= 0) {
+    return { ok: false, error: "El valor de la tasa debe ser un número mayor a 0." };
+  }
+
+  const { error } = await service.from("tasas_cambio").insert({ moneda: "EUR", valor });
+  if (error) {
+    return { ok: false, error: `Error guardando la tasa: ${error.message}` };
+  }
+
+  return { ok: true, valor, fecha: new Date().toISOString() };
+}

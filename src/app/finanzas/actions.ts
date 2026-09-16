@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR } from "@/lib/enviar-qr";
+import { guardarTasaManual } from "@/lib/tasa";
 
 type Resultado = { ok: true } | { ok: false; error: string };
 
@@ -79,6 +80,25 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
   }
 
   revalidatePath("/finanzas");
+  revalidatePath("/ventas");
+  return { ok: true };
+}
+
+export async function actualizarTasaManual(valorTexto: string): Promise<Resultado> {
+  const { user, error } = await requiereFinanzas();
+  if (!user) return { ok: false, error: error! };
+
+  const valor = Number(valorTexto.replace(",", "."));
+  if (!Number.isFinite(valor) || valor <= 0) {
+    return { ok: false, error: "Ingresa un número válido mayor a 0." };
+  }
+
+  const service = createServiceClient();
+  const resultado = await guardarTasaManual(service, valor);
+  if (!resultado.ok) return { ok: false, error: resultado.error };
+
+  revalidatePath("/finanzas");
+  revalidatePath("/comprar");
   revalidatePath("/ventas");
   return { ok: true };
 }

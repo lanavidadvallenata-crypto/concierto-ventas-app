@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
 import { getPerfilActual } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
+import { obtenerTasaActual } from "@/lib/tasa";
 import Nav from "@/components/Nav";
 import PendientesList from "./PendientesList";
+import TasaCambio from "./TasaCambio";
 
 export default async function FinanzasPage() {
   const perfil = await getPerfilActual();
@@ -36,6 +38,7 @@ export default async function FinanzasPage() {
   }
 
   const tickets = pendientes ?? [];
+  const tasaActual = await obtenerTasaActual(service);
 
   const vendedorIds = [...new Set(tickets.map((t) => t.vendido_por).filter(Boolean))];
   const sillaIds = [...new Set(tickets.map((t) => t.silla_id).filter(Boolean))];
@@ -83,6 +86,7 @@ export default async function FinanzasPage() {
           <h1 className="text-lg font-semibold">Verificación de pagos</h1>
           <p className="text-sm text-neutral-500">{lista.length} pendientes</p>
         </div>
+        <TasaCambio tasaActual={tasaActual} />
         <PendientesList tickets={lista} miId={perfil.id} />
       </main>
     </>
