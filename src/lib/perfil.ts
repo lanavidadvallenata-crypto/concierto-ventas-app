@@ -24,11 +24,15 @@ export async function getPerfilActual(): Promise<PerfilActual | null> {
 
   const { data: perfil } = await service
     .from("perfiles")
-    .select("id, nombre, rol")
+    .select("id, nombre, rol, activo")
     .eq("id", user.id)
     .maybeSingle();
 
   if (perfil) {
+    // Cuenta desactivada desde /admin (ej. staff que ya no trabaja el evento):
+    // se trata igual que "no hay perfil" — cada página protegida ya sabe
+    // redirigir a /login o mostrar "sin permiso" cuando esto devuelve null.
+    if (!perfil.activo) return null;
     return { id: perfil.id, email: user.email ?? "", nombre: perfil.nombre, rol: perfil.rol as Rol };
   }
 

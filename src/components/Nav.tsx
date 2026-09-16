@@ -7,6 +7,7 @@ export default function Nav({ perfil }: { perfil: PerfilActual }) {
     { href: "/ventas", label: "Ventas", roles: ["ventas", "finanzas", "admin"] },
     { href: "/finanzas", label: "Finanzas", roles: ["finanzas", "admin"] },
     { href: "/acceso", label: "Acceso", roles: ["acceso", "admin"] },
+    { href: "/admin", label: "Admin", roles: ["admin"] },
   ];
 
   return (
