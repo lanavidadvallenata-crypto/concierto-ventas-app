@@ -11,10 +11,21 @@ import { NextResponse, type NextRequest } from "next/server";
 // que abran las puertas, con buena señal) y la sesión queda guardada en su
 // teléfono para todo el evento — no tiene que volver a loguearse entre cada
 // escaneo.
-const PROTEGIDAS = ["/ventas", "/finanzas", "/admin", "/acceso"];
+const PROTEGIDAS = ["/ventas", "/dashboard", "/finanzas", "/admin", "/acceso"];
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
+  const host = request.headers.get("host") ?? "";
+
+  // Subdominio del equipo (equipo.lanavidadvallenata.com): es la misma app,
+  // pero al entrar por la raíz debe mandar directo al login del equipo en vez
+  // de mostrar el home público de compradores.
+  if (host.startsWith("equipo.") && path === "/") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
+  }
+
   const esProtegida = PROTEGIDAS.some((p) => path.startsWith(p));
 
   // El 100% del tráfico público (/, /comprar) pasaba por aquí y disparaba una

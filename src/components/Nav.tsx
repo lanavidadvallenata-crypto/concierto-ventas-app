@@ -5,6 +5,7 @@ import { cerrarSesion } from "@/app/actions";
 export default function Nav({ perfil }: { perfil: PerfilActual }) {
   const links = [
     { href: "/ventas", label: "Ventas", roles: ["ventas", "finanzas", "admin"] },
+    { href: "/dashboard", label: "Dashboard", roles: ["ventas", "finanzas", "admin"] },
     { href: "/finanzas", label: "Finanzas", roles: ["finanzas", "admin"] },
     { href: "/acceso", label: "Acceso", roles: ["acceso", "admin"] },
     { href: "/admin", label: "Admin", roles: ["admin"] },
