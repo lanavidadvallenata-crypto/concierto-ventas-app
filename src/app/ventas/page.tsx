@@ -10,6 +10,17 @@ export default async function VentasPage() {
   const perfil = await getPerfilActual();
   if (!perfil) redirect("/login");
 
+  if (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin") {
+    return (
+      <>
+        <Nav perfil={perfil} />
+        <main className="max-w-3xl mx-auto w-full px-4 py-6">
+          <p className="text-sm text-neutral-500">No tienes permiso para ver esta sección.</p>
+        </main>
+      </>
+    );
+  }
+
   const service = createServiceClient();
 
   const mesas = await obtenerMapaVip(service);

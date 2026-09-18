@@ -15,8 +15,8 @@ async function requiereFinanzas() {
   if (!user) return { user: null, error: "Tu sesión expiró — vuelve a entrar." };
 
   const service = createServiceClient();
-  const { data: perfil } = await service.from("perfiles").select("rol").eq("id", user.id).maybeSingle();
-  if (!perfil || (perfil.rol !== "finanzas" && perfil.rol !== "admin")) {
+  const { data: perfil } = await service.from("perfiles").select("rol, activo").eq("id", user.id).maybeSingle();
+  if (!perfil || !perfil.activo || (perfil.rol !== "finanzas" && perfil.rol !== "admin")) {
     return { user: null, error: "No tienes permiso para verificar pagos." };
   }
   return { user, error: null };
@@ -118,7 +118,21 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
   if (!ticket) return { ok: false, error: "No se encontró ese ticket." };
   if (ticket.estado_pago !== "pendiente") return { ok: false, error: "Ese ticket ya fue procesado." };
 
-  await service.from("tickets").update({ estado_pago: "rechazado", verificado_por: user.id, verificado_en: new Date().toISOString() }).eq("id", ticketId);
+  // Mismo patrón atómico que verificarPago: el UPDATE solo aplica si el ticket
+  // sigue "pendiente" en este instante — evita que un rechazo y una verificación
+  // concurrentes (dos personas de Finanzas procesando el mismo ticket a la vez)
+  // se pisen entre sí y corrompan el estado de un pago ya verificado.
+  const { data: actualizado, error: updateError } = await service
+    .from("tickets")
+    .update({ estado_pago: "rechazado", verificado_por: user.id, verificado_en: new Date().toISOString() })
+    .eq("id", ticketId)
+    .eq("estado_pago", "pendiente")
+    .select("id")
+    .maybeSingle();
+
+  if (updateError || !actualizado) {
+    return { ok: false, error: "Ese ticket ya fue procesado por otra persona." };
+  }
 
   if (ticket.tipo === "vip" && ticket.silla_id) {
     await service.from("sillas_vip").update({ estado: "disponible" }).eq("id", ticket.silla_id);

@@ -20,10 +20,26 @@ const ventaSchema = z.object({
 
 export type RegistrarVentaResult = { ok: true; avisoEmail?: string } | { ok: false; error: string };
 
-export async function registrarVenta(formData: FormData): Promise<RegistrarVentaResult> {
+// Mismo patrón que requiereFinanzas/requiereAdmin: sin esto, cualquier cuenta
+// autenticada (incluida una ya desactivada desde /admin, o con rol "acceso")
+// podía registrar ventas llamando esta acción directo, sin pasar por la
+// página /ventas ni por su chequeo de rol.
+async function requiereVentas() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Tu sesión expiró — vuelve a entrar." };
+  if (!user) return { user: null, error: "Tu sesión expiró — vuelve a entrar." };
+
+  const service = createServiceClient();
+  const { data: perfil } = await service.from("perfiles").select("rol, activo").eq("id", user.id).maybeSingle();
+  if (!perfil || !perfil.activo || (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin")) {
+    return { user: null, error: "No tienes permiso para registrar ventas." };
+  }
+  return { user, error: null };
+}
+
+export async function registrarVenta(formData: FormData): Promise<RegistrarVentaResult> {
+  const { user, error: authError } = await requiereVentas();
+  if (!user) return { ok: false, error: authError! };
 
   const parsed = ventaSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {

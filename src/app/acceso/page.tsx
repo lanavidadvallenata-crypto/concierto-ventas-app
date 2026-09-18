@@ -7,6 +7,17 @@ export default async function AccesoPage() {
   const perfil = await getPerfilActual();
   if (!perfil) redirect("/login");
 
+  if (perfil.rol !== "acceso" && perfil.rol !== "admin") {
+    return (
+      <>
+        <Nav perfil={perfil} />
+        <main className="max-w-md mx-auto w-full px-4 py-6">
+          <p className="text-sm text-neutral-500">No tienes permiso para ver esta sección.</p>
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
       <Nav perfil={perfil} />
