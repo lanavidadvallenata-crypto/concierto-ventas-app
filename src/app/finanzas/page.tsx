@@ -5,6 +5,8 @@ import { obtenerTasaActual } from "@/lib/tasa";
 import Nav from "@/components/Nav";
 import PendientesList from "./PendientesList";
 import TasaCambio from "./TasaCambio";
+import BuscarComprador from "./BuscarComprador";
+import AutoRefresh from "@/app/dashboard/AutoRefresh";
 
 export default async function FinanzasPage() {
   const perfil = await getPerfilActual();
@@ -29,7 +31,7 @@ export default async function FinanzasPage() {
   // trayendo cada pieza por separado y uniéndolas en memoria.
   const { data: pendientes, error: ticketsError } = await service
     .from("tickets")
-    .select("id, comprador_nombre, comprador_telefono, tipo, precio, moneda, metodo_pago, referencia_pago, vendido_por, silla_id, created_at")
+    .select("id, comprador_nombre, comprador_telefono, comprador_email, tipo, precio, moneda, metodo_pago, referencia_pago, vendido_por, silla_id, created_at")
     .eq("estado_pago", "pendiente")
     .order("created_at", { ascending: true });
 
@@ -40,8 +42,8 @@ export default async function FinanzasPage() {
   const tickets = pendientes ?? [];
   const tasaActual = await obtenerTasaActual(service);
 
-  const vendedorIds = [...new Set(tickets.map((t) => t.vendido_por).filter(Boolean))];
-  const sillaIds = [...new Set(tickets.map((t) => t.silla_id).filter(Boolean))];
+  const vendedorIds = [...new Set(tickets.map((t) => t.vendido_por).filter(Boolean))] as string[];
+  const sillaIds = [...new Set(tickets.map((t) => t.silla_id).filter(Boolean))] as string[];
 
   const [{ data: vendedores }, { data: sillas }] = await Promise.all([
     vendedorIds.length
@@ -68,26 +70,41 @@ export default async function FinanzasPage() {
       id: t.id as string,
       compradorNombre: t.comprador_nombre as string,
       compradorTelefono: t.comprador_telefono as string,
+      compradorEmail: (t.comprador_email as string | null) ?? null,
       tipo: t.tipo as "vip" | "general",
-      precio: t.precio as number,
-      moneda: t.moneda as string,
+      precio: Number(t.precio),
       metodoPago: t.metodo_pago as string,
-      referenciaPago: t.referencia_pago as string | null,
-      vendedorNombre: (t.vendido_por && vendedorPorId.get(t.vendido_por)) ?? "—",
+      referenciaPago: (t.referencia_pago as string | null) ?? null,
+      vendidoPor: (t.vendido_por as string | null) ?? null,
+      vendedorNombre: t.vendido_por ? (vendedorPorId.get(t.vendido_por) ?? "—") : null,
       asiento: silla && mesa ? `Fila ${mesa.fila} · Mesa ${mesa.numero} · Silla ${silla.numero}` : null,
+      creadoEn: t.created_at as string,
     };
   });
+
+  const totalPendienteUsd = lista.reduce((s, t) => s + t.precio, 0);
 
   return (
     <>
       <Nav perfil={perfil} />
-      <main className="max-w-3xl mx-auto w-full px-4 py-6 flex flex-col gap-4">
-        <div>
-          <h1 className="text-lg font-semibold">Verificación de pagos</h1>
-          <p className="text-sm text-neutral-500">{lista.length} pendientes</p>
+      <main className="max-w-3xl mx-auto w-full px-4 py-6 flex flex-col gap-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold">Verificación de pagos</h1>
+            <p className="text-sm text-neutral-500">
+              {lista.length === 0
+                ? "Sin pagos pendientes"
+                : `${lista.length} pendiente${lista.length === 1 ? "" : "s"} · $${totalPendienteUsd.toFixed(2)} por verificar`}
+            </p>
+          </div>
+          <AutoRefresh intervaloMs={30000} />
         </div>
+
+        <PendientesList tickets={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
+
+        <BuscarComprador />
+
         <TasaCambio tasaActual={tasaActual} />
-        <PendientesList tickets={lista} miId={perfil.id} />
       </main>
     </>
   );

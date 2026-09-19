@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import QRCode from "qrcode";
+import { URL_EQUIPO } from "@/lib/dominios";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
@@ -149,7 +150,11 @@ export async function enviarCorreoQR(params: {
   const resend = new Resend(process.env.RESEND_API_KEY);
   const nombre = escapeHtml(params.nombreComprador);
 
-  const urlAcceso = `${SITE_URL}/acceso/${params.qrToken}`;
+  // El QR apunta al host del EQUIPO (no al público): es donde el personal de
+  // acceso tiene su sesión iniciada. Si apuntara al dominio público, el
+  // teléfono de la puerta caería en el login en cada escaneo (la sesión es
+  // por host). Ver src/lib/dominios.ts.
+  const urlAcceso = `${URL_EQUIPO}/acceso/${params.qrToken}`;
   const qrDataUrl = await QRCode.toDataURL(urlAcceso, { width: 480, margin: 2 });
   const qrBase64 = qrDataUrl.split(",")[1];
 

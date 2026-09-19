@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { calcularTotal } from "@/lib/precios";
 import {
   DESCRIPCION_EVENTO,
@@ -33,10 +34,10 @@ export function HeroEvento({
           <img src={FLYER_URL} alt={nombre} className="w-full h-auto block" />
         </div>
         <div className="flex flex-col items-center text-center gap-2 bg-evento-principal text-white rounded-2xl px-6 py-5">
-          <a href="/" aria-label="6.18 Producciones">
+          <Link href="/" aria-label="6.18 Producciones">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo-618-white.png" alt="6.18 Producciones" className="h-5 w-auto opacity-80" />
-          </a>
+          </Link>
           {fechaFormateada && <p className="text-sm text-marca-acento/90">{fechaFormateada}</p>}
           <p className="text-sm text-marca-acento/90">
             {venue} · {ciudad}
@@ -56,10 +57,10 @@ export function HeroEvento({
   // de marca del evento, pero con título tipográfico en vez de imagen.
   return (
     <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-evento-secundario to-evento-principal text-white px-6 py-10 flex flex-col items-center text-center gap-3 min-h-[16rem] justify-center">
-      <a href="/" aria-label="6.18 Producciones">
+      <Link href="/" aria-label="6.18 Producciones">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo-618-white.png" alt="6.18 Producciones" className="h-6 w-auto opacity-90" />
-      </a>
+      </Link>
       <div className="flex flex-col items-center gap-2">
         <span className="text-xs uppercase tracking-widest text-marca-acento/80">Venta oficial de entradas</span>
         <h1 className="font-display text-4xl sm:text-5xl uppercase leading-[0.95] tracking-wide">{nombre}</h1>

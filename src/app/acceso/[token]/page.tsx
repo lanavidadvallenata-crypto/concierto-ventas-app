@@ -56,18 +56,46 @@ export default async function ValidarAccesoPage({
     .maybeSingle();
 
   if (existente) {
+    // Si el mismo QR se validó hace segundos, casi seguro es el mismo teléfono
+    // recargando la pantalla (o el navegador re-abriendo el link), no otra
+    // persona intentando colarse. Se muestra en verde con la hora para que la
+    // persona de la puerta no le niegue el paso a quien ya validó.
+    const usadoHaceMs = milisegundosDesde(existente.qr_usado_en);
+    const horaUso = existente.qr_usado_en
+      ? new Date(existente.qr_usado_en).toLocaleTimeString("es-VE", { timeZone: "America/Caracas", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      : null;
+
+    if (usadoHaceMs < 90_000) {
+      return (
+        <Resultado
+          color="green"
+          titulo="VÁLIDO"
+          detalle={`${existente.comprador_nombre} — validado hace ${Math.round(usadoHaceMs / 1000)} s (pantalla recargada)`}
+        />
+      );
+    }
+
     await service.from("accesos").insert({ ticket_id: existente.id, resultado: "ya_usado" });
     return (
       <Resultado
         color="red"
         titulo="YA USADO"
-        detalle={`${existente.comprador_nombre} — ya ingresó${existente.qr_usado_en ? ` a las ${new Date(existente.qr_usado_en).toLocaleTimeString("es-VE")}` : ""}`}
+        detalle={`${existente.comprador_nombre} — ya ingresó${horaUso ? ` a las ${horaUso}` : ""}. No dejar pasar.`}
       />
     );
   }
 
   await service.from("accesos").insert({ resultado: "invalido" });
   return <Resultado color="red" titulo="INVÁLIDO" detalle="Este código no corresponde a ninguna entrada." />;
+}
+
+// Fuera del componente a propósito: el lint de React marca Date.now() dentro
+// del render como "impuro"; aquí es un Server Component que corre una sola
+// vez por petición y necesitamos la hora real para distinguir "recargó la
+// pantalla" de "otra persona con el mismo QR".
+function milisegundosDesde(iso: string | null): number {
+  if (!iso) return Infinity;
+  return Date.now() - new Date(iso).getTime();
 }
 
 function Resultado({ color, titulo, detalle }: { color: "green" | "red"; titulo: string; detalle: string }) {

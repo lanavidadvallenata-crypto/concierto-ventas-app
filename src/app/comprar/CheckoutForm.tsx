@@ -39,6 +39,7 @@ export default function CheckoutForm({
   const [tardando, setTardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [avisoEmail, setAvisoEmail] = useState<string | null>(null);
+  const [duplicado, setDuplicado] = useState(false);
 
   // Si el servidor tarda más de lo normal en responder (ej. mucho tráfico a la vez),
   // avisamos en vez de dejar el botón "Confirmando…" sin explicación — es la causa
@@ -110,6 +111,7 @@ export default function CheckoutForm({
       return;
     }
     setAvisoEmail(res.avisoEmail ?? null);
+    setDuplicado(res.duplicado ?? false);
     setFase("confirmado");
   }
 
@@ -128,6 +130,12 @@ export default function CheckoutForm({
           Estamos verificando tu pago. En cuanto se confirme, te llegará un correo a <strong>{email}</strong> con tu
           entrada y código QR de acceso.
         </p>
+        {duplicado && (
+          <p className="text-sm text-amber-700 mt-2">
+            Esta compra ya la teníamos registrada con esa misma referencia — no la duplicamos. Si de verdad son dos
+            entradas distintas, usa la referencia de cada pago por separado.
+          </p>
+        )}
         {avisoEmail && <p className="text-sm text-amber-700 mt-2">{avisoEmail}</p>}
       </div>
     );

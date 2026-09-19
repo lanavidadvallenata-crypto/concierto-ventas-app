@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { HOST_EQUIPO, esHostPropio, esRutaEquipo } from "@/lib/dominios";
 
-// Protege /ventas, /finanzas, /acceso, /admin — sin sesión, redirige a /login.
+// Protege /ventas, /dashboard, /finanzas, /acceso, /admin — sin sesión, redirige a /login.
 // /acceso/[token] (la página que abre el QR en la puerta) SÍ requiere login:
 // el token aleatorio prueba que el TICKET es válido, pero no prueba que quien
 // lo está escaneando es parte del equipo — sin este gate, cualquiera que
@@ -15,12 +16,25 @@ const PROTEGIDAS = ["/ventas", "/dashboard", "/finanzas", "/admin", "/acceso"];
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  const host = request.headers.get("host") ?? "";
+  const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "").toLowerCase();
 
-  // Subdominio del equipo (equipo.lanavidadvallenata.com): es la misma app,
-  // pero al entrar por la raíz debe mandar directo al login del equipo en vez
-  // de mostrar el home público de compradores.
-  if (host.startsWith("equipo.") && path === "/") {
+  // Un solo host para todo lo interno (ver src/lib/dominios.ts). Si alguien del
+  // equipo abre /finanzas, /ventas, el login o un QR desde lanavidadvallenata.com
+  // o desde 618producciones.*, lo mandamos al host del equipo, que es donde
+  // vive su sesión. Así una sola vez que inician sesión les sirve para todo:
+  // ventas, finanzas, dashboard y escanear en la puerta.
+  if (esHostPropio(host) && host !== HOST_EQUIPO && esRutaEquipo(path)) {
+    const url = request.nextUrl.clone();
+    url.protocol = "https:";
+    url.host = HOST_EQUIPO;
+    url.port = "";
+    return NextResponse.redirect(url, 307);
+  }
+
+  // Subdominio del equipo: al entrar por la raíz debe mandar directo al login
+  // del equipo (o a /ventas si ya hay sesión — eso lo decide /login abajo) en
+  // vez de mostrar el home público de compradores.
+  if (host === HOST_EQUIPO && path === "/") {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
@@ -70,6 +84,7 @@ export async function middleware(request: NextRequest) {
   if (path === "/login" && user) {
     const url = request.nextUrl.clone();
     url.pathname = "/ventas";
+    url.search = "";
     return NextResponse.redirect(url);
   }
 
@@ -77,5 +92,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|ico|webp)$).*)"],
 };

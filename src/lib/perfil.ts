@@ -10,11 +10,17 @@ export type PerfilActual = {
   rol: Rol;
 };
 
-// Trae el perfil del usuario logueado. Si es su primer ingreso y todavía no
-// tiene fila en `perfiles`, se la crea con rol 'ventas' por defecto —
-// no hay pantalla de registro propia todavía (las cuentas las crea Anita
-// directo en Supabase Authentication), así que esto evita bloquear el primer login.
-// Para subir a alguien a finanzas/admin/acceso: UPDATE public.perfiles SET rol = '...' WHERE id = '<uuid>';
+// Trae el perfil del usuario logueado.
+//
+// Antes, si una cuenta de Supabase Auth no tenía fila en `perfiles`, se le
+// creaba una automáticamente con rol 'ventas'. Eso era cómodo al principio
+// (las cuentas se creaban a mano en Supabase), pero hoy todas las cuentas del
+// equipo se crean desde /admin, que ya inserta el perfil. Dejar el auto-alta
+// abierto significaba que CUALQUIER cuenta que lograra autenticarse contra
+// Supabase (por ejemplo, si el registro público de Supabase Auth quedara
+// habilitado) entraba al sistema con rol de ventas: veía el dashboard con la
+// recaudación, el mapa VIP y podía registrar ventas. Ahora: sin perfil, sin
+// acceso — y el admin lo crea desde /admin en 20 segundos si hace falta.
 export async function getPerfilActual(): Promise<PerfilActual | null> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -28,22 +34,12 @@ export async function getPerfilActual(): Promise<PerfilActual | null> {
     .eq("id", user.id)
     .maybeSingle();
 
-  if (perfil) {
-    // Cuenta desactivada desde /admin (ej. staff que ya no trabaja el evento):
-    // se trata igual que "no hay perfil" — cada página protegida ya sabe
-    // redirigir a /login o mostrar "sin permiso" cuando esto devuelve null.
-    if (!perfil.activo) return null;
-    return { id: perfil.id, email: user.email ?? "", nombre: perfil.nombre, rol: perfil.rol as Rol };
-  }
+  if (!perfil) return null;
 
-  const nombre = user.email?.split("@")[0] ?? "Usuario";
-  const { data: nuevo, error } = await service
-    .from("perfiles")
-    .insert({ id: user.id, nombre, rol: "ventas" })
-    .select("id, nombre, rol")
-    .single();
+  // Cuenta desactivada desde /admin (ej. staff que ya no trabaja el evento):
+  // se trata igual que "no hay perfil" — cada página protegida ya sabe
+  // redirigir a /login o mostrar "sin permiso" cuando esto devuelve null.
+  if (!perfil.activo) return null;
 
-  if (error || !nuevo) return null;
-
-  return { id: nuevo.id, email: user.email ?? "", nombre: nuevo.nombre, rol: nuevo.rol as Rol };
+  return { id: perfil.id, email: user.email ?? "", nombre: perfil.nombre, rol: perfil.rol as Rol };
 }

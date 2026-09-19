@@ -167,7 +167,14 @@ export default function VentaForm({
       </div>
 
       {mensaje && (
-        <p className={`text-sm ${mensaje.tipo === "ok" ? "text-green-700" : "text-red-600"}`}>{mensaje.texto}</p>
+        <div
+          role={mensaje.tipo === "ok" ? "status" : "alert"}
+          className={`rounded-lg border px-3 py-2.5 text-sm font-medium ${
+            mensaje.tipo === "ok" ? "bg-green-50 border-green-300 text-green-800" : "bg-red-50 border-red-300 text-red-800"
+          }`}
+        >
+          {mensaje.texto}
+        </div>
       )}
 
       <button

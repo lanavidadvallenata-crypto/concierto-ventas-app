@@ -5,8 +5,11 @@ import { calcularTotal } from "@/lib/precios";
 import Nav from "@/components/Nav";
 import VentasChart from "./VentasChart";
 import AutoRefresh from "./AutoRefresh";
+import Link from "next/link";
 
-export const revalidate = 10;
+// Sin `revalidate`: esta página lee la sesión (cookies) y por eso Next la
+// trata como dinámica siempre — el "revalidate = 10" de antes no hacía nada y
+// confundía. El refresco real lo hace <AutoRefresh /> cada 20 s en el cliente.
 
 const METODO_ETIQUETA: Record<string, string> = {
   pago_movil: "Pago móvil",
@@ -107,7 +110,13 @@ export default async function DashboardPage() {
           </div>
           {ingresoPendiente > 0 && (
             <p className="text-xs text-amber-600 mt-2">
-              +${fmt(ingresoPendiente)} en {pendientes.length} pago{pendientes.length === 1 ? "" : "s"} esperando verificación en Finanzas
+              +${fmt(ingresoPendiente)} en {pendientes.length} pago{pendientes.length === 1 ? "" : "s"} esperando verificación
+              {(perfil.rol === "finanzas" || perfil.rol === "admin") && (
+                <>
+                  {" · "}
+                  <Link href="/finanzas" className="underline underline-offset-2 font-medium">ir a Finanzas</Link>
+                </>
+              )}
             </p>
           )}
         </div>

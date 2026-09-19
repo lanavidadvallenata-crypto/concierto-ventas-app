@@ -19,7 +19,7 @@ export default function TasaCambio({ tasaActual }: { tasaActual: number | null }
       setMensaje({ tipo: "error", texto: res.error });
       return;
     }
-    setMensaje({ tipo: "ok", texto: "Tasa actualizada — ya se está usando en /comprar." });
+    setMensaje({ tipo: "ok", texto: "Tasa actualizada — ya se usa en la página de compra y en Ventas." });
     setValor("");
   }
 

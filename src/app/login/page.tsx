@@ -28,10 +28,18 @@ function LoginForm() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setCargando(false);
     if (error) {
-      setError("Correo o contraseña incorrectos.");
+      setError(
+        error.message.toLowerCase().includes("rate")
+          ? "Demasiados intentos — espera un minuto y vuelve a intentar."
+          : "Correo o contraseña incorrectos."
+      );
       return;
     }
-    router.push(params.get("next") || "/ventas");
+    // Solo rutas internas: ?next= viene de la URL y sin esto se podía usar
+    // para mandar a alguien del equipo a un sitio externo después de loguearse.
+    const next = params.get("next") ?? "";
+    const destino = next.startsWith("/") && !next.startsWith("//") ? next : "/ventas";
+    router.push(destino);
     router.refresh();
   }
 
