@@ -19,7 +19,7 @@ export const URL_EQUIPO = `https://${HOST_EQUIPO}`;
 // para que el desarrollo y las previews sigan funcionando.
 export const DOMINIO_RAIZ = "lanavidadvallenata.com";
 
-export const RUTAS_EQUIPO = ["/ventas", "/dashboard", "/finanzas", "/admin", "/acceso", "/login"];
+export const RUTAS_EQUIPO = ["/ventas", "/taquilla", "/dashboard", "/finanzas", "/admin", "/acceso", "/login"];
 
 export function esHostPropio(host: string) {
   const h = host.split(":")[0].toLowerCase();

@@ -18,10 +18,10 @@ const LIMITES: Record<"iniciar" | "confirmar", { maxIntentos: number; ventanaMin
   confirmar: { maxIntentos: 60, ventanaMin: 10 },
 };
 
-// Un comprador real no registra más de un puñado de compras en 10 minutos
-// (una entrada por asistente: una familia de 5 = 5 compras). Más que esto es
-// un bot o alguien intentando llenar el sistema de tickets falsos.
-const MAX_COMPRAS_POR_CORREO_10MIN = 8;
+// Un comprador real no hace más de un puñado de COMPRAS en 10 minutos (una
+// compra puede traer hasta 20 entradas). Más que esto es un bot o alguien
+// intentando llenar el sistema de tickets falsos.
+const MAX_COMPRAS_POR_CORREO_10MIN = 5;
 
 async function obtenerIp(): Promise<string> {
   const h = await headers();
@@ -76,18 +76,20 @@ export async function verificarLimitePorCorreo(
 ): Promise<LimiteResultado> {
   const desde = new Date(Date.now() - 10 * 60_000).toISOString();
 
-  const { count, error } = await service
+  const { data, error } = await service
     .from("tickets")
-    .select("id", { count: "exact", head: true })
+    .select("id, grupo_id")
     .eq("comprador_email", correo)
-    .gte("created_at", desde);
+    .gte("created_at", desde)
+    .limit(200);
 
   if (error) {
     console.error("Error verificando límite por correo:", error.message);
     return { ok: true };
   }
 
-  if ((count ?? 0) >= MAX_COMPRAS_POR_CORREO_10MIN) {
+  const compras = new Set((data ?? []).map((t) => (t.grupo_id as string | null) ?? (t.id as string)));
+  if (compras.size >= MAX_COMPRAS_POR_CORREO_10MIN) {
     return {
       ok: false,
       error:

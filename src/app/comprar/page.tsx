@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerMapaVip } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
+import { disponibilidadEtapas } from "@/lib/precios";
 import CheckoutForm from "./CheckoutForm";
 import { HeroEvento, SobreElEvento, PreciosExplicados, ComoComprar, PreguntasFrecuentes } from "./SeccionesVenta";
 
@@ -38,6 +39,22 @@ export default async function ComprarPage() {
 
   const cupoGeneralRestante = (evento?.aforo_general_total ?? 4500) - (generalVendidos ?? 0);
 
+  const [dispVip, dispGeneral] = await Promise.all([
+    disponibilidadEtapas(service, "vip"),
+    disponibilidadEtapas(service, "general"),
+  ]);
+  const preVip = dispVip.find((d) => d.etapa === "preventa");
+  const preGeneral = dispGeneral.find((d) => d.etapa === "preventa");
+  const preventa =
+    preVip && preGeneral
+      ? {
+          vip: preVip.restante ?? 0,
+          general: preGeneral.restante ?? 0,
+          precioVip: preVip.totalUnitario,
+          precioGeneral: preGeneral.totalUnitario,
+        }
+      : null;
+
   return (
     <main className="max-w-lg mx-auto w-full px-4 py-8 flex flex-col gap-8">
       <HeroEvento
@@ -48,7 +65,7 @@ export default async function ComprarPage() {
       />
 
       <SobreElEvento />
-      <PreciosExplicados />
+      <PreciosExplicados preventa={preventa} />
       <ComoComprar />
 
       <div id="comprar" className="scroll-mt-6">
@@ -58,6 +75,7 @@ export default async function ComprarPage() {
           sillasVipDisponibles={sillasVipDisponibles}
           cupoGeneralRestante={cupoGeneralRestante}
           tasaEurVes={tasaEurVes}
+          preventa={preventa}
         />
       </div>
 

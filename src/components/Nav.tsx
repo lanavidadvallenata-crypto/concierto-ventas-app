@@ -12,6 +12,7 @@ const ETIQUETA_ROL: Record<string, string> = {
 export default function Nav({ perfil }: { perfil: PerfilActual }) {
   const links = [
     { href: "/ventas", label: "Ventas", roles: ["ventas", "finanzas", "admin"] },
+    { href: "/taquilla", label: "Taquilla", roles: ["ventas", "finanzas", "admin"] },
     { href: "/finanzas", label: "Finanzas", roles: ["finanzas", "admin"] },
     { href: "/dashboard", label: "Dashboard", roles: ["ventas", "finanzas", "admin"] },
     { href: "/acceso", label: "Acceso", roles: ["acceso", "admin"] },

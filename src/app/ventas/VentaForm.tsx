@@ -4,39 +4,60 @@ import { useState, useTransition } from "react";
 import { registrarVenta } from "./actions";
 import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
-import { calcularTotal } from "@/lib/precios";
+import { calcularTotal, MAX_POR_COMPRA } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
-import { METODOS_PAGO, type MetodoPago } from "@/lib/pagos";
+import { metodosParaCanal, type MetodoPago } from "@/lib/pagos";
+
+const METODOS = metodosParaCanal("manual");
+
+export type PreventaInfo = { vip: number; general: number; precioVip: number; precioGeneral: number } | null;
 
 export default function VentaForm({
   mesas,
   cupoGeneralRestante,
   tasaEurVes,
+  preventa,
 }: {
   mesas: MesaMapa[];
   cupoGeneralRestante?: number;
   tasaEurVes: number | null;
+  preventa: PreventaInfo;
 }) {
   const [tipo, setTipo] = useState<"vip" | "general">("general");
-  const [precio, setPrecio] = useState<number>(calcularTotal("general").total);
-  const [sillaElegida, setSillaElegida] = useState<SillaElegida | null>(null);
+  const [sillas, setSillas] = useState<SillaElegida[]>([]);
+  const [cantidadGeneral, setCantidadGeneral] = useState(1);
+  // null = usar el sugerido; número = el vendedor lo editó (negoció).
+  const [precioManual, setPrecioManual] = useState<number | null>(null);
   const [metodoPago, setMetodoPago] = useState<MetodoPago>("transferencia");
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const enBolivares = metodoPago === "pago_movil" || metodoPago === "transferencia";
+  const cantidad = tipo === "vip" ? sillas.length : cantidadGeneral;
+
+  // Precio sugerido según etapa (preventa mientras quede cupo, luego regular).
+  const preventaRestante = preventa ? (tipo === "vip" ? preventa.vip : preventa.general) : 0;
+  const unitarioPreventa = preventa ? (tipo === "vip" ? preventa.precioVip : preventa.precioGeneral) : 0;
+  const unitarioRegular = calcularTotal(tipo).total;
+  const enPreventa = Math.min(cantidad, Math.max(0, preventaRestante));
+  const enRegular = Math.max(0, cantidad - enPreventa);
+  const sugerido = Math.round((enPreventa * unitarioPreventa + enRegular * unitarioRegular) * 100) / 100;
+
+  const precio = precioManual ?? sugerido;
+  const precioEditado = precioManual !== null;
+
+  const enBolivares = metodoPago === "pago_movil" || metodoPago === "transferencia" || metodoPago === "efectivo_bs";
   const montoBs = enBolivares && tasaEurVes ? convertirABs(precio, tasaEurVes) : null;
 
   function cambiarTipo(t: "vip" | "general") {
     setTipo(t);
-    setPrecio(calcularTotal(t).total);
-    if (t === "general") setSillaElegida(null);
+    setPrecioManual(null);
+    if (t === "general") setSillas([]);
   }
 
   function onSubmit(formData: FormData) {
     setMensaje(null);
-    if (tipo === "vip" && !sillaElegida) {
-      setMensaje({ tipo: "error", texto: "Toca una mesa y elige una silla en el mapa antes de registrar la venta." });
+    if (tipo === "vip" && sillas.length === 0) {
+      setMensaje({ tipo: "error", texto: "Toca una mesa y elige las sillas en el mapa antes de registrar la venta." });
       return;
     }
     startTransition(async () => {
@@ -44,10 +65,14 @@ export default function VentaForm({
       if (res.ok) {
         setMensaje({
           tipo: res.avisoEmail ? "error" : "ok",
-          texto: res.avisoEmail || "Venta registrada — le llegó un correo de bienvenida al comprador. Pasa a Finanzas para verificar el pago.",
+          texto:
+            res.avisoEmail ||
+            `Venta registrada: ${res.cantidad} entrada${res.cantidad === 1 ? "" : "s"} por $${res.total.toFixed(2)}. Al comprador le llegó el correo de bienvenida. Pasa a Finanzas para verificar el pago.`,
         });
         (document.getElementById("venta-form") as HTMLFormElement)?.reset();
-        setSillaElegida(null);
+        setSillas([]);
+        setCantidadGeneral(1);
+        setPrecioManual(null);
       } else {
         setMensaje({ tipo: "error", texto: res.error });
       }
@@ -71,35 +96,38 @@ export default function VentaForm({
         ))}
       </div>
       <input type="hidden" name="tipo" value={tipo} />
+      <input type="hidden" name="sillaIds" value={JSON.stringify(sillas.map((s) => s.id))} />
 
       {tipo === "vip" ? (
         <div>
-          <label className="block text-sm font-medium mb-1">Silla</label>
-          <input type="hidden" name="sillaId" value={sillaElegida?.id ?? ""} />
+          <label className="block text-sm font-medium mb-1">Sillas (hasta {MAX_POR_COMPRA.vip})</label>
           <MapaVip
             mesas={mesas}
-            sillaSeleccionadaId={sillaElegida?.id ?? null}
-            onSeleccionar={setSillaElegida}
+            seleccionadas={sillas}
+            onCambiar={(s) => {
+              setSillas(s);
+              setPrecioManual(null);
+            }}
+            maximo={MAX_POR_COMPRA.vip}
             cupoGeneralRestante={cupoGeneralRestante}
           />
-          <p className="text-xs text-neutral-500 mt-2">
-            {sillaElegida
-              ? `Elegida: Fila ${sillaElegida.fila} · Mesa ${sillaElegida.mesaNumero} · Silla ${sillaElegida.numero}`
-              : "Toca una mesa en el mapa para ver sus sillas."}
-          </p>
         </div>
       ) : (
         <div>
-          <label className="block text-sm font-medium mb-1">Cantidad de entradas generales</label>
+          <label className="block text-sm font-medium mb-1">Cantidad de entradas generales (hasta {MAX_POR_COMPRA.general})</label>
           <input
             name="cantidadGeneral"
             type="number"
             min={1}
-            max={20}
-            defaultValue={1}
+            max={MAX_POR_COMPRA.general}
+            value={cantidadGeneral}
+            onChange={(e) => {
+              setCantidadGeneral(Math.max(1, Math.min(MAX_POR_COMPRA.general, Number(e.target.value) || 1)));
+              setPrecioManual(null);
+            }}
             className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
           />
-          <p className="text-xs text-neutral-400 mt-1">Por ahora se registra 1 ticket por comprador — para grupos, registra una venta por cada entrada.</p>
+          <p className="text-xs text-neutral-400 mt-1">Se crea un ticket (y un QR) por cada entrada, todos al mismo correo.</p>
         </div>
       )}
 
@@ -115,7 +143,7 @@ export default function VentaForm({
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">Correo (para enviarle el QR)</label>
+        <label className="block text-sm font-medium mb-1">Correo (para enviarle los QR)</label>
         <input name="compradorEmail" type="email" required className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm" />
       </div>
 
@@ -128,11 +156,22 @@ export default function VentaForm({
             step="0.01"
             required
             value={precio}
-            onChange={(e) => setPrecio(Number(e.target.value))}
+            onChange={(e) => setPrecioManual(Number(e.target.value))}
             className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
           />
           <p className="text-xs text-neutral-400 mt-1">
-            Base ${calcularTotal(tipo).base} + ${calcularTotal(tipo).fee} de fee (10%) = ${calcularTotal(tipo).total}. Editable si negociaste otro precio.
+            {cantidad === 0
+              ? "Elige las entradas para ver el precio sugerido."
+              : enPreventa > 0 && enRegular > 0
+              ? `${enPreventa} × $${unitarioPreventa.toFixed(2)} preventa + ${enRegular} × $${unitarioRegular.toFixed(2)} = $${sugerido.toFixed(2)}. Editable si negociaste otro precio.`
+              : enPreventa > 0
+              ? `${cantidad} × $${unitarioPreventa.toFixed(2)} (preventa) = $${sugerido.toFixed(2)}. Editable si negociaste otro precio.`
+              : `${cantidad} × $${unitarioRegular.toFixed(2)} = $${sugerido.toFixed(2)}. Editable si negociaste otro precio.`}
+            {precioEditado && (
+              <button type="button" onClick={() => setPrecioManual(null)} className="ml-2 underline">
+                usar sugerido
+              </button>
+            )}
           </p>
         </div>
         <div>
@@ -144,7 +183,7 @@ export default function VentaForm({
             onChange={(e) => setMetodoPago(e.target.value as MetodoPago)}
             className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
           >
-            {METODOS_PAGO.map((m) => (
+            {METODOS.map((m) => (
               <option key={m.valor} value={m.valor} disabled={!m.activo}>
                 {m.etiqueta}
                 {!m.activo ? " — muy pronto" : ""}
@@ -179,10 +218,10 @@ export default function VentaForm({
 
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || cantidad === 0}
         className="bg-neutral-900 text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
       >
-        {pending ? "Registrando…" : "Registrar venta"}
+        {pending ? "Registrando…" : cantidad > 1 ? `Registrar venta (${cantidad} entradas)` : "Registrar venta"}
       </button>
     </form>
   );

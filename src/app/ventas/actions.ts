@@ -5,25 +5,25 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarCorreoPendiente } from "@/lib/enviar-qr";
+import { MAX_POR_COMPRA } from "@/lib/precios";
+import { metodosParaCanal } from "@/lib/pagos";
+import { registrarVentaInterna } from "@/lib/registrar-venta";
 
 const ventaSchema = z.object({
   tipo: z.enum(["vip", "general"]),
-  sillaId: z.string().uuid().optional(),
-  cantidadGeneral: z.coerce.number().int().min(1).max(20).optional(),
+  sillaIds: z.string().optional(), // JSON array de uuids (VIP)
+  cantidadGeneral: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   compradorNombre: z.string().min(2),
   compradorTelefono: z.string().min(7),
   compradorEmail: z.string().email("Correo inválido — es la única forma de enviar el QR de entrada."),
   precio: z.coerce.number().positive(),
-  metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance"]),
+  metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
   referenciaPago: z.string().optional(),
 });
 
-export type RegistrarVentaResult = { ok: true; avisoEmail?: string } | { ok: false; error: string };
+export type RegistrarVentaResult = { ok: true; avisoEmail?: string; cantidad: number; total: number } | { ok: false; error: string };
 
-// Mismo patrón que requiereFinanzas/requiereAdmin: sin esto, cualquier cuenta
-// autenticada (incluida una ya desactivada desde /admin, o con rol "acceso")
-// podía registrar ventas llamando esta acción directo, sin pasar por la
-// página /ventas ni por su chequeo de rol.
+// Mismo patrón que requiereFinanzas/requiereAdmin.
 async function requiereVentas() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -43,65 +43,61 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
 
   const parsed = ventaSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
-    return { ok: false, error: "Revisa los datos del formulario — falta o sobra algo." };
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Revisa los datos del formulario — falta o sobra algo." };
   }
   const v = parsed.data;
 
-  const service = createServiceClient();
+  if (!metodosParaCanal("manual").some((m) => m.valor === v.metodoPago && m.activo)) {
+    return { ok: false, error: "Ese método de pago no está disponible." };
+  }
 
-  const { data: evento } = await service.from("eventos").select("id").limit(1).single();
-  if (!evento) return { ok: false, error: "No se encontró el evento en la base de datos." };
-
+  let sillaIds: string[] = [];
   if (v.tipo === "vip") {
-    if (!v.sillaId) return { ok: false, error: "Selecciona una silla VIP." };
-
-    // Reserva atómica: solo pasa si la silla sigue disponible en este instante.
-    const { data: silla, error: sillaError } = await service
-      .from("sillas_vip")
-      .update({ estado: "reservada" })
-      .eq("id", v.sillaId)
-      .eq("estado", "disponible")
-      .select("id")
-      .maybeSingle();
-
-    if (sillaError || !silla) {
-      return { ok: false, error: "Esa silla ya no está disponible — alguien más la tomó. Elige otra." };
+    try {
+      const arr = JSON.parse(v.sillaIds ?? "[]");
+      sillaIds = Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+    } catch {
+      sillaIds = [];
     }
+    if (sillaIds.length === 0) return { ok: false, error: "Selecciona al menos una silla VIP." };
   }
 
-  const { error: insertError } = await service.from("tickets").insert({
-    evento_id: evento.id,
+  const service = createServiceClient();
+  const res = await registrarVentaInterna(service, {
     tipo: v.tipo,
-    silla_id: v.tipo === "vip" ? v.sillaId : null,
-    comprador_nombre: v.compradorNombre,
-    comprador_telefono: v.compradorTelefono,
-    comprador_email: v.compradorEmail,
-    precio: v.precio,
-    metodo_pago: v.metodoPago,
-    referencia_pago: v.referenciaPago || null,
-    vendido_por: user.id,
+    sillaIds,
+    cantidad: v.cantidadGeneral ?? 1,
+    compradorNombre: v.compradorNombre,
+    compradorTelefono: v.compradorTelefono,
+    compradorEmail: v.compradorEmail,
+    metodoPago: v.metodoPago,
+    referenciaPago: v.referenciaPago || null,
+    precioTotalManual: v.precio,
+    vendidoPor: user.id,
+    canal: "manual",
+    verificarDeInmediato: false,
   });
-
-  if (insertError) {
-    // Si falló después de reservar la silla, la liberamos para no perderla.
-    if (v.tipo === "vip" && v.sillaId) {
-      await service.from("sillas_vip").update({ estado: "disponible" }).eq("id", v.sillaId);
-    }
-    return { ok: false, error: "No se pudo registrar la venta — intenta de nuevo." };
-  }
+  if (!res.ok) return res;
 
   revalidatePath("/ventas");
   revalidatePath("/finanzas");
+  revalidatePath("/dashboard");
+  revalidatePath("/comprar");
 
   let avisoEmail: string | undefined;
   try {
     await enviarCorreoPendiente({
       destinatario: v.compradorEmail,
       nombreComprador: v.compradorNombre,
+      cantidad: res.cantidad,
+      tipo: v.tipo,
+      totalUsd: res.total,
+      totalBs: res.totalBs,
+      referencia: v.referenciaPago || null,
     });
   } catch {
     avisoEmail = "La venta quedó registrada, pero el correo de bienvenida no se pudo enviar — avísale al comprador por WhatsApp que su pago está en verificación.";
   }
 
-  return { ok: true, avisoEmail };
+  return { ok: true, avisoEmail, cantidad: res.cantidad, total: res.total };
 }

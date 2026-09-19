@@ -16,9 +16,13 @@ const METODO_ETIQUETA: Record<string, string> = {
   transferencia: "Transferencia",
   zelle: "Zelle",
   binance: "Binance",
+  efectivo_usd: "Efectivo $",
+  efectivo_bs: "Efectivo Bs",
 };
 
-const METODOS_ORDEN = ["transferencia", "zelle", "binance", "pago_movil"] as const;
+const METODOS_ORDEN = ["transferencia", "zelle", "binance", "pago_movil", "efectivo_usd", "efectivo_bs"] as const;
+
+const CANAL_ETIQUETA: Record<string, string> = { web: "Web", manual: "Manual", taquilla: "Taquilla" };
 
 export default async function DashboardPage() {
   const perfil = await getPerfilActual();
@@ -38,7 +42,7 @@ export default async function DashboardPage() {
   const service = createServiceClient();
 
   const [{ data: tickets }, { data: evento }, { count: sillasVipTotal }] = await Promise.all([
-    service.from("tickets").select("tipo, precio, metodo_pago, estado_pago, created_at"),
+    service.from("tickets").select("tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa"),
     service.from("eventos").select("aforo_general_total").limit(1).single(),
     service.from("sillas_vip").select("id", { count: "exact", head: true }),
   ]);
@@ -67,6 +71,18 @@ export default async function DashboardPage() {
     porMetodo.set(t.metodo_pago, actual);
   }
   const maxMonto = Math.max(1, ...[...porMetodo.values()].map((v) => v.monto));
+
+  const porCanal = new Map<string, { cantidad: number; monto: number }>();
+  for (const t of verificados) {
+    const c = (t.canal as string) ?? "web";
+    const actual = porCanal.get(c) ?? { cantidad: 0, monto: 0 };
+    actual.cantidad += 1;
+    actual.monto += Number(t.precio);
+    porCanal.set(c, actual);
+  }
+  const preventaVendida = todos.filter((t) => t.etapa === "preventa" && t.estado_pago !== "rechazado");
+  const preventaVip = preventaVendida.filter((t) => t.tipo === "vip").length;
+  const preventaGeneral = preventaVendida.filter((t) => t.tipo === "general").length;
 
   const porDia = new Map<string, number>();
   for (const t of verificados) {
@@ -135,6 +151,31 @@ export default async function DashboardPage() {
               {generalVerificados.length} <span className="text-sm font-normal text-neutral-400">/ {aforoGeneral}</span>
             </p>
             <p className="text-xs text-neutral-400 mt-1">${fmt(ingresoGeneral)}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white border border-neutral-200 rounded-xl p-4">
+            <p className="text-xs text-neutral-500">Preventa (30 VIP · 50 General)</p>
+            <p className="text-2xl font-semibold">
+              {preventaVip} <span className="text-sm font-normal text-neutral-400">/ 30 VIP</span>
+            </p>
+            <p className="text-sm font-semibold">
+              {preventaGeneral} <span className="text-xs font-normal text-neutral-400">/ 50 General</span>
+            </p>
+            <p className="text-[11px] text-neutral-400 mt-1">Incluye pendientes de verificar</p>
+          </div>
+          <div className="bg-white border border-neutral-200 rounded-xl p-4">
+            <p className="text-xs text-neutral-500">Por canal (verificado)</p>
+            {["web", "manual", "taquilla"].map((c) => {
+              const d = porCanal.get(c) ?? { cantidad: 0, monto: 0 };
+              return (
+                <div key={c} className="flex items-center justify-between text-sm">
+                  <span className="text-neutral-600">{CANAL_ETIQUETA[c]}</span>
+                  <span className="tabular-nums">{d.cantidad} · ${fmt(d.monto)}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
 

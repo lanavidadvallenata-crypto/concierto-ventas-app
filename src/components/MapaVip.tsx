@@ -3,10 +3,12 @@
 import { useState } from "react";
 import type { MesaMapa, SillaMapa } from "@/lib/mapa-vip";
 
+// Mesa agotada en ROJO (pedido del equipo, 19 sep): el gris se confundía con
+// "deshabilitado / no cargó". Rojo = vendida completa, sin ambigüedad.
 const COLOR_MESA: Record<"vacia" | "parcial" | "llena", string> = {
   vacia: "#3F6B4E",
   parcial: "#C9A24B",
-  llena: "#B0A99A",
+  llena: "#CE0100",
 };
 
 function estadoAgregadoMesa(sillas: SillaMapa[]): "vacia" | "parcial" | "llena" {
@@ -18,21 +20,36 @@ function estadoAgregadoMesa(sillas: SillaMapa[]): "vacia" | "parcial" | "llena" 
 
 export type SillaElegida = { id: string; numero: number; mesaNumero: number; fila: string };
 
+// Selección múltiple: el comprador toca sillas para agregarlas y las vuelve a
+// tocar para quitarlas, en la mesa que quiera, hasta `maximo`. La lista de
+// elegidas se muestra debajo con una X por silla.
 export default function MapaVip({
   mesas,
-  onSeleccionar,
-  sillaSeleccionadaId,
+  seleccionadas,
+  onCambiar,
+  maximo = 10,
   cupoGeneralRestante,
 }: {
   mesas: MesaMapa[];
-  onSeleccionar: (silla: SillaElegida) => void;
-  sillaSeleccionadaId?: string | null;
+  seleccionadas: SillaElegida[];
+  onCambiar: (sillas: SillaElegida[]) => void;
+  maximo?: number;
   cupoGeneralRestante?: number;
 }) {
   const [mesaActivaId, setMesaActivaId] = useState<string | null>(null);
 
   const filas = [...new Set(mesas.map((m) => m.fila))].sort();
   const mesaActiva = mesas.find((m) => m.id === mesaActivaId) ?? null;
+  const idsSeleccionados = new Set(seleccionadas.map((s) => s.id));
+  const llena = seleccionadas.length >= maximo;
+
+  function alternar(silla: SillaElegida) {
+    if (idsSeleccionados.has(silla.id)) {
+      onCambiar(seleccionadas.filter((s) => s.id !== silla.id));
+    } else if (!llena) {
+      onCambiar([...seleccionadas, silla]);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4 bg-white border border-neutral-200 rounded-xl p-4">
@@ -54,6 +71,7 @@ export default function MapaVip({
                     key={m.id}
                     mesa={m}
                     activa={mesaActivaId === m.id}
+                    conSeleccion={m.sillas.some((s) => idsSeleccionados.has(s.id))}
                     onClick={() => setMesaActivaId(mesaActivaId === m.id ? null : m.id)}
                   />
                 ))}
@@ -65,6 +83,7 @@ export default function MapaVip({
                     key={m.id}
                     mesa={m}
                     activa={mesaActivaId === m.id}
+                    conSeleccion={m.sillas.some((s) => idsSeleccionados.has(s.id))}
                     onClick={() => setMesaActivaId(mesaActivaId === m.id ? null : m.id)}
                   />
                 ))}
@@ -84,24 +103,30 @@ export default function MapaVip({
 
       {mesaActiva && (
         <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3">
-          <p className="text-sm font-semibold mb-2.5">
-            Fila {mesaActiva.fila} · Mesa {mesaActiva.numero} — elige tu silla
-          </p>
+          <div className="flex items-center justify-between mb-2.5">
+            <p className="text-sm font-semibold">
+              Fila {mesaActiva.fila} · Mesa {mesaActiva.numero}
+            </p>
+            <p className="text-xs text-neutral-500">
+              {seleccionadas.length}/{maximo} elegidas
+            </p>
+          </div>
           <div className="grid grid-cols-5 gap-1.5">
             {[...mesaActiva.sillas]
               .sort((a, b) => a.numero - b.numero)
               .map((s) => {
-                const seleccionada = s.id === sillaSeleccionadaId;
-                const disabled = s.estado !== "disponible" && !seleccionada;
+                const seleccionada = idsSeleccionados.has(s.id);
+                const disabled = (s.estado !== "disponible" && !seleccionada) || (llena && !seleccionada);
                 return (
                   <button
                     key={s.id}
                     type="button"
                     disabled={disabled}
+                    aria-pressed={seleccionada}
                     onClick={() =>
-                      onSeleccionar({ id: s.id, numero: s.numero, mesaNumero: mesaActiva.numero, fila: mesaActiva.fila })
+                      alternar({ id: s.id, numero: s.numero, mesaNumero: mesaActiva.numero, fila: mesaActiva.fila })
                     }
-                    className={`h-9 rounded-md text-xs font-medium border ${
+                    className={`h-11 rounded-md text-sm font-semibold border ${
                       seleccionada
                         ? "bg-neutral-900 text-white border-neutral-900"
                         : disabled
@@ -114,6 +139,26 @@ export default function MapaVip({
                 );
               })}
           </div>
+          {llena && (
+            <p className="text-[11px] text-amber-700 mt-2">Máximo {maximo} sillas por compra. Quita una para elegir otra.</p>
+          )}
+        </div>
+      )}
+
+      {seleccionadas.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {seleccionadas.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => alternar(s)}
+              title="Quitar"
+              className="inline-flex items-center gap-1.5 bg-neutral-900 text-white rounded-full pl-3 pr-2 py-1 text-xs font-medium"
+            >
+              {s.fila}{s.mesaNumero} · S{s.numero}
+              <span aria-hidden="true" className="text-white/70">×</span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -126,18 +171,28 @@ export default function MapaVip({
   );
 }
 
-function MesaBoton({ mesa, activa, onClick }: { mesa: MesaMapa; activa: boolean; onClick: () => void }) {
+function MesaBoton({
+  mesa,
+  activa,
+  conSeleccion,
+  onClick,
+}: {
+  mesa: MesaMapa;
+  activa: boolean;
+  conSeleccion: boolean;
+  onClick: () => void;
+}) {
   const estado = estadoAgregadoMesa(mesa.sillas);
   const disponibles = mesa.sillas.filter((s) => s.estado === "disponible").length;
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={estado === "llena"}
+      disabled={estado === "llena" && !conSeleccion}
       title={`Mesa ${mesa.numero} — ${disponibles} de ${mesa.sillas.length} disponibles`}
-      className={`w-8 h-8 rounded-full text-[10px] font-semibold text-white flex items-center justify-center border-2 shrink-0 transition-transform disabled:opacity-40 disabled:cursor-not-allowed ${
-        activa ? "border-neutral-900 scale-110" : "border-transparent"
-      }`}
+      className={`w-8 h-8 rounded-full text-[10px] font-semibold text-white flex items-center justify-center border-2 shrink-0 transition-transform disabled:cursor-not-allowed ${
+        activa ? "border-neutral-900 scale-110" : conSeleccion ? "border-neutral-900" : "border-transparent"
+      } ${estado === "llena" ? "opacity-90" : ""}`}
       style={{ backgroundColor: COLOR_MESA[estado] }}
     >
       {mesa.numero}

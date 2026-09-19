@@ -26,9 +26,17 @@ export const ETIQUETA_METODO: Record<string, string> = {
   transferencia: "Transferencia",
   zelle: "Zelle",
   binance: "Binance",
+  efectivo_usd: "Efectivo $",
+  efectivo_bs: "Efectivo Bs",
 };
 
-export const METODOS_EN_BS = new Set(["pago_movil", "transferencia"]);
+export const METODOS_EN_BS = new Set(["pago_movil", "transferencia", "efectivo_bs"]);
+
+export const ETIQUETA_CANAL: Record<string, string> = {
+  web: "Compra web",
+  manual: "Venta manual",
+  taquilla: "Taquilla",
+};
 
 export function formatoBs(monto: number): string {
   return `Bs ${monto.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

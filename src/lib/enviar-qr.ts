@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import QRCode from "qrcode";
 import { URL_EQUIPO } from "@/lib/dominios";
+import { urlWhatsAppSoporte, WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
@@ -97,15 +98,40 @@ function envolverCorreo(contenido: string) {
   `;
 }
 
+function remitente() {
+  return `La Navidad Vallenata <${process.env.RESEND_FROM_EMAIL || "no-responder@lanavidadvallenata.com"}>`;
+}
+
+function clienteResend(motivo: string) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error(`Falta RESEND_API_KEY — no se puede enviar ${motivo}`);
+  }
+  return new Resend(process.env.RESEND_API_KEY);
+}
+
+const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
+const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export async function enviarCorreoPendiente(params: {
   destinatario: string;
   nombreComprador: string;
+  cantidad?: number;
+  tipo?: "vip" | "general";
+  totalUsd?: number;
+  totalBs?: number | null;
+  referencia?: string | null;
 }) {
-  if (!process.env.RESEND_API_KEY) {
-    throw new Error("Falta RESEND_API_KEY — no se puede enviar el correo de bienvenida");
-  }
-  const resend = new Resend(process.env.RESEND_API_KEY);
+  const resend = clienteResend("el correo de bienvenida");
   const nombre = escapeHtml(params.nombreComprador);
+  const cantidad = params.cantidad ?? 1;
+  const detalle =
+    params.tipo && params.totalUsd != null
+      ? `<p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
+          <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${params.tipo === "vip" ? "VIP" : "General"}</strong> · ${fmtUsd(params.totalUsd)}${
+          params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""
+        }${params.referencia ? `<br><span style="color:#8A8782;font-size:12.5px;">Referencia de pago: ${escapeHtml(params.referencia)}</span>` : ""}
+        </p>`
+      : "";
 
   const html = envolverCorreo(`
     <tr>
@@ -118,67 +144,75 @@ export async function enviarCorreoPendiente(params: {
           </tr>
         </table>
         <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, recibimos tu compra y ya estamos verificando tu pago.</p>
-        <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">En cuanto se confirme, te llegará un correo a esta misma dirección con tu <strong>entrada y código QR de acceso</strong>. Normalmente toma poco tiempo — no necesitas hacer nada más por ahora.</p>
+        ${detalle}
+        <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">En cuanto se confirme, te llegará un correo a esta misma dirección con ${
+          cantidad > 1 ? "tus <strong>entradas y códigos QR</strong> de acceso (uno por persona)" : "tu <strong>entrada y código QR</strong> de acceso"
+        }. Normalmente toma poco tiempo — no necesitas hacer nada más por ahora.</p>
       </td>
     </tr>
     <tr>
       <td style="padding:4px 28px 32px;">
-        <p style="margin:0;font-size:12.5px;line-height:1.6;color:#8A8782;border-top:1px solid #F1ECE2;padding-top:16px;">¿Alguna duda sobre tu compra? Responde este correo o escríbenos por el mismo medio donde compraste.</p>
+        <p style="margin:0;font-size:12.5px;line-height:1.6;color:#8A8782;border-top:1px solid #F1ECE2;padding-top:16px;">¿Alguna duda sobre tu compra? Escríbenos por WhatsApp al ${WHATSAPP_SOPORTE_VISIBLE}.</p>
       </td>
     </tr>
   `);
 
   await resend.emails.send({
-    from: `La Navidad Vallenata <${process.env.RESEND_FROM_EMAIL || "no-responder@lanavidadvallenata.com"}>`,
+    from: remitente(),
     to: params.destinatario,
     subject: "Recibimos tu compra — La Navidad Vallenata",
     html,
   });
 }
 
-export async function enviarCorreoQR(params: {
-  destinatario: string;
-  nombreComprador: string;
+export type EntradaQR = {
+  qrToken: string;
   tipo: "vip" | "general";
   fila?: string | null;
   mesaNumero?: number | null;
   sillaNumero?: number | null;
-  qrToken: string;
-}) {
-  if (!process.env.RESEND_API_KEY) {
-    throw new Error("Falta RESEND_API_KEY — no se puede enviar el correo con el QR");
+};
+
+function describirEntrada(e: EntradaQR) {
+  if (e.tipo !== "vip") return "Entrada General";
+  if (e.mesaNumero != null && e.sillaNumero != null) {
+    return `${e.fila ? `Fila ${e.fila} · ` : ""}Mesa ${e.mesaNumero} · Silla ${e.sillaNumero}`;
   }
-  const resend = new Resend(process.env.RESEND_API_KEY);
+  return "Entrada VIP — tu mesa y silla te las confirma el equipo en la puerta";
+}
+
+// Un correo con TODAS las entradas de la compra: un bloque + un QR por
+// asistente. El comprador reenvía cada QR a su invitado; en la puerta cada
+// uno entra por separado.
+export async function enviarCorreoQR(params: {
+  destinatario: string;
+  nombreComprador: string;
+  entradas: EntradaQR[];
+}) {
+  const resend = clienteResend("el correo con el QR");
   const nombre = escapeHtml(params.nombreComprador);
+  const entradas = params.entradas;
+  if (entradas.length === 0) throw new Error("Sin entradas para enviar");
 
-  // El QR apunta al host del EQUIPO (no al público): es donde el personal de
-  // acceso tiene su sesión iniciada. Si apuntara al dominio público, el
-  // teléfono de la puerta caería en el login en cada escaneo (la sesión es
-  // por host). Ver src/lib/dominios.ts.
-  const urlAcceso = `${URL_EQUIPO}/acceso/${params.qrToken}`;
-  const qrDataUrl = await QRCode.toDataURL(urlAcceso, { width: 480, margin: 2 });
-  const qrBase64 = qrDataUrl.split(",")[1];
+  const attachments: { filename: string; content: string; contentId: string }[] = [];
+  const bloques: string[] = [];
 
-  const detalleAsiento =
-    params.tipo === "vip"
-      ? params.mesaNumero != null && params.sillaNumero != null
-        ? `${params.fila ? `Fila ${params.fila} · ` : ""}Mesa ${params.mesaNumero} · Silla ${params.sillaNumero}`
-        : "Entrada VIP — tu mesa y silla te las confirma el equipo en la puerta"
-      : "Entrada General";
-  const etiquetaTipo = params.tipo === "vip" ? "Entrada VIP" : "Entrada General";
+  for (let i = 0; i < entradas.length; i++) {
+    const e = entradas[i];
+    const urlAcceso = `${URL_EQUIPO}/acceso/${e.qrToken}`;
+    const qrDataUrl = await QRCode.toDataURL(urlAcceso, { width: 480, margin: 2 });
+    const cid = `qr-entrada-${i + 1}`;
+    attachments.push({ filename: `entrada-${i + 1}-qr.png`, content: qrDataUrl.split(",")[1], contentId: cid });
 
-  const html = envolverCorreo(`
+    const etiquetaTipo = e.tipo === "vip" ? "Entrada VIP" : "Entrada General";
+    bloques.push(`
     <tr>
-      <td style="padding:28px 28px 8px;">
-        <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, esta es tu entrada. Preséntala en la puerta el día del evento — el personal de acceso la va a escanear con la cámara de su teléfono.</p>
-      </td>
-    </tr>
-    <tr>
-      <td style="padding:16px 28px 8px;">
+      <td style="padding:${i === 0 ? 16 : 8}px 28px 8px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F1ECE2;border-radius:10px;">
           <tr>
             <td align="center" style="padding:16px 20px;">
-              <div style="font-family:Helvetica,Arial,sans-serif;font-weight:800;font-size:20px;letter-spacing:0.5px;color:#3D0507;">${detalleAsiento}</div>
+              ${entradas.length > 1 ? `<div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8782;margin-bottom:4px;">Entrada ${i + 1} de ${entradas.length}</div>` : ""}
+              <div style="font-family:Helvetica,Arial,sans-serif;font-weight:800;font-size:20px;letter-spacing:0.5px;color:#3D0507;">${describirEntrada(e)}</div>
               <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:#680F15;margin-top:4px;">${etiquetaTipo}</div>
             </td>
           </tr>
@@ -186,23 +220,36 @@ export async function enviarCorreoQR(params: {
       </td>
     </tr>
     <tr>
-      <td align="center" style="padding:20px 28px;">
+      <td align="center" style="padding:12px 28px 20px;">
         <table role="presentation" cellpadding="0" cellspacing="0" style="border:1px solid #F1ECE2;border-radius:10px;">
           <tr>
             <td style="padding:16px;">
-              <img src="cid:qr-entrada" width="220" height="220" alt="Código QR de entrada" style="display:block;width:220px;height:220px;border:0;">
+              <img src="cid:${cid}" width="220" height="220" alt="Código QR de entrada ${i + 1}" style="display:block;width:220px;height:220px;border:0;">
             </td>
           </tr>
         </table>
       </td>
+    </tr>`);
+  }
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:28px 28px 8px;">
+        <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, ${
+          entradas.length > 1
+            ? `aquí están tus <strong>${entradas.length} entradas</strong>. Cada una tiene su propio código QR: reenvíale a cada invitado el suyo. En la puerta, el personal de acceso escanea cada QR con la cámara de su teléfono.`
+            : "esta es tu entrada. Preséntala en la puerta el día del evento — el personal de acceso la va a escanear con la cámara de su teléfono."
+        }</p>
+      </td>
     </tr>
+    ${bloques.join("")}
     <tr>
       <td style="padding:8px 28px 24px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FBF4F1;border-left:3px solid #CE0100;border-radius:6px;">
           <tr>
             <td style="padding:14px 16px;">
               <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#3D0507;">Importante — uso y seguridad de tu QR</p>
-              <p style="margin:0 0 6px;font-size:12.5px;line-height:1.5;color:#680F15;">Este código es único y personal. Si lo compartes con alguien más, solo la primera persona que lo presente en la puerta podrá ingresar.</p>
+              <p style="margin:0 0 6px;font-size:12.5px;line-height:1.5;color:#680F15;">Cada código es único y personal. Si lo compartes con alguien más, solo la primera persona que lo presente en la puerta podrá ingresar.</p>
               <p style="margin:0;font-size:12.5px;line-height:1.5;color:#680F15;">Una vez usado en la entrada, el código queda desactivado y no sirve para ingresos posteriores ni para volver a entrar.</p>
             </td>
           </tr>
@@ -212,16 +259,77 @@ export async function enviarCorreoQR(params: {
   `);
 
   await resend.emails.send({
-    from: `La Navidad Vallenata <${process.env.RESEND_FROM_EMAIL || "no-responder@lanavidadvallenata.com"}>`,
+    from: remitente(),
     to: params.destinatario,
-    subject: "Tu entrada — La Navidad Vallenata",
+    subject: entradas.length > 1 ? `Tus ${entradas.length} entradas — La Navidad Vallenata` : "Tu entrada — La Navidad Vallenata",
     html,
-    attachments: [
-      {
-        filename: "entrada-qr.png",
-        content: qrBase64,
-        contentId: "qr-entrada",
-      },
-    ],
+    attachments,
+  });
+}
+
+// Pago rechazado (pedido del equipo, 19 sep): se le dice al comprador qué
+// pasó, con el monto y la referencia que reportó, y un botón de WhatsApp con
+// el mensaje ya escrito para que mande el comprobante y Finanzas pueda
+// reabrir la compra.
+export async function enviarCorreoRechazo(params: {
+  destinatario: string;
+  nombreComprador: string;
+  cantidad: number;
+  tipo: "vip" | "general";
+  totalUsd: number;
+  totalBs: number | null;
+  referencia: string | null;
+  metodoEtiqueta: string;
+}) {
+  const resend = clienteResend("el correo de pago rechazado");
+  const nombre = escapeHtml(params.nombreComprador);
+  const ref = params.referencia ? escapeHtml(params.referencia) : "sin referencia";
+  const mensajeWa = `Hola, soy ${params.nombreComprador}. Mi pago de ${fmtUsd(params.totalUsd)}${
+    params.totalBs != null ? ` (${fmtBs(params.totalBs)})` : ""
+  } por ${params.metodoEtiqueta}, referencia ${params.referencia ?? "—"}, para La Navidad Vallenata fue rechazado. Adjunto el comprobante para que lo revisen.`;
+  const urlWa = urlWhatsAppSoporte(mensajeWa);
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:32px 28px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="padding-bottom:14px;">
+              <div style="display:inline-block;background-color:#FBE9E7;color:#B00020;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">No pudimos confirmar tu pago</div>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, revisamos tu compra y <strong>no encontramos el pago</strong> con los datos que nos diste:</p>
+        <p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
+          <strong>${params.cantidad} entrada${params.cantidad === 1 ? "" : "s"} ${params.tipo === "vip" ? "VIP" : "General"}</strong><br>
+          Monto: ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}<br>
+          Método: ${escapeHtml(params.metodoEtiqueta)}<br>
+          Referencia reportada: <strong>${ref}</strong>
+        </p>
+        <p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:#303030;">Si sí hiciste el pago, mándanos el comprobante (captura o foto) por WhatsApp y lo verificamos de nuevo. Con el botón de abajo el mensaje ya sale escrito con tus datos:</p>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" style="padding:6px 28px 20px;">
+        <a href="${urlWa}" style="display:inline-block;background-color:#25D366;color:#FFFFFF;font-family:'Poppins',Helvetica,Arial,sans-serif;font-weight:700;font-size:15px;text-decoration:none;border-radius:999px;padding:14px 28px;">Enviar comprobante por WhatsApp</a>
+        <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:12px;color:#8A8782;margin-top:10px;">${WHATSAPP_SOPORTE_VISIBLE}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:4px 28px 32px;">
+        <p style="margin:0;font-size:12.5px;line-height:1.6;color:#8A8782;border-top:1px solid #F1ECE2;padding-top:16px;">${
+          params.tipo === "vip"
+            ? "Las sillas que habías elegido volvieron a estar disponibles. Si el pago se confirma, intentaremos asignarte las mismas; si alguien las tomó, te ayudamos a elegir otras."
+            : "Si el pago se confirma, tus entradas quedan activas y te llega el correo con los códigos QR."
+        }</p>
+      </td>
+    </tr>
+  `);
+
+  await resend.emails.send({
+    from: remitente(),
+    to: params.destinatario,
+    subject: "No pudimos confirmar tu pago — La Navidad Vallenata",
+    html,
   });
 }

@@ -3,7 +3,7 @@ import { getPerfilActual } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerTasaActual } from "@/lib/tasa";
 import Nav from "@/components/Nav";
-import PendientesList from "./PendientesList";
+import PendientesList, { type CompraPendiente } from "./PendientesList";
 import TasaCambio from "./TasaCambio";
 import BuscarComprador from "./BuscarComprador";
 import AutoRefresh from "@/app/dashboard/AutoRefresh";
@@ -25,13 +25,10 @@ export default async function FinanzasPage() {
 
   const service = createServiceClient();
 
-  // Consulta simple, sin relaciones embebidas: tickets tiene 3 FKs distintas hacia
-  // perfiles (vendido_por, verificado_por, qr_usado_por), lo que hacía ambiguo el
-  // embed de Supabase y devolvía error silencioso (0 resultados). Se resuelve
-  // trayendo cada pieza por separado y uniéndolas en memoria.
+  // Consulta simple, sin relaciones embebidas (ver src/lib/asiento.ts).
   const { data: pendientes, error: ticketsError } = await service
     .from("tickets")
-    .select("id, comprador_nombre, comprador_telefono, comprador_email, tipo, precio, moneda, metodo_pago, referencia_pago, vendido_por, silla_id, created_at")
+    .select("id, grupo_id, comprador_nombre, comprador_telefono, comprador_email, tipo, precio, precio_bs, tasa_aplicada, etapa, canal, metodo_pago, referencia_pago, vendido_por, silla_id, created_at")
     .eq("estado_pago", "pendiente")
     .order("created_at", { ascending: true });
 
@@ -63,26 +60,49 @@ export default async function FinanzasPage() {
   const mesaPorId = new Map((mesas ?? []).map((m) => [m.id, m]));
   const sillaPorId = new Map((sillas ?? []).map((s) => [s.id, s]));
 
-  const lista = tickets.map((t) => {
+  // Agrupar por compra (grupo_id). Tickets viejos sin grupo: cada uno es su compra.
+  const compras = new Map<string, CompraPendiente>();
+  for (const t of tickets) {
+    const gid = (t.grupo_id as string | null) ?? (t.id as string);
     const silla = t.silla_id ? sillaPorId.get(t.silla_id) : null;
     const mesa = silla ? mesaPorId.get(silla.mesa_id) : null;
-    return {
+    const asiento = silla && mesa ? `${mesa.fila}${mesa.numero}·S${silla.numero}` : null;
+    const precio = Number(t.precio);
+    const precioBs = t.precio_bs == null ? null : Number(t.precio_bs);
+    const existente = compras.get(gid);
+    if (existente) {
+      existente.cantidad += 1;
+      existente.total = Math.round((existente.total + precio) * 100) / 100;
+      existente.totalBs = existente.totalBs != null && precioBs != null ? Math.round((existente.totalBs + precioBs) * 100) / 100 : existente.totalBs;
+      if (asiento) existente.asientos.push(asiento);
+      if (t.etapa === "preventa") existente.enPreventa += 1;
+      continue;
+    }
+    compras.set(gid, {
       id: t.id as string,
+      grupoId: gid,
       compradorNombre: t.comprador_nombre as string,
       compradorTelefono: t.comprador_telefono as string,
       compradorEmail: (t.comprador_email as string | null) ?? null,
       tipo: t.tipo as "vip" | "general",
-      precio: Number(t.precio),
+      cantidad: 1,
+      total: precio,
+      totalBs: precioBs,
+      tasaAplicada: t.tasa_aplicada == null ? null : Number(t.tasa_aplicada),
+      enPreventa: t.etapa === "preventa" ? 1 : 0,
+      canal: (t.canal as string) ?? (t.vendido_por ? "manual" : "web"),
       metodoPago: t.metodo_pago as string,
       referenciaPago: (t.referencia_pago as string | null) ?? null,
       vendidoPor: (t.vendido_por as string | null) ?? null,
       vendedorNombre: t.vendido_por ? (vendedorPorId.get(t.vendido_por) ?? "—") : null,
-      asiento: silla && mesa ? `Fila ${mesa.fila} · Mesa ${mesa.numero} · Silla ${silla.numero}` : null,
+      asientos: asiento ? [asiento] : [],
       creadoEn: t.created_at as string,
-    };
-  });
+    });
+  }
 
-  const totalPendienteUsd = lista.reduce((s, t) => s + t.precio, 0);
+  const lista = [...compras.values()];
+  const totalPendienteUsd = lista.reduce((s, c) => s + c.total, 0);
+  const entradasPendientes = lista.reduce((s, c) => s + c.cantidad, 0);
 
   return (
     <>
@@ -94,13 +114,13 @@ export default async function FinanzasPage() {
             <p className="text-sm text-neutral-500">
               {lista.length === 0
                 ? "Sin pagos pendientes"
-                : `${lista.length} pendiente${lista.length === 1 ? "" : "s"} · $${totalPendienteUsd.toFixed(2)} por verificar`}
+                : `${lista.length} compra${lista.length === 1 ? "" : "s"} · ${entradasPendientes} entrada${entradasPendientes === 1 ? "" : "s"} · $${totalPendienteUsd.toFixed(2)} por verificar`}
             </p>
           </div>
           <AutoRefresh intervaloMs={30000} />
         </div>
 
-        <PendientesList tickets={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
+        <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
 
         <BuscarComprador />
 

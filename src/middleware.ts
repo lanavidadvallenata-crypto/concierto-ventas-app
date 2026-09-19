@@ -12,7 +12,7 @@ import { HOST_EQUIPO, esHostPropio, esRutaEquipo } from "@/lib/dominios";
 // que abran las puertas, con buena señal) y la sesión queda guardada en su
 // teléfono para todo el evento — no tiene que volver a loguearse entre cada
 // escaneo.
-const PROTEGIDAS = ["/ventas", "/dashboard", "/finanzas", "/admin", "/acceso"];
+const PROTEGIDAS = ["/ventas", "/taquilla", "/dashboard", "/finanzas", "/admin", "/acceso"];
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;

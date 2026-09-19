@@ -97,22 +97,50 @@ export function SobreElEvento() {
   );
 }
 
-export function PreciosExplicados() {
+export function PreciosExplicados({
+  preventa,
+}: {
+  preventa: { vip: number; general: number; precioVip: number; precioGeneral: number } | null;
+}) {
   const vip = calcularTotal("vip");
   const general = calcularTotal("general");
+  const preVip = preventa && preventa.vip > 0 ? Math.round(preventa.precioVip / 1.1) : null;
+  const preGeneral = preventa && preventa.general > 0 ? Math.round(preventa.precioGeneral / 1.1) : null;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-evento-secundario">VIP</p>
-        <p className="text-xl font-bold">${vip.base}</p>
+        {preVip !== null ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xl font-bold">
+              ${preVip} <span className="text-sm font-normal text-neutral-400 line-through">${vip.base}</span>
+            </p>
+            <span className="text-[10px] font-semibold uppercase tracking-wide bg-evento-acento text-white rounded-full px-2 py-0.5">
+              Preventa · quedan {preventa!.vip}
+            </span>
+          </div>
+        ) : (
+          <p className="text-xl font-bold">${vip.base}</p>
+        )}
         <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>
-        <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa, zona preferencial frente a la tarima.</p>
+        <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa, zona preferencial frente a la tarima. Hasta 10 por compra.</p>
       </div>
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">General</p>
-        <p className="text-xl font-bold">${general.base}</p>
+        {preGeneral !== null ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xl font-bold">
+              ${preGeneral} <span className="text-sm font-normal text-neutral-400 line-through">${general.base}</span>
+            </p>
+            <span className="text-[10px] font-semibold uppercase tracking-wide bg-evento-acento text-white rounded-full px-2 py-0.5">
+              Preventa · quedan {preventa!.general}
+            </span>
+          </div>
+        ) : (
+          <p className="text-xl font-bold">${general.base}</p>
+        )}
         <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>
-        <p className="text-xs text-neutral-500 mt-1">Acceso a zona general, sin asiento asignado.</p>
+        <p className="text-xs text-neutral-500 mt-1">Acceso a zona general, sin asiento asignado. Hasta 20 por compra.</p>
       </div>
     </div>
   );
@@ -121,7 +149,7 @@ export function PreciosExplicados() {
 export function ComoComprar() {
   const pasos = [
     { titulo: "Elige tu entrada", texto: "Selecciona VIP (con mapa de sillas) o General.", icono: "🎟️" },
-    { titulo: "Paga en 10 minutos", texto: "Tu selección queda reservada mientras completas el pago.", icono: "⏱️" },
+    { titulo: "Paga en 15 minutos", texto: "Tu selección queda reservada mientras completas el pago.", icono: "⏱️" },
     { titulo: "Recibe tu entrada", texto: "Te llega un correo con tu QR de acceso al confirmarse el pago.", icono: "📩" },
   ];
   return (
@@ -153,9 +181,9 @@ export function PreguntasFrecuentes() {
     { q: "¿Puedo pagar en bolívares?", a: "Sí — el monto se calcula automáticamente a la tasa del día." },
     {
       q: "¿Qué pasa si no completo el pago a tiempo?",
-      a: "Tu selección se libera después de 10 minutos y vuelve a estar disponible para otra persona.",
+      a: "Tu selección se libera después de 15 minutos y vuelve a estar disponible para otra persona.",
     },
-    { q: "¿Cómo recibo mi entrada?", a: "Por correo, con un código QR que se valida en la entrada del evento." },
+    { q: "¿Cómo recibo mi entrada?", a: "Por correo, con un código QR que se valida en la entrada del evento. Si compras varias, cada asistente recibe su propio QR en el mismo correo." },
   ];
   return (
     <div className="flex flex-col gap-3">
