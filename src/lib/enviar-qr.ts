@@ -140,6 +140,7 @@ export async function enviarCorreoQR(params: {
   destinatario: string;
   nombreComprador: string;
   tipo: "vip" | "general";
+  fila?: string | null;
   mesaNumero?: number | null;
   sillaNumero?: number | null;
   qrToken: string;
@@ -159,7 +160,11 @@ export async function enviarCorreoQR(params: {
   const qrBase64 = qrDataUrl.split(",")[1];
 
   const detalleAsiento =
-    params.tipo === "vip" ? `Mesa ${params.mesaNumero} · Silla ${params.sillaNumero}` : "Entrada General";
+    params.tipo === "vip"
+      ? params.mesaNumero != null && params.sillaNumero != null
+        ? `${params.fila ? `Fila ${params.fila} · ` : ""}Mesa ${params.mesaNumero} · Silla ${params.sillaNumero}`
+        : "Entrada VIP — tu mesa y silla te las confirma el equipo en la puerta"
+      : "Entrada General";
   const etiquetaTipo = params.tipo === "vip" ? "Entrada VIP" : "Entrada General";
 
   const html = envolverCorreo(`

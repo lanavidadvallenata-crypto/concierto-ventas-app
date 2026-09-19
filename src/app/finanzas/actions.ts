@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR } from "@/lib/enviar-qr";
 import { guardarTasaManual } from "@/lib/tasa";
+import { obtenerAsiento } from "@/lib/asiento";
 
 type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
 
@@ -22,20 +23,25 @@ async function requiereFinanzas() {
   return { user, rol: perfil.rol as "finanzas" | "admin", error: null };
 }
 
-type SillaInfo = { numero: number; mesas_vip: { numero: number } } | null;
-
 export async function verificarPago(ticketId: string): Promise<Resultado> {
   const { user, rol, error } = await requiereFinanzas();
   if (!user) return { ok: false, error: error! };
 
   const service = createServiceClient();
 
-  const { data: ticket } = await service
+  // Sin "embed" de sillas_vip: ver src/lib/asiento.ts (la FK tickets →
+  // sillas_vip no existe en la base y el embed hacía fallar TODA
+  // verificación con "No se encontró ese ticket").
+  const { data: ticket, error: ticketError } = await service
     .from("tickets")
-    .select("id, vendido_por, tipo, silla_id, comprador_nombre, comprador_email, estado_pago, sillas_vip(numero, mesa_id, mesas_vip(numero))")
+    .select("id, vendido_por, tipo, silla_id, comprador_nombre, comprador_email, estado_pago")
     .eq("id", ticketId)
     .maybeSingle();
 
+  if (ticketError) {
+    console.error("Error leyendo ticket a verificar:", ticketError.message);
+    return { ok: false, error: `No se pudo leer el ticket (${ticketError.message}). Intenta de nuevo.` };
+  }
   if (!ticket) return { ok: false, error: "No se encontró ese ticket." };
   if (ticket.estado_pago !== "pendiente") return { ok: false, error: "Ese ticket ya fue procesado." };
 
@@ -83,14 +89,15 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
     return { ok: true, aviso: "Pago verificado, pero este ticket no tiene correo — no hay a dónde mandar el QR." };
   }
 
-  const sillaInfo = ticket.sillas_vip as unknown as SillaInfo;
+  const asiento = ticket.tipo === "vip" ? await obtenerAsiento(service, ticket.silla_id) : null;
   try {
     await enviarCorreoQR({
       destinatario: ticket.comprador_email,
       nombreComprador: ticket.comprador_nombre,
       tipo: ticket.tipo as "vip" | "general",
-      mesaNumero: sillaInfo?.mesas_vip?.numero ?? null,
-      sillaNumero: sillaInfo?.numero ?? null,
+      fila: asiento?.fila ?? null,
+      mesaNumero: asiento?.mesaNumero ?? null,
+      sillaNumero: asiento?.sillaNumero ?? null,
       qrToken,
     });
     await service.from("tickets").update({ qr_enviado_en: new Date().toISOString() }).eq("id", ticketId);
@@ -114,12 +121,16 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
 
   const service = createServiceClient();
 
-  const { data: ticket } = await service
+  const { data: ticket, error: ticketError } = await service
     .from("tickets")
     .select("id, tipo, silla_id, estado_pago")
     .eq("id", ticketId)
     .maybeSingle();
 
+  if (ticketError) {
+    console.error("Error leyendo ticket a rechazar:", ticketError.message);
+    return { ok: false, error: `No se pudo leer el ticket (${ticketError.message}). Intenta de nuevo.` };
+  }
   if (!ticket) return { ok: false, error: "No se encontró ese ticket." };
   if (ticket.estado_pago !== "pendiente") return { ok: false, error: "Ese ticket ya fue procesado." };
 
@@ -160,12 +171,16 @@ export async function reenviarQR(ticketId: string): Promise<Resultado> {
 
   const service = createServiceClient();
 
-  const { data: ticket } = await service
+  const { data: ticket, error: ticketError } = await service
     .from("tickets")
-    .select("id, tipo, comprador_nombre, comprador_email, estado_pago, qr_token, qr_usado, sillas_vip(numero, mesa_id, mesas_vip(numero))")
+    .select("id, tipo, silla_id, comprador_nombre, comprador_email, estado_pago, qr_token, qr_usado")
     .eq("id", ticketId)
     .maybeSingle();
 
+  if (ticketError) {
+    console.error("Error leyendo ticket para reenviar QR:", ticketError.message);
+    return { ok: false, error: `No se pudo leer el ticket (${ticketError.message}). Intenta de nuevo.` };
+  }
   if (!ticket) return { ok: false, error: "No se encontró ese ticket." };
   if (ticket.estado_pago !== "verificado" || !ticket.qr_token) {
     return { ok: false, error: "Solo se puede reenviar el QR de un pago ya verificado." };
@@ -173,14 +188,15 @@ export async function reenviarQR(ticketId: string): Promise<Resultado> {
   if (!ticket.comprador_email) return { ok: false, error: "Este ticket no tiene correo." };
   if (ticket.qr_usado) return { ok: false, error: "Ese QR ya fue usado en la puerta — no se reenvía." };
 
-  const sillaInfo = ticket.sillas_vip as unknown as SillaInfo;
+  const asiento = ticket.tipo === "vip" ? await obtenerAsiento(service, ticket.silla_id) : null;
   try {
     await enviarCorreoQR({
       destinatario: ticket.comprador_email,
       nombreComprador: ticket.comprador_nombre,
       tipo: ticket.tipo as "vip" | "general",
-      mesaNumero: sillaInfo?.mesas_vip?.numero ?? null,
-      sillaNumero: sillaInfo?.numero ?? null,
+      fila: asiento?.fila ?? null,
+      mesaNumero: asiento?.mesaNumero ?? null,
+      sillaNumero: asiento?.sillaNumero ?? null,
       qrToken: ticket.qr_token,
     });
   } catch (e) {

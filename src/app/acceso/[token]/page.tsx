@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPerfilActual } from "@/lib/perfil";
+import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
 
 export default async function ValidarAccesoPage({
   params,
@@ -28,32 +29,57 @@ export default async function ValidarAccesoPage({
 
   // Update atómico: solo marca como usado si todavía no lo estaba.
   // Si esto devuelve una fila, este es el primer (y único) ingreso válido con ese QR.
-  const { data: marcado } = await service
+  // Sin "embed" de sillas_vip (ver src/lib/asiento.ts): con el embed, la
+  // consulta fallaba entera y TODO QR válido salía como "YA USADO".
+  const { data: marcado, error: marcarError } = await service
     .from("tickets")
-    .update({ qr_usado: true, qr_usado_en: new Date().toISOString() })
+    .update({ qr_usado: true, qr_usado_en: new Date().toISOString(), qr_usado_por: perfil.id })
     .eq("qr_token", token)
     .eq("qr_usado", false)
-    .select("id, comprador_nombre, tipo, sillas_vip(numero, mesas_vip(numero, fila))")
+    .select("id, comprador_nombre, tipo, silla_id")
     .maybeSingle();
 
+  if (marcarError) {
+    console.error("Error validando QR:", marcarError.message);
+    return (
+      <Resultado
+        color="red"
+        titulo="ERROR"
+        detalle="No se pudo validar por un problema de conexión. Vuelve a escanear. Si sigue, valida por nombre con Finanzas."
+      />
+    );
+  }
+
   if (marcado) {
-    await service.from("accesos").insert({ ticket_id: marcado.id, resultado: "valido" });
-    const silla = (marcado as unknown as { sillas_vip: { numero: number; mesas_vip: { numero: number; fila: string } } | null }).sillas_vip;
+    await service.from("accesos").insert({ ticket_id: marcado.id, resultado: "valido", escaneado_por: perfil.id });
+    const asiento = marcado.tipo === "vip" ? await obtenerAsiento(service, marcado.silla_id) : null;
     return (
       <Resultado
         color="green"
         titulo="VÁLIDO"
-        detalle={`${marcado.comprador_nombre} · ${marcado.tipo === "vip" ? `Fila ${silla?.mesas_vip?.fila} · Mesa ${silla?.mesas_vip?.numero} · Silla ${silla?.numero}` : "General"}`}
+        detalle={`${marcado.comprador_nombre} · ${describirAsiento(marcado.tipo as "vip" | "general", asiento)}`}
       />
     );
   }
 
   // No se marcó — puede ser que ya estaba usado, o que el token no existe.
-  const { data: existente } = await service
+  const { data: existente, error: existenteError } = await service
     .from("tickets")
-    .select("id, comprador_nombre, tipo, qr_usado_en")
+    .select("id, comprador_nombre, tipo, qr_usado, qr_usado_en, estado_pago")
     .eq("qr_token", token)
     .maybeSingle();
+
+  if (existenteError) {
+    console.error("Error consultando QR:", existenteError.message);
+    return <Resultado color="red" titulo="ERROR" detalle="No se pudo validar por un problema de conexión. Vuelve a escanear." />;
+  }
+
+  if (existente && !existente.qr_usado) {
+    // Existe pero el UPDATE no lo marcó: la única forma es que ya no esté
+    // verificado (ej. se rechazó después de emitir el QR). No es reingreso.
+    await service.from("accesos").insert({ ticket_id: existente.id, resultado: "invalido", escaneado_por: perfil.id });
+    return <Resultado color="red" titulo="NO VÁLIDO" detalle={`${existente.comprador_nombre} — este ticket no está verificado (estado: ${existente.estado_pago}). No dejar pasar.`} />;
+  }
 
   if (existente) {
     // Si el mismo QR se validó hace segundos, casi seguro es el mismo teléfono
@@ -75,7 +101,7 @@ export default async function ValidarAccesoPage({
       );
     }
 
-    await service.from("accesos").insert({ ticket_id: existente.id, resultado: "ya_usado" });
+    await service.from("accesos").insert({ ticket_id: existente.id, resultado: "ya_usado", escaneado_por: perfil.id });
     return (
       <Resultado
         color="red"
@@ -85,7 +111,7 @@ export default async function ValidarAccesoPage({
     );
   }
 
-  await service.from("accesos").insert({ resultado: "invalido" });
+  await service.from("accesos").insert({ resultado: "invalido", escaneado_por: perfil.id });
   return <Resultado color="red" titulo="INVÁLIDO" detalle="Este código no corresponde a ninguna entrada." />;
 }
 
