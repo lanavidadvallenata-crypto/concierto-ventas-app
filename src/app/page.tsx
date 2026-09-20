@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { disponibilidadEtapas } from "@/lib/precios";
 import { ProductoraHome } from "./ProductoraHome";
 
 // El dato del evento (nombre/fecha/venue) no cambia entre visitas — cachearlo
@@ -14,9 +15,14 @@ const obtenerEventoCacheado = unstable_cache(
       .select("nombre, fecha, venue, ciudad")
       .limit(1)
       .single();
-    return evento ?? null;
+    // "Desde $X": precio base de la etapa vigente para General (preventa
+    // mientras quede cupo). Se cachea junto con el evento.
+    const disp = await disponibilidadEtapas(service, "general");
+    const vigente = disp.find((d) => d.restante === null || d.restante > 0);
+    const desdeBase = vigente ? Math.round((vigente.totalUnitario / 1.1) * 100) / 100 : null;
+    return { evento: evento ?? null, desdeBase };
   },
-  ["home-evento"],
+  ["home-evento-v2"],
   { revalidate: 30 }
 );
 
@@ -31,7 +37,7 @@ export default async function Home() {
 
   // Público general (dominio o subdominio de la productora): home de marca,
   // no la pantalla de login del equipo — antes cualquier visitante caía en /login.
-  const evento = await obtenerEventoCacheado();
+  const { evento, desdeBase } = await obtenerEventoCacheado();
 
-  return <ProductoraHome evento={evento} />;
+  return <ProductoraHome evento={evento} desdePreventa={desdeBase} />;
 }

@@ -5,7 +5,7 @@ import {
   LINEUP,
   CONTACTO_WHATSAPP_TEXTO,
   CONTACTO_WHATSAPP_URL,
-  FLYER_URL,
+  FLYER_HERO_URL,
 } from "@/lib/evento-copy";
 
 export function HeroEvento({
@@ -23,15 +23,23 @@ export function HeroEvento({
     ? new Date(fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric" })
     : null;
 
-  if (FLYER_URL) {
-    // Afiche real del evento (branding_4.pdf): ya trae título, fecha y line-up
-    // como arte final. No se le superpone texto — el afiche es la pieza, y los
-    // datos operativos (venue/fecha/CTA) van debajo, en bloque aparte.
+  if (FLYER_HERO_URL) {
+    // Afiche real del evento (arte final 4:5, 20 sep): ya trae título, fecha y
+    // line-up. No se le superpone texto — el afiche es la pieza, y los datos
+    // operativos (venue/fecha/CTA) van debajo, en bloque aparte. width/height
+    // reservan el espacio antes de que cargue (sin salto de layout en móvil).
     return (
       <div className="flex flex-col gap-4">
         <div className="rounded-2xl overflow-hidden border border-neutral-200">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={FLYER_URL} alt={nombre} className="w-full h-auto block" />
+          <img
+            src={FLYER_HERO_URL}
+            alt={nombre}
+            width={864}
+            height={1080}
+            fetchPriority="high"
+            className="w-full h-auto block"
+          />
         </div>
         <div className="flex flex-col items-center text-center gap-2 bg-evento-principal text-white rounded-2xl px-6 py-5">
           <Link href="/" aria-label="6.18 Producciones">

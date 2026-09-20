@@ -5,6 +5,7 @@ import { urlWhatsAppSoporte, WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
+const BANNER_URL = `${SITE_URL}/flyer-horizontal.jpg`;
 
 // El nombre del comprador lo escribe él mismo en el formulario — sin escapar,
 // un nombre con "<" o "&" podía romper el HTML del correo. Barato de evitar.
@@ -48,6 +49,9 @@ function encabezadoCorreo() {
 // como productora (encabezado, arriba) y La Navidad Vallenata como el
 // evento puntual que se está comprando (este banner, con su propia
 // paleta roja navideña).
+// Arte final horizontal (1080x567) hospedado en el sitio: los clientes de
+// correo lo cargan por URL. El alt lleva el texto por si el cliente bloquea
+// imágenes (Gmail las muestra; Outlook a veces pide "descargar imágenes").
 function bannerEvento() {
   return `
     <tr>
@@ -55,9 +59,8 @@ function bannerEvento() {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr><td style="height:3px;background-color:#CE0100;font-size:0;line-height:0;">&nbsp;</td></tr>
           <tr>
-            <td align="center" style="padding:20px 24px;">
-              <div style="font-family:Helvetica,Arial,sans-serif;font-weight:800;font-size:24px;line-height:1.15;letter-spacing:1px;color:#F1ECE2;text-transform:uppercase;">La Navidad Vallenata</div>
-              <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13px;color:#D9BDB9;margin-top:6px;">4 de diciembre de 2026 · Hangar Grano de Oro, Maracaibo</div>
+            <td style="padding:0;">
+              <img src="${BANNER_URL}" width="560" alt="La Navidad Vallenata — Miguel Morales, Diomedes Dionisio e Iván Zuleta · Maracaibo, Hangar Grano de Oro · Vie 04 Dic" style="display:block;width:100%;max-width:560px;height:auto;border:0;">
             </td>
           </tr>
         </table>

@@ -13,7 +13,20 @@ export const CONTACTO_WHATSAPP_TEXTO = "Escríbenos por WhatsApp";
 // 0414-6079247; si se prefiere volver a ese, cambiar aquí y en src/lib/contacto.ts.
 export const CONTACTO_WHATSAPP_URL: string | null = "https://wa.me/584241250127";
 
-export const FLYER_URL: string | null = "/flyer-navidad-vallenata.png";
+// Artes finales del evento (20 sep). Cada formato tiene su sitio:
+//  - 4:5  (864x1080)  → hero de /comprar: es la proporción de feed de Instagram,
+//                        llena la pantalla del teléfono sin empujar el botón de
+//                        compra demasiado abajo.
+//  - 1.9:1 (1080x567) → tarjeta del home de 6.18 (aspect 1200/630), encabezado
+//                        de los correos (560px de ancho) y vista previa al
+//                        compartir el link en WhatsApp/Instagram (Open Graph).
+//  - 3:4  (810x1080)  → post de feed alternativo; no se usa en la app, se
+//                        sirve en /flyer-3x4.jpg para que el equipo lo comparta.
+//  - 9:16 (607x1080)  → stories / estados de WhatsApp; igual, /flyer-story.jpg.
+export const FLYER_HERO_URL = "/flyer-4x5.jpg";
+export const FLYER_HORIZONTAL_URL = "/flyer-horizontal.jpg";
+export const FLYER_OG_URL = "/og-navidad-vallenata.jpg"; // 1200x630, la horizontal escalada
+export const FLYER_URL: string | null = FLYER_HERO_URL;
 
 // Home de la productora (bienvenida). Texto persuasivo, no institucional
 // (pedido de Anita, 16/9, emulando el tono de venta de plataformas como

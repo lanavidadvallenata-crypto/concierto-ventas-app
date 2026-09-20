@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { calcularTotal } from "@/lib/precios";
-import { SOBRE_PRODUCTORA, CONTACTO_WHATSAPP_URL, INSTAGRAM_URL, FLYER_URL } from "@/lib/evento-copy";
+import { SOBRE_PRODUCTORA, CONTACTO_WHATSAPP_URL, INSTAGRAM_URL, FLYER_HORIZONTAL_URL } from "@/lib/evento-copy";
 
 type Evento = { nombre: string; fecha: string | null; venue: string; ciudad: string } | null;
 
-export function ProductoraHome({ evento }: { evento: Evento }) {
+export function ProductoraHome({ evento, desdePreventa }: { evento: Evento; desdePreventa?: number | null }) {
   const fechaFormateada = evento?.fecha
     ? new Date(evento.fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric" })
     : null;
-  const desde = evento ? calcularTotal("general").base : null;
+  const regular = calcularTotal("general").base;
+  const desde = evento ? (desdePreventa ?? regular) : null;
+  const enPreventa = evento && desdePreventa != null && desdePreventa < regular;
 
   return (
     <main className="min-h-screen flex flex-col bg-marca-acento">
@@ -68,10 +70,14 @@ export function ProductoraHome({ evento }: { evento: Evento }) {
             className="group relative overflow-hidden rounded-2xl bg-white shadow-lg ring-1 ring-black/5 flex flex-col hover:shadow-xl transition-shadow"
           >
             <div className="relative aspect-[1200/630] bg-gradient-to-br from-marca-secundario to-marca-principal flex items-start justify-between">
-              {FLYER_URL && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={FLYER_URL} alt="" className="absolute inset-0 w-full h-full object-cover" />
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={FLYER_HORIZONTAL_URL}
+                alt=""
+                width={1080}
+                height={567}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
               <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
               {fechaFormateada && (
                 <span className="relative m-3 bg-marca-acento text-marca-principal text-[11px] font-bold px-2.5 py-1 rounded-md">
@@ -90,7 +96,9 @@ export function ProductoraHome({ evento }: { evento: Evento }) {
               <div className="flex items-center justify-between mt-3">
                 {desde !== null && (
                   <span className="text-xs text-marca-neutro-1">
-                    Desde <strong className="text-marca-principal text-sm">${desde}</strong>{" "}
+                    {enPreventa ? "Preventa desde" : "Desde"}{" "}
+                    <strong className="text-marca-principal text-sm">${desde}</strong>{" "}
+                    {enPreventa && <span className="line-through opacity-60">${regular}</span>}{" "}
                     <span className="opacity-60">+ fee</span>
                   </span>
                 )}
