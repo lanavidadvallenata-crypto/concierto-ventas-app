@@ -51,6 +51,24 @@ export default function MapaVip({
     }
   }
 
+  // Mesa completa de un toque: agrega todas las sillas disponibles de la mesa
+  // activa que todavía no estén elegidas, hasta el máximo por compra.
+  function elegirMesaCompleta() {
+    if (!mesaActiva) return;
+    const cupo = maximo - seleccionadas.length;
+    const nuevas = [...mesaActiva.sillas]
+      .sort((a, b) => a.numero - b.numero)
+      .filter((s) => s.estado === "disponible" && !idsSeleccionados.has(s.id))
+      .slice(0, Math.max(0, cupo))
+      .map((s) => ({ id: s.id, numero: s.numero, mesaNumero: mesaActiva.numero, fila: mesaActiva.fila }));
+    if (nuevas.length) onCambiar([...seleccionadas, ...nuevas]);
+  }
+
+  const disponiblesMesaActiva = mesaActiva
+    ? mesaActiva.sillas.filter((s) => s.estado === "disponible" && !idsSeleccionados.has(s.id)).length
+    : 0;
+  const cabenMasEnMesaActiva = Math.min(disponiblesMesaActiva, maximo - seleccionadas.length);
+
   return (
     <div className="flex flex-col gap-4 bg-white border border-neutral-200 rounded-xl p-3 sm:p-4">
       <div className="bg-neutral-900 text-white text-center text-xs font-semibold tracking-[0.2em] py-3 rounded-lg">
@@ -108,7 +126,7 @@ export default function MapaVip({
 
       {mesaActiva && (
         <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3">
-          <div className="flex items-center justify-between mb-2.5">
+          <div className="flex items-center justify-between gap-2 mb-2.5">
             <p className="text-sm font-semibold">
               Fila {mesaActiva.fila} · Mesa {mesaActiva.numero}
             </p>
@@ -116,6 +134,17 @@ export default function MapaVip({
               {seleccionadas.length}/{maximo} elegidas
             </p>
           </div>
+          {cabenMasEnMesaActiva > 1 && (
+            <button
+              type="button"
+              onClick={elegirMesaCompleta}
+              className="w-full h-10 mb-2.5 rounded-md border border-neutral-900 text-sm font-semibold text-neutral-900 hover:bg-neutral-900 hover:text-white"
+            >
+              {cabenMasEnMesaActiva === mesaActiva.sillas.length
+                ? `Elegir la mesa completa (${cabenMasEnMesaActiva} sillas)`
+                : `Elegir las ${cabenMasEnMesaActiva} sillas disponibles`}
+            </button>
+          )}
           <div className="grid grid-cols-5 gap-1.5">
             {[...mesaActiva.sillas]
               .sort((a, b) => a.numero - b.numero)
@@ -145,7 +174,9 @@ export default function MapaVip({
               })}
           </div>
           {llena && (
-            <p className="text-[11px] text-amber-700 mt-2">Máximo {maximo} sillas por compra. Quita una para elegir otra.</p>
+            <p className="text-xs font-medium text-green-800 bg-green-50 border border-green-200 rounded-md px-3 py-2 mt-2">
+              Listo: {maximo} sillas elegidas, el máximo por compra. Completa tus datos abajo para continuar. (Si quieres cambiar una, tócala para quitarla.)
+            </p>
           )}
         </div>
       )}
