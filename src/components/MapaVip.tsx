@@ -52,7 +52,7 @@ export default function MapaVip({
   }
 
   return (
-    <div className="flex flex-col gap-4 bg-white border border-neutral-200 rounded-xl p-4">
+    <div className="flex flex-col gap-4 bg-white border border-neutral-200 rounded-xl p-3 sm:p-4">
       <div className="bg-neutral-900 text-white text-center text-xs font-semibold tracking-[0.2em] py-3 rounded-lg">
         TARIMA
       </div>
@@ -62,10 +62,15 @@ export default function MapaVip({
           const mesasFila = mesas.filter((m) => m.fila === fila).sort((a, b) => a.numero - b.numero);
           const izquierda = mesasFila.filter((m) => m.numero <= 5);
           const derecha = mesasFila.filter((m) => m.numero > 5);
+          // Las 10 mesas de la fila se reparten en dos rejillas de 5 columnas
+          // (una a cada lado del pasillo) y cada mesa ocupa el ancho de su
+          // celda: así el mapa siempre cabe en el ancho del teléfono en vez de
+          // desbordarse por la derecha (antes cada mesa medía 32px fijos y la
+          // fila completa pedía más ancho del que hay en un móvil).
           return (
-            <div key={fila} className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold text-neutral-400 w-3 shrink-0">{fila}</span>
-              <div className="flex-1 flex justify-end gap-1.5">
+            <div key={fila} className="flex items-center gap-1.5 sm:gap-2">
+              <span className="text-[10px] sm:text-[11px] font-semibold text-neutral-400 w-2.5 sm:w-3 shrink-0">{fila}</span>
+              <div className="flex-1 min-w-0 grid grid-cols-5 gap-1 sm:gap-1.5 justify-items-end">
                 {izquierda.map((m) => (
                   <MesaBoton
                     key={m.id}
@@ -76,8 +81,8 @@ export default function MapaVip({
                   />
                 ))}
               </div>
-              <div className="w-5 shrink-0 border-l border-dashed border-neutral-300 h-8" />
-              <div className="flex-1 flex justify-start gap-1.5">
+              <div className="w-2 sm:w-4 shrink-0 border-l border-dashed border-neutral-300 h-7 sm:h-8" />
+              <div className="flex-1 min-w-0 grid grid-cols-5 gap-1 sm:gap-1.5 justify-items-start">
                 {derecha.map((m) => (
                   <MesaBoton
                     key={m.id}
@@ -88,7 +93,7 @@ export default function MapaVip({
                   />
                 ))}
               </div>
-              <span className="text-[11px] font-semibold text-neutral-400 w-3 shrink-0 text-right">{fila}</span>
+              <span className="hidden sm:block text-[11px] font-semibold text-neutral-400 w-3 shrink-0 text-right">{fila}</span>
             </div>
           );
         })}
@@ -190,7 +195,7 @@ function MesaBoton({
       onClick={onClick}
       disabled={estado === "llena" && !conSeleccion}
       title={`Mesa ${mesa.numero} — ${disponibles} de ${mesa.sillas.length} disponibles`}
-      className={`w-8 h-8 rounded-full text-[10px] font-semibold text-white flex items-center justify-center border-2 shrink-0 transition-transform disabled:cursor-not-allowed ${
+      className={`w-full max-w-9 aspect-square rounded-full text-[10px] sm:text-[11px] font-semibold text-white flex items-center justify-center border-2 transition-transform disabled:cursor-not-allowed ${
         activa ? "border-neutral-900 scale-110" : conSeleccion ? "border-neutral-900" : "border-transparent"
       } ${estado === "llena" ? "opacity-90" : ""}`}
       style={{ backgroundColor: COLOR_MESA[estado] }}
