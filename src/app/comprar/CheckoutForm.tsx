@@ -6,7 +6,7 @@ import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal, MAX_POR_COMPRA, type CotizacionCompra } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
 import { INSTRUCCIONES_PAGO, BINANCE_QR_URL, metodosParaCanal, type MetodoPago } from "@/lib/pagos";
-import { iniciarCheckoutPublico, confirmarCheckoutPublico } from "./actions";
+import { iniciarCheckoutPublico, confirmarCheckoutPublico, liberarHoldPublico } from "./actions";
 
 type Fase = "seleccion" | "pago" | "confirmado";
 
@@ -119,6 +119,7 @@ export default function CheckoutForm({
       sillaIds: tipo === "vip" ? sillas.map((s) => s.id) : undefined,
       cantidad: tipo === "general" ? cantidadGeneral : undefined,
       expiraEnEsperado: expiraEn ?? undefined,
+      tasaMostrada: tasaCompra ?? undefined,
       compradorNombre: nombre,
       compradorTelefono: telefono,
       compradorEmail: email,
@@ -139,6 +140,11 @@ export default function CheckoutForm({
   }
 
   function volverAElegir() {
+    // Suelta el hold de estas sillas para que no queden bloqueadas 15 min
+    // (y para que el mismo comprador pueda volver a elegirlas).
+    if (tipo === "vip" && sillas.length && expiraEn) {
+      void liberarHoldPublico({ sillaIds: sillas.map((s) => s.id), expiraEn });
+    }
     setSillas([]);
     setExpiraEn(null);
     setCotizacion(null);

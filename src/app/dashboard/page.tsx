@@ -1,11 +1,12 @@
-import { redirect } from "next/navigation";
-import { getPerfilActual } from "@/lib/perfil";
+import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { calcularTotal } from "@/lib/precios";
 import Nav from "@/components/Nav";
 import VentasChart from "./VentasChart";
 import AutoRefresh from "./AutoRefresh";
 import Link from "next/link";
+import { seleccionarTodo } from "@/lib/db";
+import { ETAPAS } from "@/lib/precios";
 
 // Sin `revalidate`: esta página lee la sesión (cookies) y por eso Next la
 // trata como dinámica siempre — el "revalidate = 10" de antes no hacía nada y
@@ -25,8 +26,7 @@ const METODOS_ORDEN = ["transferencia", "zelle", "binance", "pago_movil", "efect
 const CANAL_ETIQUETA: Record<string, string> = { web: "Web", manual: "Manual", taquilla: "Taquilla" };
 
 export default async function DashboardPage() {
-  const perfil = await getPerfilActual();
-  if (!perfil) redirect("/login");
+  const perfil = await requerirPerfil();
 
   if (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin") {
     return (
@@ -41,13 +41,16 @@ export default async function DashboardPage() {
 
   const service = createServiceClient();
 
-  const [{ data: tickets }, { data: evento }, { count: sillasVipTotal }] = await Promise.all([
-    service.from("tickets").select("tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa"),
+  type TicketResumen = { tipo: string; precio: number | string; metodo_pago: string; estado_pago: string; created_at: string; canal: string | null; etapa: string | null };
+  const [{ data: tickets, error: ticketsError }, { data: evento }, { count: sillasVipTotal }] = await Promise.all([
+    seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa"),
     service.from("eventos").select("aforo_general_total").limit(1).single(),
     service.from("sillas_vip").select("id", { count: "exact", head: true }),
   ]);
+  if (ticketsError) console.error("Error cargando tickets para el dashboard:", ticketsError);
 
   const todos = tickets ?? [];
+  const cupoPreventa = ETAPAS.find((e) => e.id === "preventa")?.cupo ?? { vip: 0, general: 0 };
   const verificados = todos.filter((t) => t.estado_pago === "verificado");
   const pendientes = todos.filter((t) => t.estado_pago === "pendiente");
 
@@ -156,12 +159,12 @@ export default async function DashboardPage() {
 
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
-            <p className="text-xs text-neutral-500">Preventa (30 VIP · 50 General)</p>
+            <p className="text-xs text-neutral-500">Preventa ({cupoPreventa.vip} VIP · {cupoPreventa.general} General)</p>
             <p className="text-2xl font-semibold">
-              {preventaVip} <span className="text-sm font-normal text-neutral-400">/ 30 VIP</span>
+              {preventaVip} <span className="text-sm font-normal text-neutral-400">/ {cupoPreventa.vip} VIP</span>
             </p>
             <p className="text-sm font-semibold">
-              {preventaGeneral} <span className="text-xs font-normal text-neutral-400">/ 50 General</span>
+              {preventaGeneral} <span className="text-xs font-normal text-neutral-400">/ {cupoPreventa.general} General</span>
             </p>
             <p className="text-[11px] text-neutral-400 mt-1">Incluye pendientes de verificar</p>
           </div>

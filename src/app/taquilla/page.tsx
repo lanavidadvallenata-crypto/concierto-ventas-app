@@ -1,11 +1,11 @@
-import { redirect } from "next/navigation";
-import { getPerfilActual } from "@/lib/perfil";
+import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerMapaVip } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
 import { ETIQUETA_METODO, METODOS_EN_BS, formatoBs, formatoUsd, horaCaracas } from "@/lib/formato";
 import Nav from "@/components/Nav";
 import TaquillaForm from "./TaquillaForm";
+import { taquillaAbierta } from "@/lib/taquilla";
 
 function inicioDelDiaCaracas(): string {
   // Medianoche de hoy en Venezuela (UTC-4), en ISO, para "tus ventas de hoy".
@@ -17,8 +17,7 @@ function inicioDelDiaCaracas(): string {
 }
 
 export default async function TaquillaPage() {
-  const perfil = await getPerfilActual();
-  if (!perfil) redirect("/login");
+  const perfil = await requerirPerfil();
 
   if (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin") {
     return (
@@ -32,6 +31,21 @@ export default async function TaquillaPage() {
   }
 
   const service = createServiceClient();
+  const abierta = await taquillaAbierta(service);
+  if (!abierta && perfil.rol !== "admin") {
+    return (
+      <>
+        <Nav perfil={perfil} />
+        <main className="max-w-3xl mx-auto w-full px-4 py-6">
+          <h1 className="text-lg font-semibold">Taquilla — boletos físicos</h1>
+          <p className="text-sm text-neutral-600 mt-2">
+            La taquilla se habilita el día del evento (4 de diciembre). Las ventas de taquilla quedan verificadas al instante sin
+            pasar por Finanzas, por eso no está abierta antes. Mientras tanto, registra las ventas en <strong>Ventas</strong>.
+          </p>
+        </main>
+      </>
+    );
+  }
   const mesas = await obtenerMapaVip(service);
   const tasaEurVes = await obtenerTasaActual(service);
 

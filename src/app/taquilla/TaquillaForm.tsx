@@ -61,6 +61,7 @@ export default function TaquillaForm({
       cantidad: tipo === "general" ? cantidad : undefined,
       metodoPago,
       precioTotal: precio,
+      precioEditado,
       referenciaPago: referencia,
       boletoFisico: boleto,
     });

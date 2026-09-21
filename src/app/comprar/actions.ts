@@ -9,7 +9,7 @@ import { liberarSillasVencidas } from "@/lib/mapa-vip";
 import { cotizarCompra, MAX_POR_COMPRA, type CotizacionCompra, type DisponibilidadEtapa } from "@/lib/precios";
 import { METODOS_PAGO_ACTIVOS, metodoEsEnBs } from "@/lib/pagos";
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
-import { obtenerTasaActual, convertirABs } from "@/lib/tasa";
+import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
 
 // 15 minutos (antes 10): una transferencia bancaria en Venezuela desde la app
 // del banco, con la clave especial, la verificación y la referencia, se toma
@@ -118,17 +118,42 @@ const confirmarSchema = z.object({
   sillaIds: z.array(z.string().uuid()).max(MAX_POR_COMPRA.vip).optional(),
   cantidad: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   expiraEnEsperado: z.string().optional(),
-  compradorNombre: z.string().min(2),
-  compradorTelefono: z.string().min(7),
-  compradorEmail: z.string().email("Correo inválido — es la única forma de enviarte el QR de entrada."),
+  // Tasa con la que se le mostró el monto en Bs al comprador (viene de iniciar).
+  tasaMostrada: z.coerce.number().positive().optional(),
+  compradorNombre: z.string().trim().min(2, "Escribe tu nombre completo."),
+  compradorTelefono: z.string().trim().min(7, "Escribe un teléfono válido."),
+  compradorEmail: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Correo inválido — es la única forma de enviarte el QR de entrada."),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
-  referenciaPago: z.string().min(3, "Ingresa el número de referencia del pago."),
-  honeypot: z.string().max(0).optional(), // campo invisible: si viene lleno, es un bot
+  referenciaPago: z.string().trim().min(3, "Ingresa el número de referencia del pago."),
+  // Campo invisible anti-bots. Se valida a mano más abajo (si fuera max(0) en
+  // el schema, el bot recibiría un error de validación en vez del éxito falso).
+  honeypot: z.string().optional(),
 });
 
 export type ConfirmarCheckoutResult =
   | { ok: true; avisoEmail?: string; duplicado?: boolean; cantidad: number; total: number }
   | { ok: false; error: string };
+
+// Libera el hold de ESTA compra cuando el comprador vuelve atrás a elegir otras
+// sillas. Solo suelta sillas que sigan reservadas con esa misma hora de
+// vencimiento (no toca sillas que ya tengan ticket o que otro haya tomado).
+export async function liberarHoldPublico(input: unknown): Promise<{ ok: true }> {
+  const parsed = z.object({ sillaIds: z.array(z.string().uuid()).max(MAX_POR_COMPRA.vip), expiraEn: z.string() }).safeParse(input);
+  if (!parsed.success || parsed.data.sillaIds.length === 0) return { ok: true };
+  const service = createServiceClient();
+  await service
+    .from("sillas_vip")
+    .update({ estado: "disponible", reservado_hasta: null })
+    .in("id", parsed.data.sillaIds)
+    .eq("estado", "reservada")
+    .eq("reservado_hasta", parsed.data.expiraEn);
+  revalidatePath("/comprar");
+  return { ok: true };
+}
 
 // Fase 2: el comprador ya pagó y vuelve con la referencia — se crean los
 // tickets pendientes (uno por asistente, todos con el mismo grupo_id) y, si es
@@ -210,16 +235,33 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
 
     await liberarSillasVencidas(service);
 
-    // Todas las sillas del grupo deben seguir con el hold de ESTA compra.
-    const { data: sillasActuales } = await service
+    // Reclamo del hold EN LA BASE, no en JS: el UPDATE solo aplica a las sillas
+    // que siguen reservadas con la hora de vencimiento de ESTA compra, y
+    // Postgres compara timestamps como timestamps. (Antes se comparaba el
+    // texto ISO de JS ("…00.120Z") con el texto que devuelve Postgres
+    // ("…00.12+00:00"): nunca coincidían y TODA compra VIP web fallaba con
+    // "tu tiempo expiró".) Al pasar, reservado_hasta queda en null: la silla
+    // deja de ser un bloqueo temporal y pasa a estar reservada por ticket.
+    const { data: reclamadas, error: reclamoError } = await service
       .from("sillas_vip")
-      .select("id, estado, reservado_hasta")
-      .in("id", sillaIds);
+      .update({ reservado_hasta: null })
+      .in("id", sillaIds)
+      .eq("estado", "reservada")
+      .eq("reservado_hasta", v.expiraEnEsperado)
+      .select("id");
 
-    const vigentes = (sillasActuales ?? []).filter(
-      (s) => s.estado === "reservada" && s.reservado_hasta === v.expiraEnEsperado
-    );
-    if (vigentes.length !== sillaIds.length) {
+    if (reclamoError) {
+      console.error("Error reclamando sillas:", reclamoError.message);
+      return { ok: false, error: "No se pudo confirmar la reserva de tus sillas. Intenta de nuevo." };
+    }
+
+    const idsReclamadas = (reclamadas ?? []).map((s) => s.id as string);
+    if (idsReclamadas.length !== sillaIds.length) {
+      // Alguna se venció o la tomó otra persona: devolvemos las que sí
+      // reclamamos para no dejarlas colgadas y pedimos volver al mapa.
+      if (idsReclamadas.length) {
+        await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", idsReclamadas);
+      }
       return {
         ok: false,
         error: "Tu tiempo para pagar expiró y las sillas se liberaron. Vuelve a elegir tus sillas en el mapa.",
@@ -231,7 +273,13 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   // el precio de cada ticket sale de la etapa vigente en este instante.
   const { cotizacion } = await cotizarCompra(service, v.tipo, cantidad);
   const enBs = metodoEsEnBs(v.metodoPago);
-  const tasa = enBs ? await obtenerTasaActual(service) : null;
+  // La tasa que se usa es la que el comprador VIO al pagar (viene de iniciar),
+  // siempre que sea una tasa real guardada en las últimas 48 h; si no, la
+  // vigente. Así, si la tasa cambia mientras transfiere, no se le cobra otro
+  // monto del que se le indicó.
+  const tasa = enBs ? await tasaParaConfirmar(service, v.tasaMostrada) : null;
+  const totalBs = enBs && tasa ? convertirABs(cotizacion.total, tasa) : null;
+  const bsPorLinea = repartirBs(cotizacion.lineas.map((l) => l.total), totalBs);
 
   const grupoId = randomUUID();
   const filas = cotizacion.lineas.map((linea, i) => ({
@@ -248,7 +296,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     // el monto exacto que se le indicó, con la tasa del momento.
     precio: linea.total,
     moneda: "USD",
-    precio_bs: enBs && tasa ? convertirABs(linea.total, tasa) : null,
+    precio_bs: bsPorLinea[i],
     tasa_aplicada: enBs && tasa ? tasa : null,
     metodo_pago: v.metodoPago,
     referencia_pago: v.referenciaPago,
@@ -262,12 +310,11 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", sillaIds);
     }
     console.error("Error creando tickets públicos:", insertError.message);
+    // 23505 = índice único tickets_silla_viva_uq: alguien más ya tiene ticket en esa silla.
+    if (insertError.code === "23505") {
+      return { ok: false, error: "Una de las sillas ya tiene una compra registrada. Vuelve al mapa y elige otra." };
+    }
     return { ok: false, error: "No se pudo registrar tu compra — intenta de nuevo." };
-  }
-
-  if (v.tipo === "vip" && sillaIds.length) {
-    // Ya no es un bloqueo temporal — a partir de aquí quedan reservadas porque tienen ticket.
-    await service.from("sillas_vip").update({ reservado_hasta: null }).in("id", sillaIds);
   }
 
   revalidatePath("/comprar");
@@ -283,7 +330,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       cantidad,
       tipo: v.tipo,
       totalUsd: cotizacion.total,
-      totalBs: enBs && tasa ? convertirABs(cotizacion.total, tasa) : null,
+      totalBs,
       referencia: v.referenciaPago,
     });
   } catch (e) {

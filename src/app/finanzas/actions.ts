@@ -348,14 +348,19 @@ export async function buscarTickets(consulta: string): Promise<{ ok: true; ticke
   const q = consulta.trim();
   if (q.length < 3) return { ok: false, error: "Escribe al menos 3 letras o números." };
 
+  // El valor va entre comillas dobles dentro del árbol lógico de PostgREST:
+  // sin ellas, una coma o un paréntesis en la búsqueda ("Pérez, Juan",
+  // "0041(2)") rompe el filtro con "failed to parse logic tree". Se escapan
+  // comodines de ilike y las comillas/backslash del valor.
   const patron = `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+  const valor = `"${patron.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
   const service = createServiceClient();
   const { data, error: dbError } = await service
     .from("tickets")
     .select("id, grupo_id, comprador_nombre, comprador_email, comprador_telefono, tipo, precio, precio_bs, metodo_pago, referencia_pago, estado_pago, canal, created_at, qr_enviado_en, qr_usado")
     .or(
-      `comprador_nombre.ilike.${patron},comprador_email.ilike.${patron},comprador_telefono.ilike.${patron},referencia_pago.ilike.${patron}`
+      `comprador_nombre.ilike.${valor},comprador_email.ilike.${valor},comprador_telefono.ilike.${valor},referencia_pago.ilike.${valor}`
     )
     .order("created_at", { ascending: false })
     .limit(60);

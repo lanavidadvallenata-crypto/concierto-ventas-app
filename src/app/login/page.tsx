@@ -37,8 +37,17 @@ function LoginForm() {
     }
     // Solo rutas internas: ?next= viene de la URL y sin esto se podía usar
     // para mandar a alguien del equipo a un sitio externo después de loguearse.
-    const next = params.get("next") ?? "";
-    const destino = next.startsWith("/") && !next.startsWith("//") ? next : "/ventas";
+    // Solo rutas internas. Se resuelve contra el origen actual: "/\\evil.com" o
+    // "//evil.com" terminan en otro dominio y se descartan.
+    let destino = "/ventas";
+    try {
+      const u = new URL(params.get("next") ?? "", window.location.origin);
+      if (u.origin === window.location.origin && u.pathname.startsWith("/") && u.pathname !== "/login") {
+        destino = u.pathname + u.search;
+      }
+    } catch {
+      destino = "/ventas";
+    }
     router.push(destino);
     router.refresh();
   }

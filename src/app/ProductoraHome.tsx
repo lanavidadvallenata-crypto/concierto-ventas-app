@@ -6,7 +6,7 @@ type Evento = { nombre: string; fecha: string | null; venue: string; ciudad: str
 
 export function ProductoraHome({ evento, desdePreventa }: { evento: Evento; desdePreventa?: number | null }) {
   const fechaFormateada = evento?.fecha
-    ? new Date(evento.fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric" })
+    ? new Date(evento.fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
     : null;
   const regular = calcularTotal("general").base;
   const desde = evento ? (desdePreventa ?? regular) : null;

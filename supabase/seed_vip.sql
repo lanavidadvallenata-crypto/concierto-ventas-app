@@ -7,6 +7,8 @@
 --
 -- IMPORTANTE: este script reemplaza mesas_vip y sillas_vip desde cero.
 -- Solo córrelo si esas tablas todavía están vacías (no has vendido nada).
+-- El `drop … cascade` también borra la FK tickets.silla_id → sillas_vip:
+-- después de correrlo hay que correr reparar_fk_tickets_sillas.sql.
 -- Corre esto completo UNA sola vez en el SQL Editor de Supabase,
 -- después de schema.sql.
 -- =========================================================
@@ -28,6 +30,8 @@ create table public.sillas_vip (
   mesa_id uuid not null references public.mesas_vip(id) on delete cascade,
   numero int not null,
   estado text not null default 'disponible' check (estado in ('disponible', 'reservada', 'vendida')),
+  -- Bloqueo temporal mientras el comprador web paga (ver agregar_bloqueo_temporal.sql).
+  reservado_hasta timestamptz,
   unique (mesa_id, numero)
 );
 

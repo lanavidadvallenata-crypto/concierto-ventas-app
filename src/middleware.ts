@@ -82,6 +82,8 @@ export async function middleware(request: NextRequest) {
   }
 
   if (path === "/login" && user) {
+    // Con sesión, /login manda a /ventas. Si la cuenta no tiene perfil activo,
+    // /ventas la manda a /sin-acceso (ruta pública) — sin bucle.
     const url = request.nextUrl.clone();
     url.pathname = "/ventas";
     url.search = "";

@@ -36,6 +36,7 @@ export default async function ValidarAccesoPage({
     .update({ qr_usado: true, qr_usado_en: new Date().toISOString(), qr_usado_por: perfil.id })
     .eq("qr_token", token)
     .eq("qr_usado", false)
+    .eq("estado_pago", "verificado")
     .select("id, comprador_nombre, tipo, silla_id")
     .maybeSingle();
 
@@ -92,11 +93,15 @@ export default async function ValidarAccesoPage({
       : null;
 
     if (usadoHaceMs < 90_000) {
+      // Casi seguro es la misma pantalla recargada — pero también podría ser
+      // un segundo teléfono con la captura del QR en otro carril. Se muestra
+      // en ÁMBAR (no verde) con la hora, y se registra el intento igual.
+      await service.from("accesos").insert({ ticket_id: existente.id, resultado: "ya_usado", escaneado_por: perfil.id });
       return (
         <Resultado
-          color="green"
-          titulo="VÁLIDO"
-          detalle={`${existente.comprador_nombre} — validado hace ${Math.round(usadoHaceMs / 1000)} s (pantalla recargada)`}
+          color="amber"
+          titulo="YA VALIDADO"
+          detalle={`${existente.comprador_nombre} — entró hace ${Math.round(usadoHaceMs / 1000)} s. Si es la misma persona (pantalla recargada), pasa. Si es otra, NO.`}
         />
       );
     }
@@ -124,8 +129,8 @@ function milisegundosDesde(iso: string | null): number {
   return Date.now() - new Date(iso).getTime();
 }
 
-function Resultado({ color, titulo, detalle }: { color: "green" | "red"; titulo: string; detalle: string }) {
-  const bg = color === "green" ? "bg-green-600" : "bg-red-600";
+function Resultado({ color, titulo, detalle }: { color: "green" | "red" | "amber"; titulo: string; detalle: string }) {
+  const bg = color === "green" ? "bg-green-600" : color === "amber" ? "bg-amber-500" : "bg-red-600";
   return (
     <main className={`min-h-screen flex flex-col items-center justify-center ${bg} text-white px-6 text-center gap-3`}>
       <h1 className="text-4xl font-bold">{titulo}</h1>

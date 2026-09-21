@@ -1,5 +1,4 @@
-import { redirect } from "next/navigation";
-import { getPerfilActual } from "@/lib/perfil";
+import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerTasaActual } from "@/lib/tasa";
 import Nav from "@/components/Nav";
@@ -7,10 +6,10 @@ import PendientesList, { type CompraPendiente } from "./PendientesList";
 import TasaCambio from "./TasaCambio";
 import BuscarComprador from "./BuscarComprador";
 import AutoRefresh from "@/app/dashboard/AutoRefresh";
+import { seleccionarTodo } from "@/lib/db";
 
 export default async function FinanzasPage() {
-  const perfil = await getPerfilActual();
-  if (!perfil) redirect("/login");
+  const perfil = await requerirPerfil();
 
   if (perfil.rol !== "finanzas" && perfil.rol !== "admin") {
     return (
@@ -26,11 +25,17 @@ export default async function FinanzasPage() {
   const service = createServiceClient();
 
   // Consulta simple, sin relaciones embebidas (ver src/lib/asiento.ts).
-  const { data: pendientes, error: ticketsError } = await service
-    .from("tickets")
-    .select("id, grupo_id, comprador_nombre, comprador_telefono, comprador_email, tipo, precio, precio_bs, tasa_aplicada, etapa, canal, metodo_pago, referencia_pago, vendido_por, silla_id, created_at")
-    .eq("estado_pago", "pendiente")
-    .order("created_at", { ascending: true });
+  type TicketPendiente = {
+    id: string; grupo_id: string | null; comprador_nombre: string; comprador_telefono: string; comprador_email: string | null;
+    tipo: string; precio: number | string; precio_bs: number | string | null; tasa_aplicada: number | string | null; etapa: string | null;
+    canal: string | null; metodo_pago: string; referencia_pago: string | null; vendido_por: string | null; silla_id: string | null; created_at: string;
+  };
+  const { data: pendientes, error: ticketsError } = await seleccionarTodo<TicketPendiente>(
+    service,
+    "tickets",
+    "id, grupo_id, comprador_nombre, comprador_telefono, comprador_email, tipo, precio, precio_bs, tasa_aplicada, etapa, canal, metodo_pago, referencia_pago, vendido_por, silla_id, created_at",
+    (q) => q.eq("estado_pago", "pendiente").order("created_at", { ascending: true })
+  );
 
   if (ticketsError) {
     console.error("Error cargando pagos pendientes:", ticketsError);

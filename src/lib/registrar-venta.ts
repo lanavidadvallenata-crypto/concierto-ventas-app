@@ -1,8 +1,8 @@
 import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { cotizarCompra, MAX_POR_COMPRA, type Tipo } from "@/lib/precios";
+import { cotizarCompra, cotizar, disponibilidadEtapas, MAX_POR_COMPRA, type Etapa, type Tipo } from "@/lib/precios";
 import { metodoEsEnBs, type Canal, type MetodoPago } from "@/lib/pagos";
-import { obtenerTasaActual, convertirABs } from "@/lib/tasa";
+import { obtenerTasaActual, convertirABs, repartirBs } from "@/lib/tasa";
 
 export type DatosVentaInterna = {
   tipo: Tipo;
@@ -15,10 +15,15 @@ export type DatosVentaInterna = {
   referenciaPago: string | null;
   // Precio TOTAL de la compra si el vendedor lo editó (negoció). null = el de la etapa.
   precioTotalManual: number | null;
+  // Taquilla vende siempre a precio regular (no consume preventa).
+  etapaForzada?: Etapa;
   vendidoPor: string;
   canal: Canal;
   // Taquilla: queda verificada de una (el vendedor tiene el dinero en la mano).
   verificarDeInmediato: boolean;
+  // Piso de precio negociado como fracción del cotizado (ej. 0.5 = no menos
+  // del 50 %). undefined = sin piso (admin).
+  pisoPrecio?: number;
 };
 
 export type ResultadoVentaInterna =
@@ -68,12 +73,24 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
     }
   }
 
-  const { cotizacion } = await cotizarCompra(service, d.tipo, cantidad);
+  const cotizacion = d.etapaForzada
+    ? cotizar(
+        (await disponibilidadEtapas(service, d.tipo)).filter((x) => x.etapa === d.etapaForzada).map((x) => ({ ...x, restante: null })),
+        cantidad
+      )
+    : (await cotizarCompra(service, d.tipo, cantidad)).cotizacion;
 
   // Precio negociado: se reparte proporcionalmente entre los tickets para que
   // la suma dé exacto el total que cobró el vendedor.
   let preciosPorTicket = cotizacion.lineas.map((l) => l.total);
   if (d.precioTotalManual != null && d.precioTotalManual > 0 && Math.abs(d.precioTotalManual - cotizacion.total) > 0.005) {
+    if (d.pisoPrecio != null && d.precioTotalManual < cotizacion.total * d.pisoPrecio) {
+      if (sillaIds.length) await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", sillaIds);
+      return {
+        ok: false,
+        error: `El precio no puede ser menor al ${Math.round(d.pisoPrecio * 100)} % del precio de lista ($${cotizacion.total.toFixed(2)}). Un admin puede registrar descuentos mayores.`,
+      };
+    }
     const factor = d.precioTotalManual / cotizacion.total;
     preciosPorTicket = cotizacion.lineas.map((l) => Math.round(l.total * factor * 100) / 100);
     const suma = preciosPorTicket.reduce((s, p) => s + p, 0);
@@ -83,6 +100,8 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
 
   const enBs = metodoEsEnBs(d.metodoPago);
   const tasa = enBs ? await obtenerTasaActual(service) : null;
+  const totalBs = enBs && tasa ? convertirABs(total, tasa) : null;
+  const bsPorTicket = repartirBs(preciosPorTicket, totalBs);
 
   const grupoId = randomUUID();
   const ahora = new Date().toISOString();
@@ -98,7 +117,7 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
     comprador_email: d.compradorEmail,
     precio: preciosPorTicket[i],
     moneda: "USD",
-    precio_bs: enBs && tasa ? convertirABs(preciosPorTicket[i], tasa) : null,
+    precio_bs: bsPorTicket[i],
     tasa_aplicada: enBs && tasa ? tasa : null,
     metodo_pago: d.metodoPago,
     referencia_pago: d.referenciaPago,
@@ -113,6 +132,9 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
   if (insertError || !insertados) {
     if (sillaIds.length) await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", sillaIds);
     console.error("Error registrando venta interna:", insertError?.message);
+    if (insertError?.code === "23505") {
+      return { ok: false, error: "Una de las sillas ya tiene una compra registrada por otra persona. Elige otra." };
+    }
     return { ok: false, error: `No se pudo registrar la venta (${insertError?.message ?? "error"}) — intenta de nuevo.` };
   }
 
@@ -126,6 +148,6 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
     ticketIds: insertados.map((t) => t.id as string),
     cantidad,
     total,
-    totalBs: enBs && tasa ? convertirABs(total, tasa) : null,
+    totalBs,
   };
 }

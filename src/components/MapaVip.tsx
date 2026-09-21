@@ -142,7 +142,7 @@ export default function MapaVip({
             >
               {cabenMasEnMesaActiva === mesaActiva.sillas.length
                 ? `Elegir la mesa completa (${cabenMasEnMesaActiva} sillas)`
-                : `Elegir las ${cabenMasEnMesaActiva} sillas disponibles`}
+                : `Agregar las otras ${cabenMasEnMesaActiva} sillas`}
             </button>
           )}
           <div className="grid grid-cols-5 gap-1.5">

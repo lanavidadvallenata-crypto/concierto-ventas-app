@@ -13,12 +13,15 @@ const ventaSchema = z.object({
   tipo: z.enum(["vip", "general"]),
   sillaIds: z.string().optional(), // JSON array de uuids (VIP)
   cantidadGeneral: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
-  compradorNombre: z.string().min(2),
-  compradorTelefono: z.string().min(7),
-  compradorEmail: z.string().email("Correo inválido — es la única forma de enviar el QR de entrada."),
+  compradorNombre: z.string().trim().min(2, "Escribe el nombre del comprador."),
+  compradorTelefono: z.string().trim().min(7, "Escribe un teléfono válido."),
+  compradorEmail: z.string().trim().toLowerCase().email("Correo inválido — es la única forma de enviar el QR de entrada."),
   precio: z.coerce.number().positive(),
+  // "1" solo si el vendedor editó el precio a mano; si no, se usa la
+  // cotización del servidor (el precio en pantalla puede estar desactualizado).
+  precioEditado: z.string().optional(),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
-  referenciaPago: z.string().optional(),
+  referenciaPago: z.string().trim().optional(),
 });
 
 export type RegistrarVentaResult = { ok: true; avisoEmail?: string; cantidad: number; total: number } | { ok: false; error: string };
@@ -63,6 +66,8 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
   }
 
   const service = createServiceClient();
+  const { data: perfil } = await service.from("perfiles").select("rol").eq("id", user.id).maybeSingle();
+  const esAdmin = perfil?.rol === "admin";
   const res = await registrarVentaInterna(service, {
     tipo: v.tipo,
     sillaIds,
@@ -72,7 +77,9 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
     compradorEmail: v.compradorEmail,
     metodoPago: v.metodoPago,
     referenciaPago: v.referenciaPago || null,
-    precioTotalManual: v.precio,
+    precioTotalManual: v.precioEditado === "1" ? v.precio : null,
+    // Ventas/finanzas pueden negociar hasta 30 % de descuento; admin sin tope.
+    pisoPrecio: esAdmin ? undefined : 0.7,
     vendidoPor: user.id,
     canal: "manual",
     verificarDeInmediato: false,

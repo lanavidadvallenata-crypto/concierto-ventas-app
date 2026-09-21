@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { actualizarTasaManual } from "./actions";
 
 export default function TasaCambio({ tasaActual }: { tasaActual: number | null }) {
   const [valor, setValor] = useState("");
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
+  const router = useRouter();
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -21,6 +23,7 @@ export default function TasaCambio({ tasaActual }: { tasaActual: number | null }
     }
     setMensaje({ tipo: "ok", texto: "Tasa actualizada — ya se usa en la página de compra y en Ventas." });
     setValor("");
+    router.refresh();
   }
 
   return (

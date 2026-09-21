@@ -102,12 +102,17 @@ export async function cambiarActivo(perfilId: string, activo: boolean): Promise<
     return { ok: false, error: "No puedes desactivar tu propia cuenta." };
   }
 
-  const { error: errorUpdate } = await createServiceClient()
-    .from("perfiles")
-    .update({ activo })
-    .eq("id", perfilId);
+  const service = createServiceClient();
+  const { error: errorUpdate } = await service.from("perfiles").update({ activo }).eq("id", perfilId);
 
   if (errorUpdate) return { ok: false, error: "No se pudo actualizar la cuenta." };
+
+  if (!activo) {
+    // Cierra todas las sesiones abiertas de esa persona (teléfono, laptop):
+    // desactivar debe sacarla del sistema de inmediato, no cuando expire.
+    const { error: errorSignOut } = await service.auth.admin.signOut(perfilId, "global");
+    if (errorSignOut) console.error("No se pudieron cerrar las sesiones de la cuenta desactivada:", errorSignOut.message);
+  }
 
   revalidatePath("/admin");
   return { ok: true };

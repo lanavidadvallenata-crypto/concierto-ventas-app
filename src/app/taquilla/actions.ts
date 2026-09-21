@@ -7,6 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { MAX_POR_COMPRA } from "@/lib/precios";
 import { metodosParaCanal } from "@/lib/pagos";
 import { registrarVentaInterna } from "@/lib/registrar-venta";
+import { taquillaAbierta } from "@/lib/taquilla";
 
 const taquillaSchema = z.object({
   tipo: z.enum(["vip", "general"]),
@@ -14,7 +15,8 @@ const taquillaSchema = z.object({
   cantidad: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
   precioTotal: z.coerce.number().positive(),
-  referenciaPago: z.string().optional(),
+  precioEditado: z.boolean().optional(),
+  referenciaPago: z.string().trim().optional(),
   // Opcional: número(s) del talonario físico entregado, para cuadrar caja.
   boletoFisico: z.string().optional(),
 });
@@ -24,14 +26,24 @@ export type VentaTaquillaResult = { ok: true; cantidad: number; total: number; t
 async function requiereTaquilla() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { user: null, error: "Tu sesión expiró — vuelve a entrar." };
+  if (!user) return { user: null, rol: null, error: "Tu sesión expiró — vuelve a entrar." };
 
   const service = createServiceClient();
   const { data: perfil } = await service.from("perfiles").select("rol, activo, nombre").eq("id", user.id).maybeSingle();
   if (!perfil || !perfil.activo || (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin")) {
-    return { user: null, error: "No tienes permiso para vender en taquilla." };
+    return { user: null, rol: null, error: "No tienes permiso para vender en taquilla." };
   }
-  return { user, error: null };
+
+  // Taquilla verifica sin segunda persona (el vendedor tiene el dinero en la
+  // mano), así que solo se habilita el día del evento. Admin puede usarla
+  // antes para probar.
+  if (perfil.rol !== "admin") {
+    const abierta = await taquillaAbierta(service);
+    if (!abierta) {
+      return { user: null, rol: null, error: "La taquilla se habilita el día del evento. Hasta entonces, registra la venta en Ventas para que Finanzas la verifique." };
+    }
+  }
+  return { user, rol: perfil.rol as string, error: null };
 }
 
 // Venta de boleto físico el día del evento: queda VERIFICADA al instante
@@ -39,7 +51,7 @@ async function requiereTaquilla() {
 // la puerta es el talonario). Se registra quién vendió, cuánto, en qué
 // método y a qué hora, para el arqueo de caja.
 export async function registrarVentaTaquilla(input: unknown): Promise<VentaTaquillaResult> {
-  const { user, error: authError } = await requiereTaquilla();
+  const { user, rol, error: authError } = await requiereTaquilla();
   if (!user) return { ok: false, error: authError! };
 
   const parsed = taquillaSchema.safeParse(input);
@@ -64,7 +76,11 @@ export async function registrarVentaTaquilla(input: unknown): Promise<VentaTaqui
     compradorEmail: null,
     metodoPago: v.metodoPago,
     referenciaPago: referencia || null,
-    precioTotalManual: v.precioTotal,
+    precioTotalManual: v.precioEditado ? v.precioTotal : null,
+    // Taquilla = precio regular siempre (no consume cupo de preventa).
+    etapaForzada: "regular",
+    // Descuento en puerta: hasta 30 % salvo admin.
+    pisoPrecio: rol === "admin" ? undefined : 0.7,
     vendidoPor: user.id,
     canal: "taquilla",
     verificarDeInmediato: true,

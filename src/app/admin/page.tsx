@@ -1,13 +1,11 @@
-import { redirect } from "next/navigation";
-import { getPerfilActual, type Rol } from "@/lib/perfil";
+import { requerirPerfil, type Rol } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import Nav from "@/components/Nav";
 import PerfilesList from "./PerfilesList";
 import CrearCuentaForm from "./CrearCuentaForm";
 
 export default async function AdminPage() {
-  const perfil = await getPerfilActual();
-  if (!perfil) redirect("/login");
+  const perfil = await requerirPerfil();
 
   if (perfil.rol !== "admin") {
     return (

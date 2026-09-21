@@ -20,7 +20,7 @@ export function HeroEvento({
   ciudad: string;
 }) {
   const fechaFormateada = fecha
-    ? new Date(fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric" })
+    ? new Date(fecha).toLocaleDateString("es-VE", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
     : null;
 
   if (FLYER_HERO_URL) {

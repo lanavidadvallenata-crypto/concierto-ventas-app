@@ -97,6 +97,7 @@ export default function VentaForm({
       </div>
       <input type="hidden" name="tipo" value={tipo} />
       <input type="hidden" name="sillaIds" value={JSON.stringify(sillas.map((s) => s.id))} />
+      <input type="hidden" name="precioEditado" value={precioEditado ? "1" : "0"} />
 
       {tipo === "vip" ? (
         <div>

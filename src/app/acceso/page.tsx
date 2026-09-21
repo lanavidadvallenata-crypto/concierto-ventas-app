@@ -1,11 +1,9 @@
-import { redirect } from "next/navigation";
-import { getPerfilActual } from "@/lib/perfil";
+import { requerirPerfil } from "@/lib/perfil";
 import Nav from "@/components/Nav";
 import EntradaManual from "./EntradaManual";
 
 export default async function AccesoPage() {
-  const perfil = await getPerfilActual();
-  if (!perfil) redirect("/login");
+  const perfil = await requerirPerfil();
 
   if (perfil.rol !== "acceso" && perfil.rol !== "admin") {
     return (

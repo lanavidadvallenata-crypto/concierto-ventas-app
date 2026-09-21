@@ -160,12 +160,13 @@ export async function enviarCorreoPendiente(params: {
     </tr>
   `);
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: remitente(),
     to: params.destinatario,
     subject: "Recibimos tu compra — La Navidad Vallenata",
     html,
   });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
 
 export type EntradaQR = {
@@ -261,13 +262,14 @@ export async function enviarCorreoQR(params: {
     </tr>
   `);
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: remitente(),
     to: params.destinatario,
     subject: entradas.length > 1 ? `Tus ${entradas.length} entradas — La Navidad Vallenata` : "Tu entrada — La Navidad Vallenata",
     html,
     attachments,
   });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
 
 // Pago rechazado (pedido del equipo, 19 sep): se le dice al comprador qué
@@ -329,10 +331,11 @@ export async function enviarCorreoRechazo(params: {
     </tr>
   `);
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: remitente(),
     to: params.destinatario,
     subject: "No pudimos confirmar tu pago — La Navidad Vallenata",
     html,
   });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }

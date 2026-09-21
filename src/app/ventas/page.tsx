@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getPerfilActual } from "@/lib/perfil";
+import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerMapaVip } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
@@ -8,8 +8,11 @@ import Nav from "@/components/Nav";
 import VentaForm from "./VentaForm";
 
 export default async function VentasPage() {
-  const perfil = await getPerfilActual();
-  if (!perfil) redirect("/login");
+  const perfil = await requerirPerfil();
+
+  // El login manda a /ventas a todo el mundo; al personal de puerta lo
+  // llevamos a su pantalla en vez de mostrarle "sin permiso".
+  if (perfil.rol === "acceso") redirect("/acceso");
 
   if (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin") {
     return (
