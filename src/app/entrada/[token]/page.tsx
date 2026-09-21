@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
+import { codigoEntrada } from "@/lib/qr";
 
 // Página pública de UNA entrada: el mismo QR que va en el correo, abierto
 // desde un enlace que el comprador puede mandar por WhatsApp a cada invitado.
@@ -105,6 +106,12 @@ export default async function EntradaPublicaPage({ params }: { params: Promise<{
             </p>
           )}
 
+          {codigoEntrada(token) ? (
+            <p className="text-xs text-neutral-500 text-center">
+              Si el QR no escanea, di este código en la puerta:
+              <span className="block font-mono text-lg font-bold tracking-[0.15em] text-neutral-800 mt-0.5">{codigoEntrada(token)}</span>
+            </p>
+          ) : null}
           <p className="text-xs text-neutral-500 text-center">A nombre de <strong className="text-neutral-700">{ticket.comprador_nombre}</strong></p>
         </div>
 

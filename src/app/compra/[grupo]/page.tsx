@@ -5,6 +5,7 @@ import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import { codigoCompra } from "@/lib/compra";
+import { codigoEntrada } from "@/lib/qr";
 
 // "Mis entradas": todas las entradas de UNA compra, con un botón de WhatsApp
 // por entrada para mandarle a cada invitado la suya (enlace /entrada/<token>).
@@ -73,6 +74,7 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
         tipo: t.tipo,
         detalle: t.tipo === "vip" ? describirAsiento("vip", asiento) : "Acceso general · sin asiento asignado",
         usada: t.qr_usado,
+        codigo: codigoEntrada(t.qr_token),
         urlEntrada,
         urlWhatsApp: `https://wa.me/?text=${encodeURIComponent(texto)}`,
         qr,
@@ -121,6 +123,7 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
                 <p className="font-bold text-[#3D0507] leading-tight">{f.tipo === "vip" ? "Entrada VIP" : "Entrada General"}</p>
                 <p className="text-sm text-neutral-600 leading-snug">{f.detalle}</p>
                 <p className={`text-xs mt-1 ${f.usada ? "text-red-700" : "text-green-800"}`}>{f.usada ? "Ya ingresó" : "Válida · sin usar"}</p>
+                {f.codigo ? <p className="text-[11px] text-neutral-500">Código <span className="font-mono font-semibold text-neutral-700 tracking-wider">{f.codigo}</span></p> : null}
               </div>
             </div>
             {!f.usada ? (

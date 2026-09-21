@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { urlWhatsAppSoporte, WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import { codigoCompra } from "@/lib/compra";
+import { codigoEntrada } from "@/lib/qr";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
@@ -245,6 +246,7 @@ export async function enviarCorreoQR(params: {
           <tr>
             <td style="padding:16px;">
               <img src="cid:${cid}" width="220" height="220" alt="Código QR de entrada ${i + 1}" style="display:block;width:220px;height:220px;border:0;">
+              ${codigoEntrada(e.qrToken) ? `<p style="margin:10px 0 0;text-align:center;font-size:11px;color:#8A8782;">Si el QR no escanea, di este código en la puerta:<br><span style="font-family:Menlo,Consolas,monospace;font-size:17px;font-weight:700;letter-spacing:2px;color:#303030;">${codigoEntrada(e.qrToken)}</span></p>` : ""}
             </td>
           </tr>
         </table>
