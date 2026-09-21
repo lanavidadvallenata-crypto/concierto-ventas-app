@@ -101,6 +101,7 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
       totalUsd: res.total,
       totalBs: res.totalBs,
       referencia: v.referenciaPago || null,
+      grupoId: res.grupoId,
     });
   } catch {
     avisoEmail = "La venta quedó registrada, pero el correo de bienvenida no se pudo enviar — avísale al comprador por WhatsApp que su pago está en verificación.";

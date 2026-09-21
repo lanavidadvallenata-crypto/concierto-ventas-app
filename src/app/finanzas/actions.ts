@@ -221,6 +221,7 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
       totalBs: totalBs == null ? null : Math.round(totalBs * 100) / 100,
       referencia: primero.referencia_pago,
       metodoEtiqueta: ETIQUETA_METODO[primero.metodo_pago] ?? primero.metodo_pago,
+      grupoId: primero.grupo_id ?? primero.id,
     });
   } catch (e) {
     console.error("Error enviando correo de rechazo:", (e as Error).message);

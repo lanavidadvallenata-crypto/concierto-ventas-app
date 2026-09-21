@@ -123,8 +123,11 @@ export async function enviarCorreoPendiente(params: {
   totalUsd?: number;
   totalBs?: number | null;
   referencia?: string | null;
+  // grupo_id de la compra: asunto único + cabecera anti-agrupación (ver codigoCompra).
+  grupoId?: string;
 }) {
   const resend = clienteResend("el correo de bienvenida");
+  const codigo = params.grupoId ? codigoCompra(params.grupoId) : null;
   const nombre = escapeHtml(params.nombreComprador);
   const cantidad = params.cantidad ?? 1;
   const detalle =
@@ -163,8 +166,9 @@ export async function enviarCorreoPendiente(params: {
   const { error } = await resend.emails.send({
     from: remitente(),
     to: params.destinatario,
-    subject: "Recibimos tu compra — La Navidad Vallenata",
+    subject: codigo ? `Recibimos tu compra ${codigo} — La Navidad Vallenata` : "Recibimos tu compra — La Navidad Vallenata",
     html,
+    ...(params.grupoId ? { headers: { "X-Entity-Ref-ID": params.grupoId } } : {}),
   });
   if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
@@ -320,8 +324,10 @@ export async function enviarCorreoRechazo(params: {
   totalBs: number | null;
   referencia: string | null;
   metodoEtiqueta: string;
+  grupoId?: string;
 }) {
   const resend = clienteResend("el correo de pago rechazado");
+  const codigo = params.grupoId ? codigoCompra(params.grupoId) : null;
   const nombre = escapeHtml(params.nombreComprador);
   const ref = params.referencia ? escapeHtml(params.referencia) : "sin referencia";
   const mensajeWa = `Hola, soy ${params.nombreComprador}. Mi pago de ${fmtUsd(params.totalUsd)}${
@@ -369,8 +375,9 @@ export async function enviarCorreoRechazo(params: {
   const { error } = await resend.emails.send({
     from: remitente(),
     to: params.destinatario,
-    subject: "No pudimos confirmar tu pago — La Navidad Vallenata",
+    subject: codigo ? `No pudimos confirmar tu pago · compra ${codigo} — La Navidad Vallenata` : "No pudimos confirmar tu pago — La Navidad Vallenata",
     html,
+    ...(params.grupoId ? { headers: { "X-Entity-Ref-ID": params.grupoId } } : {}),
   });
   if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }

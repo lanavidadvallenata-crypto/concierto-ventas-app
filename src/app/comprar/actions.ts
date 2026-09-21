@@ -332,6 +332,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       totalUsd: cotizacion.total,
       totalBs,
       referencia: v.referenciaPago,
+      grupoId,
     });
   } catch (e) {
     console.error("Error enviando correo de compra recibida:", (e as Error).message);
