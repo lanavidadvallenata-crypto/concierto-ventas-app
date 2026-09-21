@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import QRCode from "qrcode";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { urlWhatsAppSoporte, WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
+import { codigoCompra } from "@/lib/compra";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
@@ -101,8 +102,14 @@ function envolverCorreo(contenido: string) {
   `;
 }
 
+// Remitente con nombre real y dirección que no diga "no-responder": los
+// filtros de Gmail tratan "no-reply" como señal de correo masivo. Las
+// respuestas van al correo del equipo (RESEND_REPLY_TO).
 function remitente() {
-  return `La Navidad Vallenata <${process.env.RESEND_FROM_EMAIL || "no-responder@lanavidadvallenata.com"}>`;
+  return `La Navidad Vallenata <${process.env.RESEND_FROM_EMAIL || "entradas@lanavidadvallenata.com"}>`;
+}
+function respuestasA() {
+  return process.env.RESEND_REPLY_TO || "lanavidadvallenata@gmail.com";
 }
 
 function clienteResend(motivo: string) {
@@ -165,6 +172,7 @@ export async function enviarCorreoPendiente(params: {
 
   const { error } = await resend.emails.send({
     from: remitente(),
+    replyTo: respuestasA(),
     to: params.destinatario,
     subject: codigo ? `Recibimos tu compra ${codigo} — La Navidad Vallenata` : "Recibimos tu compra — La Navidad Vallenata",
     html,
@@ -192,16 +200,6 @@ function describirEntrada(e: EntradaQR) {
 // Un correo con TODAS las entradas de la compra: un bloque + un QR por
 // asistente. El comprador reenvía cada QR a su invitado; en la puerta cada
 // uno entra por separado.
-// Código corto y legible de la compra (los 8 primeros caracteres del
-// grupo_id). Va en el asunto para que Gmail NO apile en una misma
-// conversación dos compras distintas del mismo comprador (mismo asunto +
-// mismo remitente = mismo hilo, y el correo viejo queda colapsado: "me
-// desaparecieron las primeras entradas"). Un reenvío de la MISMA compra sí
-// se agrupa con el original, que es lo deseable.
-export function codigoCompra(grupoId: string) {
-  return grupoId.replace(/-/g, "").slice(0, 8).toUpperCase();
-}
-
 export async function enviarCorreoQR(params: {
   destinatario: string;
   nombreComprador: string;
@@ -214,6 +212,7 @@ export async function enviarCorreoQR(params: {
   const entradas = params.entradas;
   if (entradas.length === 0) throw new Error("Sin entradas para enviar");
   const codigo = codigoCompra(params.grupoId);
+  const urlCompra = `${SITE_URL}/compra/${params.grupoId}`;
 
   const attachments: { filename: string; content: string; contentId: string }[] = [];
   const bloques: string[] = [];
@@ -226,10 +225,6 @@ export async function enviarCorreoQR(params: {
     attachments.push({ filename: `entrada-${i + 1}-qr.png`, content: qrDataUrl.split(",")[1], contentId: cid });
 
     const etiquetaTipo = e.tipo === "vip" ? "Entrada VIP" : "Acceso general · sin asiento asignado";
-    // Enlace público de ESTA entrada (misma información que el QR): sirve
-    // aunque el cliente de correo no muestre imágenes, y es lo que el
-    // comprador le manda por WhatsApp a cada invitado.
-    const urlEntrada = `${SITE_URL}/entrada/${e.qrToken}`;
     bloques.push(`
     <tr>
       <td style="padding:${i === 0 ? 16 : 8}px 28px 8px;">
@@ -254,20 +249,6 @@ export async function enviarCorreoQR(params: {
           </tr>
         </table>
       </td>
-    </tr>
-    <tr>
-      <td align="center" style="padding:0 28px ${i === entradas.length - 1 ? 8 : 20}px;">
-        <table role="presentation" cellpadding="0" cellspacing="0">
-          <tr>
-            <td align="center" style="background-color:#3D0507;border-radius:8px;">
-              <a href="${urlEntrada}" style="display:inline-block;padding:12px 22px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#FFFFFF;text-decoration:none;">${
-                entradas.length > 1 ? `Ver / enviar la entrada ${i + 1}` : "Ver / enviar mi entrada"
-              }</a>
-            </td>
-          </tr>
-        </table>
-        <p style="margin:8px 0 0;font-size:11.5px;line-height:1.5;color:#8A8782;">Este enlace abre el mismo QR en cualquier teléfono. Si no ves la imagen arriba, úsalo.<br><a href="${urlEntrada}" style="color:#680F15;word-break:break-all;">${urlEntrada}</a></p>
-      </td>
     </tr>`);
   }
 
@@ -276,12 +257,30 @@ export async function enviarCorreoQR(params: {
       <td style="padding:28px 28px 8px;">
         <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, ${
           entradas.length > 1
-            ? `aquí están tus <strong>${entradas.length} entradas</strong> (compra ${codigo}). Cada una tiene su propio código QR y su propio enlace: mándale a cada invitado el suyo por WhatsApp con el botón "Ver / enviar". En la puerta, el personal de acceso escanea cada QR con la cámara de su teléfono.`
-            : `esta es tu entrada (compra ${codigo}). Preséntala en la puerta el día del evento — el personal de acceso la va a escanear con la cámara de su teléfono. Si la va a usar otra persona, mándasela con el botón "Ver / enviar".`
+            ? `aquí están tus <strong>${entradas.length} entradas</strong> (compra ${codigo}). Cada una tiene su propio código QR y es de una persona. En la puerta, el personal de acceso escanea cada QR con la cámara de su teléfono.`
+            : `esta es tu entrada (compra ${codigo}). Preséntala en la puerta el día del evento — el personal de acceso la va a escanear con la cámara de su teléfono.`
         }</p>
       </td>
     </tr>
     ${bloques.join("")}
+    <tr>
+      <td align="center" style="padding:4px 28px 20px;">
+        <table role="presentation" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="background-color:#3D0507;border-radius:8px;">
+              <a href="${urlCompra}" style="display:inline-block;padding:13px 24px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;">${
+                entradas.length > 1 ? "Ver mis entradas y enviarlas por WhatsApp" : "Ver mi entrada en el teléfono"
+              }</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:10px 0 0;font-size:12px;line-height:1.5;color:#8A8782;">${
+          entradas.length > 1
+            ? "Desde ahí le mandas a cada invitado su entrada por WhatsApp; a cada uno le llega un enlace que abre su QR en su teléfono."
+            : "Ahí ves tu QR en grande y puedes guardarlo o mandarlo por WhatsApp si la va a usar otra persona."
+        }</p>
+      </td>
+    </tr>
     <tr>
       <td style="padding:8px 28px 24px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FBF4F1;border-left:3px solid #CE0100;border-radius:6px;">
@@ -299,6 +298,7 @@ export async function enviarCorreoQR(params: {
 
   const { error } = await resend.emails.send({
     from: remitente(),
+    replyTo: respuestasA(),
     to: params.destinatario,
     subject: entradas.length > 1 ? `Tus ${entradas.length} entradas · compra ${codigo} — La Navidad Vallenata` : `Tu entrada · compra ${codigo} — La Navidad Vallenata`,
     html,
@@ -374,6 +374,7 @@ export async function enviarCorreoRechazo(params: {
 
   const { error } = await resend.emails.send({
     from: remitente(),
+    replyTo: respuestasA(),
     to: params.destinatario,
     subject: codigo ? `No pudimos confirmar tu pago · compra ${codigo} — La Navidad Vallenata` : "No pudimos confirmar tu pago — La Navidad Vallenata",
     html,
