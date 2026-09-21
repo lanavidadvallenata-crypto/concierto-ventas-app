@@ -34,7 +34,7 @@ export default function CheckoutForm({
   const [nombre, setNombre] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
-  const [metodoPago, setMetodoPago] = useState<MetodoPago>("transferencia");
+  const [metodoPago, setMetodoPago] = useState<MetodoPago>("pago_movil");
   const [honeypot, setHoneypot] = useState("");
 
   const [referencia, setReferencia] = useState("");

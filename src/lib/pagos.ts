@@ -11,11 +11,9 @@ export const METODOS_PAGO: {
   // evento) y en venta manual (alguien pagó en mano a un vendedor).
   canales: Canal[];
 }[] = [
-  // Pago móvil: pendiente — Anita confirmó (14 sept) que está en configuración.
-  // Es el método más usado, así que se deja visible pero deshabilitado en vez de
-  // ocultarlo, para que la gente sepa que viene pronto. Activar apenas lleguen
-  // los datos reales (banco, cédula/RIF, teléfono) reemplazando INSTRUCCIONES_PAGO.pago_movil.
-  { valor: "pago_movil", etiqueta: "Pago móvil", moneda: "VES", activo: false, canales: ["web", "manual", "taquilla"] },
+  // Pago móvil: activo desde el 21 sep (datos de Anita: BNC, RIF J-507237133,
+  // 0424-2251711). Va primero porque es el método más usado en Venezuela.
+  { valor: "pago_movil", etiqueta: "Pago móvil", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla"] },
   { valor: "transferencia", etiqueta: "Transferencia bancaria", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla"] },
   { valor: "zelle", etiqueta: "Zelle", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla"] },
   { valor: "binance", etiqueta: "Binance", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla"] },
@@ -36,7 +34,7 @@ export function metodoEsEnBs(metodo: string) {
 // Datos reales confirmados por Anita (14 sept) — cuentas a nombre de Baspartu 2025.
 export const INSTRUCCIONES_PAGO: Record<MetodoPago, string> = {
   pago_movil:
-    "Pago móvil próximamente — está en configuración. Por ahora paga por Transferencia, Zelle o Binance.",
+    "Pago móvil BNC\nRIF: J-507237133\nTeléfono: 0424-2251711\n\nEnvía el monto exacto en bolívares (arriba) y anota el número de referencia que te da tu banco.",
   transferencia:
     "Transferencia BNC a nombre de:\nBASPARTU 2025, C.A. — RIF J-507237133\nCuenta: 0191-0316-14-2100172759\n\nTransfiere el monto exacto en bolívares (arriba) y anota el número de referencia.",
   zelle:
