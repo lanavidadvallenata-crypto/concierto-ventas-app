@@ -1,129 +1,147 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPerfilActual } from "@/lib/perfil";
 import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
+import { registrarIngreso } from "./actions";
 
+// Pantalla de la puerta. Abrir el enlace del QR NO cambia nada: solo muestra
+// la entrada. El ingreso se registra con el toque en "DEJAR ENTRAR"
+// (ver actions.ts — por qué no se valida al cargar la página).
+//
+// Estados:
+//   - LISTO PARA ENTRAR (oscuro + botón verde): verificada y sin usar.
+//   - VÁLIDO (verde): se acaba de registrar el ingreso (últimos 90 s) — es la
+//     pantalla que ve la persona de la puerta justo después del toque, y la
+//     que se repite si el teléfono recarga.
+//   - YA VALIDADO (ámbar): al tocar, otro carril ya lo había marcado.
+//   - YA USADO (rojo): ingresó hace más de 90 s.
+//   - NO VÁLIDO / INVÁLIDO (rojo): no verificado / token desconocido.
 export default async function ValidarAccesoPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ repetido?: string; error?: string }>;
 }) {
   const { token } = await params;
+  const { repetido, error: errorAccion } = await searchParams;
 
   // El middleware ya exige sesión iniciada para llegar hasta acá. Este chequeo
-  // adicional de rol es lo que de verdad separa "personal de acceso" de
-  // "cualquiera con una cuenta en el sistema" (por ejemplo, alguien de Ventas
-  // no debería poder validar entradas en la puerta). No se ejecuta el UPDATE
-  // que marca el ticket como usado si el rol no es el correcto.
+  // de rol es lo que separa "personal de acceso" de "cualquiera con cuenta".
   const perfil = await getPerfilActual();
   if (!perfil || (perfil.rol !== "acceso" && perfil.rol !== "admin")) {
-    return (
-      <Resultado
-        color="red"
-        titulo="SIN PERMISO"
-        detalle="Esta cuenta no tiene rol de acceso. Pídele a Anita que te lo asigne."
-      />
-    );
+    return <Resultado color="red" titulo="SIN PERMISO" detalle="Esta cuenta no tiene rol de acceso. Pídele a Anita que te lo asigne." />;
   }
 
   const service = createServiceClient();
 
-  // Update atómico: solo marca como usado si todavía no lo estaba.
-  // Si esto devuelve una fila, este es el primer (y único) ingreso válido con ese QR.
-  // Sin "embed" de sillas_vip (ver src/lib/asiento.ts): con el embed, la
-  // consulta fallaba entera y TODO QR válido salía como "YA USADO".
-  const { data: marcado, error: marcarError } = await service
+  // Solo lectura. Sin "embed" de sillas_vip (ver src/lib/asiento.ts).
+  const { data: ticket, error: ticketError } = await service
     .from("tickets")
-    .update({ qr_usado: true, qr_usado_en: new Date().toISOString(), qr_usado_por: perfil.id })
+    .select("id, comprador_nombre, tipo, silla_id, qr_usado, qr_usado_en, estado_pago")
     .eq("qr_token", token)
-    .eq("qr_usado", false)
-    .eq("estado_pago", "verificado")
-    .select("id, comprador_nombre, tipo, silla_id")
     .maybeSingle();
 
-  if (marcarError) {
-    console.error("Error validando QR:", marcarError.message);
+  if (ticketError) {
+    console.error("Error consultando QR:", ticketError.message);
     return (
       <Resultado
         color="red"
         titulo="ERROR"
-        detalle="No se pudo validar por un problema de conexión. Vuelve a escanear. Si sigue, valida por nombre con Finanzas."
+        detalle="No se pudo consultar por un problema de conexión. Vuelve a escanear. Si sigue, valida por nombre con Finanzas."
       />
     );
   }
 
-  if (marcado) {
-    await service.from("accesos").insert({ ticket_id: marcado.id, resultado: "valido", escaneado_por: perfil.id });
-    const asiento = marcado.tipo === "vip" ? await obtenerAsiento(service, marcado.silla_id) : null;
+  if (!ticket) {
+    await service.from("accesos").insert({ resultado: "invalido", escaneado_por: perfil.id });
+    return <Resultado color="red" titulo="INVÁLIDO" detalle="Este código no corresponde a ninguna entrada." />;
+  }
+
+  const asiento = ticket.tipo === "vip" ? await obtenerAsiento(service, ticket.silla_id) : null;
+  const descripcion = `${ticket.comprador_nombre} · ${describirAsiento(ticket.tipo as "vip" | "general", asiento)}`;
+
+  if (ticket.estado_pago !== "verificado") {
+    await service.from("accesos").insert({ ticket_id: ticket.id, resultado: "invalido", escaneado_por: perfil.id });
     return (
       <Resultado
-        color="green"
-        titulo="VÁLIDO"
-        detalle={`${marcado.comprador_nombre} · ${describirAsiento(marcado.tipo as "vip" | "general", asiento)}`}
+        color="red"
+        titulo="NO VÁLIDO"
+        detalle={`${descripcion} — este ticket no está verificado (estado: ${ticket.estado_pago}). No dejar pasar.`}
       />
     );
   }
 
-  // No se marcó — puede ser que ya estaba usado, o que el token no existe.
-  const { data: existente, error: existenteError } = await service
-    .from("tickets")
-    .select("id, comprador_nombre, tipo, qr_usado, qr_usado_en, estado_pago")
-    .eq("qr_token", token)
-    .maybeSingle();
-
-  if (existenteError) {
-    console.error("Error consultando QR:", existenteError.message);
-    return <Resultado color="red" titulo="ERROR" detalle="No se pudo validar por un problema de conexión. Vuelve a escanear." />;
-  }
-
-  if (existente && !existente.qr_usado) {
-    // Existe pero el UPDATE no lo marcó: la única forma es que ya no esté
-    // verificado (ej. se rechazó después de emitir el QR). No es reingreso.
-    await service.from("accesos").insert({ ticket_id: existente.id, resultado: "invalido", escaneado_por: perfil.id });
-    return <Resultado color="red" titulo="NO VÁLIDO" detalle={`${existente.comprador_nombre} — este ticket no está verificado (estado: ${existente.estado_pago}). No dejar pasar.`} />;
-  }
-
-  if (existente) {
-    // Si el mismo QR se validó hace segundos, casi seguro es el mismo teléfono
-    // recargando la pantalla (o el navegador re-abriendo el link), no otra
-    // persona intentando colarse. Se muestra en verde con la hora para que la
-    // persona de la puerta no le niegue el paso a quien ya validó.
-    const usadoHaceMs = milisegundosDesde(existente.qr_usado_en);
-    const horaUso = existente.qr_usado_en
-      ? new Date(existente.qr_usado_en).toLocaleTimeString("es-VE", { timeZone: "America/Caracas", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  if (ticket.qr_usado) {
+    const usadoHaceMs = milisegundosDesde(ticket.qr_usado_en);
+    const horaUso = ticket.qr_usado_en
+      ? new Date(ticket.qr_usado_en).toLocaleTimeString("es-VE", { timeZone: "America/Caracas", hour: "2-digit", minute: "2-digit", second: "2-digit" })
       : null;
 
-    if (usadoHaceMs < 90_000) {
-      // Casi seguro es la misma pantalla recargada — pero también podría ser
-      // un segundo teléfono con la captura del QR en otro carril. Se muestra
-      // en ÁMBAR (no verde) con la hora, y se registra el intento igual.
-      await service.from("accesos").insert({ ticket_id: existente.id, resultado: "ya_usado", escaneado_por: perfil.id });
+    if (repetido === "1") {
+      // Otro teléfono lo marcó entre que se abrió la pantalla y el toque.
+      await service.from("accesos").insert({ ticket_id: ticket.id, resultado: "ya_usado", escaneado_por: perfil.id });
       return (
         <Resultado
           color="amber"
           titulo="YA VALIDADO"
-          detalle={`${existente.comprador_nombre} — entró hace ${Math.round(usadoHaceMs / 1000)} s. Si es la misma persona (pantalla recargada), pasa. Si es otra, NO.`}
+          detalle={`${descripcion} — otro carril registró su ingreso hace ${Math.round(usadoHaceMs / 1000)} s. Si es la misma persona, pasa. Si es otra, NO.`}
         />
       );
     }
 
-    await service.from("accesos").insert({ ticket_id: existente.id, resultado: "ya_usado", escaneado_por: perfil.id });
+    if (usadoHaceMs < 90_000) {
+      // Pantalla que ve la puerta justo después de tocar DEJAR ENTRAR (la
+      // acción redirige aquí), o el mismo teléfono recargando. No se registra
+      // de nuevo: el "valido" ya quedó en la bitácora.
+      return (
+        <Resultado
+          color="green"
+          titulo="VÁLIDO"
+          detalle={`${descripcion} — ingreso registrado${horaUso ? ` a las ${horaUso}` : ""}.`}
+        />
+      );
+    }
+
+    await service.from("accesos").insert({ ticket_id: ticket.id, resultado: "ya_usado", escaneado_por: perfil.id });
     return (
       <Resultado
         color="red"
         titulo="YA USADO"
-        detalle={`${existente.comprador_nombre} — ya ingresó${horaUso ? ` a las ${horaUso}` : ""}. No dejar pasar.`}
+        detalle={`${descripcion} — ya ingresó${horaUso ? ` a las ${horaUso}` : ""}. No dejar pasar.`}
       />
     );
   }
 
-  await service.from("accesos").insert({ resultado: "invalido", escaneado_por: perfil.id });
-  return <Resultado color="red" titulo="INVÁLIDO" detalle="Este código no corresponde a ninguna entrada." />;
+  // Verificada y sin usar: mostrar y esperar el toque.
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center bg-neutral-900 text-white px-6 text-center gap-6">
+      <div className="flex flex-col gap-2">
+        <p className="text-xs uppercase tracking-widest text-neutral-400">Entrada verificada · sin usar</p>
+        <h1 className="text-3xl font-bold leading-tight">{ticket.comprador_nombre}</h1>
+        <p className="text-xl text-neutral-200">{describirAsiento(ticket.tipo as "vip" | "general", asiento)}</p>
+      </div>
+      {errorAccion === "1" ? (
+        <p className="text-sm bg-red-700/60 rounded-lg px-3 py-2">No se pudo registrar por un problema de conexión. Toca de nuevo.</p>
+      ) : null}
+      <form action={registrarIngreso} className="w-full max-w-xs">
+        <input type="hidden" name="token" value={token} />
+        <button
+          type="submit"
+          className="w-full min-h-20 rounded-2xl bg-green-600 active:bg-green-700 text-white text-2xl font-bold tracking-wide shadow-lg"
+        >
+          DEJAR ENTRAR
+        </button>
+      </form>
+      <p className="text-xs text-neutral-400 max-w-xs">
+        Al tocar queda registrado el ingreso y este QR deja de servir. Si la persona no coincide con el nombre, no toques.
+      </p>
+    </main>
+  );
 }
 
 // Fuera del componente a propósito: el lint de React marca Date.now() dentro
-// del render como "impuro"; aquí es un Server Component que corre una sola
-// vez por petición y necesitamos la hora real para distinguir "recargó la
-// pantalla" de "otra persona con el mismo QR".
+// del render como "impuro"; aquí es un Server Component que necesita la hora
+// real para distinguir "recién registrado" de "entró hace rato".
 function milisegundosDesde(iso: string | null): number {
   if (!iso) return Infinity;
   return Date.now() - new Date(iso).getTime();
