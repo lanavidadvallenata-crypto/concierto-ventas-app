@@ -154,7 +154,7 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
 
   const entradas = await entradasParaCorreo(verificados);
   try {
-    await enviarCorreoQR({ destinatario: primero.comprador_email, nombreComprador: primero.comprador_nombre, entradas });
+    await enviarCorreoQR({ destinatario: primero.comprador_email, nombreComprador: primero.comprador_nombre, entradas, grupoId: primero.grupo_id ?? primero.id });
     await service
       .from("tickets")
       .update({ qr_enviado_en: new Date().toISOString() })
@@ -305,7 +305,7 @@ export async function reenviarQR(ticketId: string): Promise<Resultado> {
 
   const entradas = await entradasParaCorreo(verificados);
   try {
-    await enviarCorreoQR({ destinatario: primero.comprador_email, nombreComprador: primero.comprador_nombre, entradas });
+    await enviarCorreoQR({ destinatario: primero.comprador_email, nombreComprador: primero.comprador_nombre, entradas, grupoId: primero.grupo_id ?? primero.id });
   } catch (e) {
     console.error("Error reenviando QR:", (e as Error).message);
     return { ok: false, error: "No se pudo enviar el correo. Revisa que el correo esté bien escrito e intenta de nuevo en un minuto." };

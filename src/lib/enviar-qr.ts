@@ -188,15 +188,28 @@ function describirEntrada(e: EntradaQR) {
 // Un correo con TODAS las entradas de la compra: un bloque + un QR por
 // asistente. El comprador reenvía cada QR a su invitado; en la puerta cada
 // uno entra por separado.
+// Código corto y legible de la compra (los 8 primeros caracteres del
+// grupo_id). Va en el asunto para que Gmail NO apile en una misma
+// conversación dos compras distintas del mismo comprador (mismo asunto +
+// mismo remitente = mismo hilo, y el correo viejo queda colapsado: "me
+// desaparecieron las primeras entradas"). Un reenvío de la MISMA compra sí
+// se agrupa con el original, que es lo deseable.
+export function codigoCompra(grupoId: string) {
+  return grupoId.replace(/-/g, "").slice(0, 8).toUpperCase();
+}
+
 export async function enviarCorreoQR(params: {
   destinatario: string;
   nombreComprador: string;
   entradas: EntradaQR[];
+  // grupo_id de la compra (o id del ticket si es una compra vieja sin grupo).
+  grupoId: string;
 }) {
   const resend = clienteResend("el correo con el QR");
   const nombre = escapeHtml(params.nombreComprador);
   const entradas = params.entradas;
   if (entradas.length === 0) throw new Error("Sin entradas para enviar");
+  const codigo = codigoCompra(params.grupoId);
 
   const attachments: { filename: string; content: string; contentId: string }[] = [];
   const bloques: string[] = [];
@@ -208,7 +221,11 @@ export async function enviarCorreoQR(params: {
     const cid = `qr-entrada-${i + 1}`;
     attachments.push({ filename: `entrada-${i + 1}-qr.png`, content: qrDataUrl.split(",")[1], contentId: cid });
 
-    const etiquetaTipo = e.tipo === "vip" ? "Entrada VIP" : "Entrada General";
+    const etiquetaTipo = e.tipo === "vip" ? "Entrada VIP" : "Acceso general · sin asiento asignado";
+    // Enlace público de ESTA entrada (misma información que el QR): sirve
+    // aunque el cliente de correo no muestre imágenes, y es lo que el
+    // comprador le manda por WhatsApp a cada invitado.
+    const urlEntrada = `${SITE_URL}/entrada/${e.qrToken}`;
     bloques.push(`
     <tr>
       <td style="padding:${i === 0 ? 16 : 8}px 28px 8px;">
@@ -233,6 +250,20 @@ export async function enviarCorreoQR(params: {
           </tr>
         </table>
       </td>
+    </tr>
+    <tr>
+      <td align="center" style="padding:0 28px ${i === entradas.length - 1 ? 8 : 20}px;">
+        <table role="presentation" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="background-color:#3D0507;border-radius:8px;">
+              <a href="${urlEntrada}" style="display:inline-block;padding:12px 22px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#FFFFFF;text-decoration:none;">${
+                entradas.length > 1 ? `Ver / enviar la entrada ${i + 1}` : "Ver / enviar mi entrada"
+              }</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:8px 0 0;font-size:11.5px;line-height:1.5;color:#8A8782;">Este enlace abre el mismo QR en cualquier teléfono. Si no ves la imagen arriba, úsalo.<br><a href="${urlEntrada}" style="color:#680F15;word-break:break-all;">${urlEntrada}</a></p>
+      </td>
     </tr>`);
   }
 
@@ -241,8 +272,8 @@ export async function enviarCorreoQR(params: {
       <td style="padding:28px 28px 8px;">
         <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, ${
           entradas.length > 1
-            ? `aquí están tus <strong>${entradas.length} entradas</strong>. Cada una tiene su propio código QR: reenvíale a cada invitado el suyo. En la puerta, el personal de acceso escanea cada QR con la cámara de su teléfono.`
-            : "esta es tu entrada. Preséntala en la puerta el día del evento — el personal de acceso la va a escanear con la cámara de su teléfono."
+            ? `aquí están tus <strong>${entradas.length} entradas</strong> (compra ${codigo}). Cada una tiene su propio código QR y su propio enlace: mándale a cada invitado el suyo por WhatsApp con el botón "Ver / enviar". En la puerta, el personal de acceso escanea cada QR con la cámara de su teléfono.`
+            : `esta es tu entrada (compra ${codigo}). Preséntala en la puerta el día del evento — el personal de acceso la va a escanear con la cámara de su teléfono. Si la va a usar otra persona, mándasela con el botón "Ver / enviar".`
         }</p>
       </td>
     </tr>
@@ -265,9 +296,13 @@ export async function enviarCorreoQR(params: {
   const { error } = await resend.emails.send({
     from: remitente(),
     to: params.destinatario,
-    subject: entradas.length > 1 ? `Tus ${entradas.length} entradas — La Navidad Vallenata` : "Tu entrada — La Navidad Vallenata",
+    subject: entradas.length > 1 ? `Tus ${entradas.length} entradas · compra ${codigo} — La Navidad Vallenata` : `Tu entrada · compra ${codigo} — La Navidad Vallenata`,
     html,
     attachments,
+    // Gmail respeta esta cabecera para NO agrupar correos distintos en un
+    // mismo hilo aunque se parezcan; con el grupo_id, cada compra es su
+    // propia conversación y un reenvío de la misma compra sí se agrupa.
+    headers: { "X-Entity-Ref-ID": params.grupoId },
   });
   if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
