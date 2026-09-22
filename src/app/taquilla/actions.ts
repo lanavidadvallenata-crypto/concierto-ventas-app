@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { MAX_POR_COMPRA } from "@/lib/precios";
-import { metodosParaCanal } from "@/lib/pagos";
+import { metodoEsEnBs, metodosParaCanal } from "@/lib/pagos";
+import { obtenerTasaActual } from "@/lib/tasa";
 import { registrarVentaInterna } from "@/lib/registrar-venta";
 import { taquillaAbierta } from "@/lib/taquilla";
 
@@ -14,7 +15,10 @@ const taquillaSchema = z.object({
   sillaIds: z.array(z.string().uuid()).max(MAX_POR_COMPRA.vip).optional(),
   cantidad: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
-  precioTotal: z.coerce.number().positive(),
+  // Total en USD (métodos en dólares). En métodos en bolívares el vendedor
+  // escribe el monto en Bs (montoBs) y el USD se calcula con la tasa del día.
+  precioTotal: z.coerce.number().positive().optional(),
+  montoBs: z.coerce.number().positive().optional(),
   precioEditado: z.boolean().optional(),
   referenciaPago: z.string().trim().optional(),
   // Opcional: número(s) del talonario físico entregado, para cuadrar caja.
@@ -63,6 +67,22 @@ export async function registrarVentaTaquilla(input: unknown): Promise<VentaTaqui
   }
 
   const service = createServiceClient();
+
+  // Monto cobrado: en Bs para métodos en bolívares (si el vendedor lo editó),
+  // en USD para el resto. Sin editar = precio de lista sin fee.
+  let precioTotalManual: number | null = null;
+  let totalBsManual: number | null = null;
+  if (v.precioEditado) {
+    if (metodoEsEnBs(v.metodoPago) && v.montoBs != null) {
+      const tasa = await obtenerTasaActual(service);
+      if (!tasa) return { ok: false, error: "No hay tasa del día para convertir los bolívares. Cóbralo en dólares o pide a Finanzas que cargue la tasa." };
+      precioTotalManual = Math.round((v.montoBs / tasa) * 100) / 100;
+      totalBsManual = Math.round(v.montoBs * 100) / 100;
+    } else if (v.precioTotal != null) {
+      precioTotalManual = v.precioTotal;
+    }
+  }
+
   const referencia = [v.referenciaPago?.trim(), v.boletoFisico?.trim() ? `boleto ${v.boletoFisico.trim()}` : ""]
     .filter(Boolean)
     .join(" · ");
@@ -76,9 +96,12 @@ export async function registrarVentaTaquilla(input: unknown): Promise<VentaTaqui
     compradorEmail: null,
     metodoPago: v.metodoPago,
     referenciaPago: referencia || null,
-    precioTotalManual: v.precioEditado ? v.precioTotal : null,
-    // Taquilla = precio regular siempre (no consume cupo de preventa).
+    precioTotalManual,
+    totalBsManual,
+    // Taquilla = precio regular siempre (no consume cupo de preventa) y SIN
+    // fee de servicio (Anita, 22 sep): $120 VIP / $30 General.
     etapaForzada: "regular",
+    sinFee: true,
     // Descuento en puerta: hasta 30 % salvo admin.
     pisoPrecio: rol === "admin" ? undefined : 0.7,
     vendidoPor: user.id,

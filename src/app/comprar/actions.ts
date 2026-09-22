@@ -8,7 +8,7 @@ import { enviarCorreoPendiente } from "@/lib/enviar-qr";
 import { codigoCompra } from "@/lib/compra";
 import { liberarSillasVencidas } from "@/lib/mapa-vip";
 import { cotizarCompra, MAX_POR_COMPRA, type CotizacionCompra, type DisponibilidadEtapa } from "@/lib/precios";
-import { METODOS_PAGO_ACTIVOS, metodoEsEnBs } from "@/lib/pagos";
+import { METODOS_PAGO_ACTIVOS, metodoEsEnBs, normalizarReferencia, validarReferencia, validarTelefono } from "@/lib/pagos";
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
 import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
 
@@ -122,19 +122,22 @@ const confirmarSchema = z.object({
   // Tasa con la que se le mostró el monto en Bs al comprador (viene de iniciar).
   tasaMostrada: z.coerce.number().positive().optional(),
   compradorNombre: z.string().trim().min(2, "Escribe tu nombre completo."),
-  compradorTelefono: z.string().trim().min(7, "Escribe un teléfono válido."),
+  // 10 a 15 dígitos. Antes bastaban 7 caracteres y el error salía recién al
+  // confirmar el pago, debajo de la referencia: parecía que la referencia
+  // estaba mal (caso real con Binance, 22 sep).
+  compradorTelefono: z
+    .string()
+    .trim()
+    .refine((t) => validarTelefono(t) === null, "Revisa tu teléfono (WhatsApp): debe tener al menos 10 dígitos, por ejemplo 0414 123 4567."),
   compradorEmail: z
     .string()
     .trim()
     .toLowerCase()
     .email("Correo inválido — es la única forma de enviarte el QR de entrada."),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
-  // Referencia COMPLETA (Anita, 22 sep): con los últimos dígitos solos,
-  // Finanzas no puede ubicar el pago en el estado de cuenta.
-  referenciaPago: z
-    .string()
-    .trim()
-    .refine((r) => r.replace(/\s/g, "").length >= 6, "Escribe el número de referencia completo, con todos los dígitos de tu comprobante."),
+  // El dato cambia según el método (ver REFERENCIA_POR_METODO en pagos.ts):
+  // se valida y normaliza abajo, cuando ya se sabe el método.
+  referenciaPago: z.string().trim().min(1, "Escribe el dato de tu pago para que podamos ubicarlo."),
   // Campo invisible anti-bots. Se valida a mano más abajo (si fuera max(0) en
   // el schema, el bot recibiría un error de validación en vez del éxito falso).
   honeypot: z.string().optional(),
@@ -170,6 +173,10 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Revisa los datos del formulario." };
   }
   const v = parsed.data;
+
+  const errorReferencia = validarReferencia(v.metodoPago, v.referenciaPago);
+  if (errorReferencia) return { ok: false, error: errorReferencia };
+  v.referenciaPago = normalizarReferencia(v.metodoPago, v.referenciaPago);
 
   if (v.honeypot) {
     // Bot: respondemos como si todo hubiera salido bien, sin hacer nada.
@@ -207,7 +214,9 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     .eq("comprador_email", v.compradorEmail)
     .eq("referencia_pago", v.referenciaPago)
     .eq("tipo", v.tipo)
-    .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString())
+    // Binance se identifica por el USUARIO (no cambia entre pagos): ventana
+    // corta para no confundir una segunda compra real con un reintento.
+    .gte("created_at", new Date(Date.now() - (v.metodoPago === "binance" ? 2 : 10) * 60_000).toISOString())
     .limit(1);
 
   if (ticketsExistentes && ticketsExistentes.length > 0) {

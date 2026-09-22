@@ -24,6 +24,11 @@ export type DatosVentaInterna = {
   // Piso de precio negociado como fracción del cotizado (ej. 0.5 = no menos
   // del 50 %). undefined = sin piso (admin).
   pisoPrecio?: number;
+  // Taquilla (Anita, 22 sep): precio SIN el fee de servicio del 10 %.
+  sinFee?: boolean;
+  // Monto exacto cobrado en Bs cuando el vendedor lo escribió en bolívares:
+  // se guarda tal cual (no se reconvierte y pierde céntimos).
+  totalBsManual?: number | null;
 };
 
 export type ResultadoVentaInterna =
@@ -80,19 +85,23 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
       )
     : (await cotizarCompra(service, d.tipo, cantidad)).cotizacion;
 
+  // Precio de lista por ticket: con fee (web/ventas) o sin fee (taquilla).
+  const preciosLista = cotizacion.lineas.map((l) => (d.sinFee ? l.base : l.total));
+  const totalLista = Math.round(preciosLista.reduce((s, p) => s + p, 0) * 100) / 100;
+
   // Precio negociado: se reparte proporcionalmente entre los tickets para que
   // la suma dé exacto el total que cobró el vendedor.
-  let preciosPorTicket = cotizacion.lineas.map((l) => l.total);
-  if (d.precioTotalManual != null && d.precioTotalManual > 0 && Math.abs(d.precioTotalManual - cotizacion.total) > 0.005) {
-    if (d.pisoPrecio != null && d.precioTotalManual < cotizacion.total * d.pisoPrecio) {
+  let preciosPorTicket = preciosLista;
+  if (d.precioTotalManual != null && d.precioTotalManual > 0 && Math.abs(d.precioTotalManual - totalLista) > 0.005) {
+    if (d.pisoPrecio != null && d.precioTotalManual < totalLista * d.pisoPrecio) {
       if (sillaIds.length) await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", sillaIds);
       return {
         ok: false,
-        error: `El precio no puede ser menor al ${Math.round(d.pisoPrecio * 100)} % del precio de lista ($${cotizacion.total.toFixed(2)}). Un admin puede registrar descuentos mayores.`,
+        error: `El precio no puede ser menor al ${Math.round(d.pisoPrecio * 100)} % del precio de lista ($${totalLista.toFixed(2)}). Un admin puede registrar descuentos mayores.`,
       };
     }
-    const factor = d.precioTotalManual / cotizacion.total;
-    preciosPorTicket = cotizacion.lineas.map((l) => Math.round(l.total * factor * 100) / 100);
+    const factor = d.precioTotalManual / totalLista;
+    preciosPorTicket = preciosLista.map((p) => Math.round(p * factor * 100) / 100);
     const suma = preciosPorTicket.reduce((s, p) => s + p, 0);
     preciosPorTicket[preciosPorTicket.length - 1] = Math.round((preciosPorTicket[preciosPorTicket.length - 1] + (d.precioTotalManual - suma)) * 100) / 100;
   }
@@ -100,7 +109,7 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
 
   const enBs = metodoEsEnBs(d.metodoPago);
   const tasa = enBs ? await obtenerTasaActual(service) : null;
-  const totalBs = enBs && tasa ? convertirABs(total, tasa) : null;
+  const totalBs = enBs ? (d.totalBsManual ?? (tasa ? convertirABs(total, tasa) : null)) : null;
   const bsPorTicket = repartirBs(preciosPorTicket, totalBs);
 
   const grupoId = randomUUID();

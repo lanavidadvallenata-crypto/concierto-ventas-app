@@ -5,7 +5,15 @@ import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal, MAX_POR_COMPRA, type CotizacionCompra } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
-import { INSTRUCCIONES_PAGO, BINANCE_QR_URL, metodosParaCanal, type MetodoPago } from "@/lib/pagos";
+import {
+  INSTRUCCIONES_PAGO,
+  BINANCE_QR_URL,
+  REFERENCIA_POR_METODO,
+  metodosParaCanal,
+  validarReferencia,
+  validarTelefono,
+  type MetodoPago,
+} from "@/lib/pagos";
 import { iniciarCheckoutPublico, confirmarCheckoutPublico, liberarHoldPublico } from "./actions";
 import BotonSoporte from "@/components/BotonSoporte";
 import { sugerirCorreo } from "@/lib/correo";
@@ -96,6 +104,11 @@ export default function CheckoutForm({
       setError("Completa nombre, teléfono y correo.");
       return;
     }
+    const errorTelefono = validarTelefono(telefono);
+    if (errorTelefono) {
+      setError(errorTelefono);
+      return;
+    }
     setCargando(true);
     const res = await iniciarCheckoutPublico({
       tipo,
@@ -116,12 +129,18 @@ export default function CheckoutForm({
 
   async function confirmarPago() {
     setError(null);
-    if (referencia.replace(/\s/g, "").length < 6) {
-      setError("Escribe el número de referencia completo, con todos los dígitos de tu comprobante.");
+    const errorReferencia = validarReferencia(metodoPago, referencia);
+    if (errorReferencia) {
+      setError(errorReferencia);
       return;
     }
-    if (!email.trim() || !telefono.trim()) {
-      setError("Revisa tu correo y tu teléfono: son la forma de enviarte tus QR y de contactarte.");
+    if (!email.trim()) {
+      setError("Revisa tu correo: es donde te llegan tus QR.");
+      return;
+    }
+    const errorTelefono = validarTelefono(telefono);
+    if (errorTelefono) {
+      setError(errorTelefono);
       return;
     }
     setCargando(true);
@@ -295,28 +314,21 @@ export default function CheckoutForm({
         {!expirado && (
           <div>
             <label className="block text-sm font-medium mb-1" htmlFor="referencia-pago">
-              {metodoPago === "zelle"
-                ? "Número de confirmación completo"
-                : metodoPago === "binance"
-                ? "Número de orden completo"
-                : "Número de referencia completo"}
+              {REFERENCIA_POR_METODO[metodoPago].etiqueta}
             </label>
             <input
               id="referencia-pago"
               value={referencia}
               onChange={(e) => setReferencia(e.target.value)}
-              inputMode={metodoPago === "zelle" ? "text" : "numeric"}
+              inputMode={REFERENCIA_POR_METODO[metodoPago].teclado}
+              autoCapitalize={metodoPago === "zelle" ? "characters" : "off"}
+              autoCorrect="off"
+              spellCheck={false}
               autoComplete="off"
               className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm font-mono tracking-wide"
-              placeholder="Referencia completa"
+              placeholder={REFERENCIA_POR_METODO[metodoPago].placeholder}
             />
-            <p className="text-xs text-neutral-500 mt-1">
-              {metodoPago === "zelle"
-                ? "Copia el número de confirmación completo que te da tu banco."
-                : metodoPago === "binance"
-                ? "Copia el número de orden completo que te muestra Binance al confirmar."
-                : "Copia la referencia completa del comprobante de tu banco, no solo los últimos dígitos. Con la referencia completa confirmamos tu pago más rápido."}
-            </p>
+            <p className="text-xs text-neutral-500 mt-1">{REFERENCIA_POR_METODO[metodoPago].ayuda}</p>
           </div>
         )}
 
@@ -517,6 +529,9 @@ export default function CheckoutForm({
             </option>
           ))}
         </select>
+        <p className="text-xs text-neutral-500 mt-1">
+          Después de pagar te vamos a pedir: <strong className="text-neutral-700">{REFERENCIA_POR_METODO[metodoPago].etiqueta.toLowerCase()}</strong>.
+        </p>
       </div>
 
       {/* Campo trampa para bots — invisible para personas */}

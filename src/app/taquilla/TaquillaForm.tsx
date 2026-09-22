@@ -6,7 +6,7 @@ import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal, MAX_POR_COMPRA } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
-import { metodosParaCanal, type MetodoPago } from "@/lib/pagos";
+import { metodoEsEnBs, metodosParaCanal, type MetodoPago } from "@/lib/pagos";
 import { registrarVentaTaquilla } from "./actions";
 
 // En taquilla solo tiene sentido lo que se cobra ahí mismo. Orden: efectivo primero.
@@ -30,22 +30,33 @@ export default function TaquillaForm({
   const [cantidad, setCantidad] = useState(1);
   const [metodoPago, setMetodoPago] = useState<MetodoPago>("efectivo_usd");
   const [precioManual, setPrecioManual] = useState<number | null>(null);
+  // Monto en bolívares escrito por el vendedor (métodos en Bs).
+  const [montoBsManual, setMontoBsManual] = useState<number | null>(null);
   const [referencia, setReferencia] = useState("");
   const [boleto, setBoleto] = useState("");
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
 
   const n = tipo === "vip" ? sillas.length : cantidad;
-  // Precio de taquilla = precio regular (decisión de Anita, 19 sep).
-  const unitario = calcularTotal(tipo).total;
+  // Precio de taquilla = precio regular SIN fee de servicio (Anita, 22 sep):
+  // $120 VIP / $30 General.
+  const unitario = calcularTotal(tipo).base;
   const sugerido = Math.round(n * unitario * 100) / 100;
 
-  const precio = precioManual ?? sugerido;
-  const precioEditado = precioManual !== null;
-
-  const enBs = metodoPago === "efectivo_bs" || metodoPago === "transferencia" || metodoPago === "pago_movil";
-  const montoBs = enBs && tasaEurVes ? convertirABs(precio, tasaEurVes) : null;
+  // Métodos en bolívares: el vendedor escribe lo que cobró en Bs y se muestra
+  // el equivalente en USD. El resto: en USD.
+  const enBs = metodoEsEnBs(metodoPago) && tasaEurVes !== null;
+  const sugeridoBs = enBs && tasaEurVes ? convertirABs(sugerido, tasaEurVes) : null;
+  const montoBs = enBs ? montoBsManual ?? sugeridoBs : null;
+  const precio = enBs && montoBs != null && tasaEurVes ? Math.round((montoBs / tasaEurVes) * 100) / 100 : precioManual ?? sugerido;
+  const precioEditado = enBs ? montoBsManual !== null : precioManual !== null;
   const esEfectivo = metodoPago === "efectivo_usd" || metodoPago === "efectivo_bs";
+  const fmtBs = (x: number) => x.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function reiniciarMonto() {
+    setPrecioManual(null);
+    setMontoBsManual(null);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,13 +65,18 @@ export default function TaquillaForm({
       setMensaje({ tipo: "error", texto: tipo === "vip" ? "Elige las sillas en el mapa." : "Indica la cantidad." });
       return;
     }
+    if (!(precio > 0) || (enBs && !(montoBs && montoBs > 0))) {
+      setMensaje({ tipo: "error", texto: "Escribe el monto cobrado." });
+      return;
+    }
     setCargando(true);
     const res = await registrarVentaTaquilla({
       tipo,
       sillaIds: tipo === "vip" ? sillas.map((s) => s.id) : undefined,
       cantidad: tipo === "general" ? cantidad : undefined,
       metodoPago,
-      precioTotal: precio,
+      precioTotal: enBs ? undefined : precio,
+      montoBs: enBs && montoBs != null ? montoBs : undefined,
       precioEditado,
       referenciaPago: referencia,
       boletoFisico: boleto,
@@ -80,7 +96,7 @@ export default function TaquillaForm({
     setCantidad(1);
     setReferencia("");
     setBoleto("");
-    setPrecioManual(null);
+    reiniciarMonto();
     router.refresh();
   }
 
@@ -93,14 +109,14 @@ export default function TaquillaForm({
             type="button"
             onClick={() => {
               setTipo(t);
-              setPrecioManual(null);
+              reiniciarMonto();
               if (t === "general") setSillas([]);
             }}
             className={`flex-1 h-12 rounded-md text-base font-semibold border ${
               tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
             }`}
           >
-            {t === "vip" ? `VIP · $${calcularTotal("vip").total}` : `General · $${calcularTotal("general").total}`}
+            {t === "vip" ? `VIP · $${calcularTotal("vip").base}` : `General · $${calcularTotal("general").base}`}
           </button>
         ))}
       </div>
@@ -111,7 +127,7 @@ export default function TaquillaForm({
           seleccionadas={sillas}
           onCambiar={(s) => {
             setSillas(s);
-            setPrecioManual(null);
+            reiniciarMonto();
           }}
           maximo={MAX_POR_COMPRA.vip}
           cupoGeneralRestante={cupoGeneralRestante}
@@ -120,18 +136,18 @@ export default function TaquillaForm({
         <div>
           <label className="block text-sm font-medium mb-1">Cantidad</label>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={() => { setCantidad((c) => Math.max(1, c - 1)); setPrecioManual(null); }} className="w-12 h-12 rounded-md border border-neutral-300 text-xl font-semibold" aria-label="Menos">−</button>
+            <button type="button" onClick={() => { setCantidad((c) => Math.max(1, c - 1)); reiniciarMonto(); }} className="w-12 h-12 rounded-md border border-neutral-300 text-xl font-semibold" aria-label="Menos">−</button>
             <input
               type="number"
               min={1}
               max={MAX_POR_COMPRA.general}
               value={cantidad}
-              onChange={(e) => { setCantidad(Math.max(1, Math.min(MAX_POR_COMPRA.general, Number(e.target.value) || 1))); setPrecioManual(null); }}
+              onChange={(e) => { setCantidad(Math.max(1, Math.min(MAX_POR_COMPRA.general, Number(e.target.value) || 1))); reiniciarMonto(); }}
               className="w-20 h-12 text-center border border-neutral-300 rounded-md text-xl font-semibold"
             />
-            <button type="button" onClick={() => { setCantidad((c) => Math.min(MAX_POR_COMPRA.general, c + 1)); setPrecioManual(null); }} className="w-12 h-12 rounded-md border border-neutral-300 text-xl font-semibold" aria-label="Más">+</button>
+            <button type="button" onClick={() => { setCantidad((c) => Math.min(MAX_POR_COMPRA.general, c + 1)); reiniciarMonto(); }} className="w-12 h-12 rounded-md border border-neutral-300 text-xl font-semibold" aria-label="Más">+</button>
             {[2, 4, 6].map((q) => (
-              <button key={q} type="button" onClick={() => { setCantidad(q); setPrecioManual(null); }} className="h-12 px-3 rounded-md border border-neutral-300 text-sm font-medium text-neutral-600">
+              <button key={q} type="button" onClick={() => { setCantidad(q); reiniciarMonto(); }} className="h-12 px-3 rounded-md border border-neutral-300 text-sm font-medium text-neutral-600">
                 {q}
               </button>
             ))}
@@ -147,7 +163,10 @@ export default function TaquillaForm({
               key={m.valor}
               type="button"
               disabled={!m.activo}
-              onClick={() => setMetodoPago(m.valor)}
+              onClick={() => {
+                setMetodoPago(m.valor);
+                reiniciarMonto();
+              }}
               className={`h-12 rounded-md text-sm font-medium border px-2 disabled:opacity-40 ${
                 metodoPago === m.valor ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-700"
               }`}
@@ -159,28 +178,55 @@ export default function TaquillaForm({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium mb-1">Total cobrado (USD)</label>
-          <input
-            type="number"
-            step="0.01"
-            min={0.01}
-            value={precio}
-            onChange={(e) => setPrecioManual(Number(e.target.value))}
-            className="w-full h-12 border border-neutral-300 rounded-md px-3 text-lg font-semibold tabular-nums"
-          />
-          <p className="text-xs text-neutral-400 mt-1">
-            {n > 0 ? `${n} × $${unitario.toFixed(2)} = $${sugerido.toFixed(2)}` : "Elige las entradas"}
-            {precioEditado && (
-              <button type="button" onClick={() => setPrecioManual(null)} className="ml-2 underline">usar sugerido</button>
-            )}
-          </p>
-          {enBs && (
-            <p className="text-sm font-medium text-neutral-800 mt-1 tabular-nums">
-              {montoBs !== null ? `Cobrar Bs ${montoBs.toLocaleString("es-VE", { minimumFractionDigits: 2 })}` : "Tasa no disponible — cobra en USD"}
+        {enBs ? (
+          <div>
+            <label className="block text-sm font-medium mb-1">Total cobrado (Bs)</label>
+            <input
+              type="number"
+              step="0.01"
+              min={0.01}
+              inputMode="decimal"
+              value={montoBs ?? ""}
+              onChange={(e) => setMontoBsManual(Number(e.target.value))}
+              className="w-full h-12 border border-neutral-300 rounded-md px-3 text-lg font-semibold tabular-nums"
+            />
+            <p className="text-xs text-neutral-500 mt-1 tabular-nums">
+              {n > 0 && sugeridoBs != null
+                ? `${n} × $${unitario.toFixed(2)} = $${sugerido.toFixed(2)} → Bs ${fmtBs(sugeridoBs)} (tasa ${fmtBs(tasaEurVes!)})`
+                : "Elige las entradas"}
+              {precioEditado && (
+                <button type="button" onClick={reiniciarMonto} className="ml-2 underline">
+                  usar sugerido
+                </button>
+              )}
             </p>
-          )}
-        </div>
+            <p className="text-sm font-medium text-neutral-800 mt-1 tabular-nums">Equivale a ${precio.toFixed(2)} · sin fee</p>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-sm font-medium mb-1">Total cobrado (USD)</label>
+            <input
+              type="number"
+              step="0.01"
+              min={0.01}
+              inputMode="decimal"
+              value={precio}
+              onChange={(e) => setPrecioManual(Number(e.target.value))}
+              className="w-full h-12 border border-neutral-300 rounded-md px-3 text-lg font-semibold tabular-nums"
+            />
+            <p className="text-xs text-neutral-500 mt-1">
+              {n > 0 ? `${n} × $${unitario.toFixed(2)} = $${sugerido.toFixed(2)} · sin fee` : "Elige las entradas"}
+              {precioEditado && (
+                <button type="button" onClick={reiniciarMonto} className="ml-2 underline">
+                  usar sugerido
+                </button>
+              )}
+            </p>
+            {metodoEsEnBs(metodoPago) && tasaEurVes === null && (
+              <p className="text-sm font-medium text-amber-800 mt-1">Tasa del día no disponible: cobra y registra en USD.</p>
+            )}
+          </div>
+        )}
         <div className="flex flex-col gap-3">
           {!esEfectivo && (
             <div>
@@ -211,7 +257,11 @@ export default function TaquillaForm({
         disabled={cargando || n === 0}
         className="h-14 bg-green-700 hover:bg-green-800 text-white rounded-lg text-base font-semibold disabled:opacity-50"
       >
-        {cargando ? "Registrando…" : n > 0 ? `Cobrar $${precio.toFixed(2)} — ${n} ${tipo === "vip" ? "VIP" : "General"}` : "Registrar venta"}
+        {cargando
+          ? "Registrando…"
+          : n > 0
+          ? `Cobrar ${enBs && montoBs != null ? `Bs ${fmtBs(montoBs)}` : `$${precio.toFixed(2)}`} — ${n} ${tipo === "vip" ? "VIP" : "General"}`
+          : "Registrar venta"}
       </button>
     </form>
   );
