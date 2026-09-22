@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
 import { calcularTotal, MAX_POR_COMPRA, type CotizacionCompra } from "@/lib/precios";
@@ -61,6 +61,16 @@ export default function CheckoutForm({
   const [duplicado, setDuplicado] = useState(false);
   const [confirmadas, setConfirmadas] = useState(0);
   const [codigoCompra, setCodigoCompra] = useState<string | null>(null);
+  // Duración total del apartado (para la barra del contador).
+  const [duracionPago, setDuracionPago] = useState(900);
+  // Al cambiar de paso, la pantalla sube al inicio del formulario: si no, la
+  // persona queda a media página y no ve el contador ni los avisos.
+  const raiz = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (fase === "seleccion") return;
+    const reducido = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    raiz.current?.scrollIntoView({ behavior: reducido ? "auto" : "smooth", block: "start" });
+  }, [fase]);
   const [avisoHorario, setAvisoHorario] = useState<string | null>(null);
 
   const sugerenciaCorreo = email.includes("@") ? sugerirCorreo(email) : null;
@@ -122,6 +132,7 @@ export default function CheckoutForm({
       return;
     }
     setExpiraEn(res.expiraEn);
+    setDuracionPago(Math.max(60, Math.round((new Date(res.expiraEn).getTime() - Date.now()) / 1000)));
     setCotizacion(res.cotizacion);
     setTasaCompra(res.tasaEurVes);
     setFase("pago");
@@ -185,41 +196,75 @@ export default function CheckoutForm({
   }
 
   if (fase === "confirmado") {
-    return (
-      <div className="bg-white border border-neutral-200 rounded-xl p-6 text-center flex flex-col gap-2">
-        <p className="text-lg font-semibold">¡Recibimos tu compra! 🎄</p>
-        {codigoCompra && (
-          <p className="text-sm text-neutral-600">
-            Tu código de compra: <strong className="font-mono tracking-wider text-neutral-900">{codigoCompra}</strong>
-          </p>
-        )}
-        <p className="text-sm text-neutral-600">
-          Estamos verificando tu pago. En cuanto se confirme, te llegará un correo a <strong>{email}</strong> con{" "}
-          {confirmadas > 1 ? `tus ${confirmadas} entradas y sus códigos QR` : "tu entrada y código QR"} de acceso.
-        </p>
-        <div className="text-left flex flex-col gap-2 mt-2">
-          {avisoHorario ? (
-            <p className="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2">{avisoHorario}</p>
-          ) : (
-            <p className="text-xs bg-neutral-50 border border-neutral-200 text-neutral-600 rounded-lg px-3 py-2">{TEXTO_HORARIO}</p>
-          )}
-          <p className="text-xs bg-neutral-50 border border-neutral-200 text-neutral-600 rounded-lg px-3 py-2">
-            <strong className="text-neutral-800">Revisa también Promociones y Spam (No deseado).</strong> Tus QR llegan en un correo
-            aparte de &ldquo;La Navidad Vallenata&rdquo;{codigoCompra ? ` con tu código ${codigoCompra}` : ""}. Si cae ahí, márcalo como
-            &ldquo;No es spam&rdquo; o muévelo a Principal.
-          </p>
+    const avisoCorreo = (
+      <div key="correo" className="rounded-xl border-2 border-evento-acento bg-[#FFF4F2] p-4 flex flex-col gap-2">
+        <div className="flex items-center gap-2 text-evento-principal">
+          <IconoCorreo />
+          <p className="text-base font-bold leading-tight">Revisa Promociones y Spam</p>
         </div>
-        {duplicado && (
-          <p className="text-sm text-amber-700 mt-2">
-            Esta compra ya la teníamos registrada con esa misma referencia — no la duplicamos. Si de verdad son dos
-            compras distintas, usa la referencia de cada pago por separado.
+        <p className="text-sm leading-relaxed text-[#5A1A1D]">
+          Tus QR llegan en <strong>otro correo</strong> de &ldquo;La Navidad Vallenata&rdquo;{codigoCompra ? <> con tu código <strong>{codigoCompra}</strong></> : null}.
+          Muchas veces cae en <strong>Promociones</strong> o en <strong>Spam (No deseado)</strong>: búscalo ahí y márcalo como &ldquo;No es spam&rdquo;.
+        </p>
+        <div className="rounded-lg bg-white border border-[#F2C9C4] px-3 py-2">
+          <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500">Te lo enviamos a</p>
+          <p className="text-base font-semibold text-neutral-900 break-all">{email}</p>
+          {sugerenciaCorreo && (
+            <p className="text-sm font-semibold text-evento-acento mt-1">
+              ¿Está bien escrito? Parece que quisiste poner {sugerenciaCorreo}. Si es así, escríbenos por WhatsApp para corregirlo.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+    const avisoHorarioBloque = (
+      <div
+        key="horario"
+        className={`rounded-xl p-4 flex flex-col gap-1.5 ${avisoHorario ? "border-2 border-amber-500 bg-amber-50" : "border border-amber-300 bg-amber-50/70"}`}
+      >
+        <div className="flex items-center gap-2 text-amber-900">
+          <IconoReloj />
+          <p className="text-base font-bold leading-tight">¿Cuándo llegan tus QR?</p>
+        </div>
+        {avisoHorario ? <p className="text-sm font-semibold leading-relaxed text-amber-950">{avisoHorario}</p> : null}
+        <p className="text-sm leading-relaxed text-amber-900">{TEXTO_HORARIO}</p>
+      </div>
+    );
+    return (
+      <div ref={raiz} className="scroll-mt-4 bg-white border border-neutral-200 rounded-xl overflow-hidden">
+        <div className="bg-marca-secundario text-white px-5 pt-6 pb-5 text-center flex flex-col items-center gap-1.5">
+          <span className="w-12 h-12 rounded-full bg-white/15 border border-white/30 flex items-center justify-center">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12.5l4.5 4.5L19 7.5" />
+            </svg>
+          </span>
+          <p className="text-2xl font-bold leading-tight">¡Recibimos tu compra!</p>
+          <p className="text-sm text-white/85">
+            Estamos verificando tu pago. Cuando se confirme te enviamos{" "}
+            {confirmadas > 1 ? `tus ${confirmadas} entradas con sus QR` : "tu entrada con su QR"}.
           </p>
-        )}
-        {avisoEmail && <p className="text-sm text-amber-700 mt-2">{avisoEmail}</p>}
-        <div className="mt-3">
+          {codigoCompra && (
+            <div className="mt-2 rounded-lg bg-white/10 border border-white/25 px-4 py-2 flex flex-col items-center">
+              <span className="text-[11px] uppercase tracking-[0.14em] text-white/75">Tu código de compra</span>
+              <span className="font-mono text-2xl font-bold tracking-[0.18em]">{codigoCompra}</span>
+              <span className="text-[11px] text-white/70">Guárdalo: con él te atendemos más rápido</span>
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 sm:p-5 flex flex-col gap-3">
+          {duplicado && (
+            <p className="text-sm rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2">
+              Esta compra ya la teníamos registrada con esa misma referencia — no la duplicamos. Si de verdad son dos compras
+              distintas, usa la referencia de cada pago por separado.
+            </p>
+          )}
+          {avisoEmail && <p className="text-sm rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2">{avisoEmail}</p>}
+          {/* Si entró fuera de horario, eso es lo primero que necesita saber. */}
+          {avisoHorario ? [avisoHorarioBloque, avisoCorreo] : [avisoCorreo, avisoHorarioBloque]}
           <BotonSoporte
             variante="boton"
-            texto="¿Te equivocaste en tu correo o teléfono? Escríbenos"
+            texto="¿Escribiste mal tu correo o teléfono? Escríbenos"
             mensaje={`Hola, acabo de comprar entradas para La Navidad Vallenata${codigoCompra ? ` (compra ${codigoCompra})` : ""} a nombre de ${nombre}. Mi correo registrado es ${email} y necesito ayuda con: `}
           />
         </div>
@@ -232,16 +277,45 @@ export default function CheckoutForm({
     const minutos = Math.floor(segundosRestantes / 60);
     const segundos = segundosRestantes % 60;
     const expirado = segundosRestantes <= 0;
+    const fraccion = Math.max(0, Math.min(1, segundosRestantes / duracionPago));
+    const urgencia = segundosRestantes <= 120 ? "critico" : segundosRestantes <= 300 ? "aviso" : "normal";
     const enBolivares = metodo.moneda === "VES";
     const montoBs = enBolivares && tasaCompra ? convertirABs(cotizacion.total, tasaCompra) : null;
     return (
-      <div className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">Completa tu pago</p>
-          <span className={`text-sm font-mono font-semibold ${expirado ? "text-red-600" : "text-neutral-700"}`}>
-            {expirado ? "Tiempo agotado" : `${minutos}:${segundos.toString().padStart(2, "0")}`}
-          </span>
+      <div ref={raiz} className="scroll-mt-4 bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
+        {/* Contador: fijo arriba mientras la persona baja a ver los datos de pago. */}
+        <div
+          role="timer"
+          aria-label={expirado ? "Tiempo agotado" : `Quedan ${minutos} minutos y ${segundos} segundos para pagar`}
+          className={`sticky top-2 z-20 -mx-5 -mt-5 rounded-t-xl px-5 pt-3 pb-3 text-white shadow-lg ${
+            expirado || urgencia === "critico" ? "bg-evento-acento" : urgencia === "aviso" ? "bg-amber-600" : "bg-marca-secundario"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-white/80">
+                {expirado ? "Se acabó el tiempo" : tipo === "vip" ? "Tus sillas están apartadas" : "Tus entradas están apartadas"}
+              </p>
+              <p className="text-sm font-semibold leading-snug">
+                {expirado
+                  ? "Vuelve a elegir para intentarlo de nuevo"
+                  : urgencia === "critico"
+                  ? "¡Últimos minutos! Paga y confirma ya"
+                  : "Paga y confirma antes de que termine el tiempo"}
+              </p>
+            </div>
+            <span
+              className={`font-mono text-4xl font-bold tabular-nums leading-none shrink-0 ${urgencia === "critico" && !expirado ? "motion-safe:animate-pulse" : ""}`}
+            >
+              {expirado ? "0:00" : `${minutos}:${segundos.toString().padStart(2, "0")}`}
+            </span>
+          </div>
+          <div className="mt-2.5 h-2 rounded-full bg-white/25 overflow-hidden" aria-hidden="true">
+            <div className="h-full rounded-full bg-white" style={{ width: `${fraccion * 100}%` }} />
+          </div>
         </div>
+
+        <p className="text-base font-semibold -mb-1">Completa tu pago</p>
 
         {tipo === "vip" && sillas.length > 0 && (
           <p className="text-sm text-neutral-600">
@@ -582,4 +656,22 @@ function netoPorEtapa(c: CotizacionCompra) {
     mapa.set(l.etapa, r);
   }
   return [...mapa.values()];
+}
+
+function IconoCorreo() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3.5 6.5l8.5 6.5 8.5-6.5" />
+    </svg>
+  );
+}
+
+function IconoReloj() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
 }
