@@ -7,6 +7,9 @@ import { calcularTotal, MAX_POR_COMPRA, type CotizacionCompra } from "@/lib/prec
 import { convertirABs } from "@/lib/tasa";
 import { INSTRUCCIONES_PAGO, BINANCE_QR_URL, metodosParaCanal, type MetodoPago } from "@/lib/pagos";
 import { iniciarCheckoutPublico, confirmarCheckoutPublico, liberarHoldPublico } from "./actions";
+import BotonSoporte from "@/components/BotonSoporte";
+import { sugerirCorreo } from "@/lib/correo";
+import { TEXTO_HORARIO, avisoFueraDeHorario } from "@/lib/horario";
 
 type Fase = "seleccion" | "pago" | "confirmado";
 
@@ -49,6 +52,10 @@ export default function CheckoutForm({
   const [avisoEmail, setAvisoEmail] = useState<string | null>(null);
   const [duplicado, setDuplicado] = useState(false);
   const [confirmadas, setConfirmadas] = useState(0);
+  const [codigoCompra, setCodigoCompra] = useState<string | null>(null);
+  const [avisoHorario, setAvisoHorario] = useState<string | null>(null);
+
+  const sugerenciaCorreo = email.includes("@") ? sugerirCorreo(email) : null;
 
   const cantidad = tipo === "vip" ? sillas.length : cantidadGeneral;
 
@@ -109,8 +116,12 @@ export default function CheckoutForm({
 
   async function confirmarPago() {
     setError(null);
-    if (!referencia) {
-      setError("Ingresa el número de referencia del pago.");
+    if (referencia.replace(/\s/g, "").length < 6) {
+      setError("Escribe el número de referencia completo, con todos los dígitos de tu comprobante.");
+      return;
+    }
+    if (!email.trim() || !telefono.trim()) {
+      setError("Revisa tu correo y tu teléfono: son la forma de enviarte tus QR y de contactarte.");
       return;
     }
     setCargando(true);
@@ -136,6 +147,8 @@ export default function CheckoutForm({
     setAvisoEmail(res.avisoEmail ?? null);
     setDuplicado(res.duplicado ?? false);
     setConfirmadas(res.cantidad);
+    setCodigoCompra(res.codigo ?? null);
+    setAvisoHorario(avisoFueraDeHorario(new Date()));
     setFase("confirmado");
   }
 
@@ -156,10 +169,27 @@ export default function CheckoutForm({
     return (
       <div className="bg-white border border-neutral-200 rounded-xl p-6 text-center flex flex-col gap-2">
         <p className="text-lg font-semibold">¡Recibimos tu compra! 🎄</p>
+        {codigoCompra && (
+          <p className="text-sm text-neutral-600">
+            Tu código de compra: <strong className="font-mono tracking-wider text-neutral-900">{codigoCompra}</strong>
+          </p>
+        )}
         <p className="text-sm text-neutral-600">
           Estamos verificando tu pago. En cuanto se confirme, te llegará un correo a <strong>{email}</strong> con{" "}
           {confirmadas > 1 ? `tus ${confirmadas} entradas y sus códigos QR` : "tu entrada y código QR"} de acceso.
         </p>
+        <div className="text-left flex flex-col gap-2 mt-2">
+          {avisoHorario ? (
+            <p className="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2">{avisoHorario}</p>
+          ) : (
+            <p className="text-xs bg-neutral-50 border border-neutral-200 text-neutral-600 rounded-lg px-3 py-2">{TEXTO_HORARIO}</p>
+          )}
+          <p className="text-xs bg-neutral-50 border border-neutral-200 text-neutral-600 rounded-lg px-3 py-2">
+            <strong className="text-neutral-800">Revisa también Promociones y Spam (No deseado).</strong> Tus QR llegan en un correo
+            aparte de &ldquo;La Navidad Vallenata&rdquo;{codigoCompra ? ` con tu código ${codigoCompra}` : ""}. Si cae ahí, márcalo como
+            &ldquo;No es spam&rdquo; o muévelo a Principal.
+          </p>
+        </div>
         {duplicado && (
           <p className="text-sm text-amber-700 mt-2">
             Esta compra ya la teníamos registrada con esa misma referencia — no la duplicamos. Si de verdad son dos
@@ -167,6 +197,13 @@ export default function CheckoutForm({
           </p>
         )}
         {avisoEmail && <p className="text-sm text-amber-700 mt-2">{avisoEmail}</p>}
+        <div className="mt-3">
+          <BotonSoporte
+            variante="boton"
+            texto="¿Te equivocaste en tu correo o teléfono? Escríbenos"
+            mensaje={`Hola, acabo de comprar entradas para La Navidad Vallenata${codigoCompra ? ` (compra ${codigoCompra})` : ""} a nombre de ${nombre}. Mi correo registrado es ${email} y necesito ayuda con: `}
+          />
+        </div>
       </div>
     );
   }
@@ -199,20 +236,24 @@ export default function CheckoutForm({
           </p>
         )}
 
-        <div className="flex flex-col gap-1.5 border-y border-neutral-200 py-3">
-          {cotizacion.resumen.map((r) => (
+        <div className="flex flex-col gap-1.5 border-y border-neutral-200 py-3 tabular-nums">
+          {netoPorEtapa(cotizacion).map((r) => (
             <div key={r.etapa} className="flex items-center justify-between text-sm text-neutral-600">
               <span>
-                {r.cantidad} × {r.nombreEtapa}
+                {r.cantidad} × {r.nombreEtapa} · ${r.unitario.toFixed(2)} c/u
               </span>
-              <span>${(r.cantidad * r.totalUnitario).toFixed(2)}</span>
+              <span>${r.neto.toFixed(2)}</span>
             </div>
           ))}
-          <div className="flex items-center justify-between text-xs text-neutral-400">
-            <span>Incluye fee de servicio (10 %)</span>
+          <div className="flex items-center justify-between text-sm text-neutral-800 border-t border-dashed border-neutral-200 pt-1.5">
+            <span>Subtotal (precio neto)</span>
+            <span>${cotizacion.base.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm text-neutral-800">
+            <span>Fee de servicio (10 %)</span>
             <span>${cotizacion.fee.toFixed(2)}</span>
           </div>
-          <div className="flex items-center justify-between text-base font-bold text-neutral-900 pt-1">
+          <div className="flex items-center justify-between text-base font-bold text-neutral-900 pt-1 border-t border-neutral-200 mt-0.5">
             <span>Total a pagar</span>
             <span>${cotizacion.total.toFixed(2)}</span>
           </div>
@@ -253,13 +294,63 @@ export default function CheckoutForm({
 
         {!expirado && (
           <div>
-            <label className="block text-sm font-medium mb-1">Número de referencia del pago</label>
+            <label className="block text-sm font-medium mb-1" htmlFor="referencia-pago">
+              {metodoPago === "zelle"
+                ? "Número de confirmación completo"
+                : metodoPago === "binance"
+                ? "Número de orden completo"
+                : "Número de referencia completo"}
+            </label>
             <input
+              id="referencia-pago"
               value={referencia}
               onChange={(e) => setReferencia(e.target.value)}
-              className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
-              placeholder="Últimos dígitos, número de confirmación…"
+              inputMode={metodoPago === "zelle" ? "text" : "numeric"}
+              autoComplete="off"
+              className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm font-mono tracking-wide"
+              placeholder="Referencia completa"
             />
+            <p className="text-xs text-neutral-500 mt-1">
+              {metodoPago === "zelle"
+                ? "Copia el número de confirmación completo que te da tu banco."
+                : metodoPago === "binance"
+                ? "Copia el número de orden completo que te muestra Binance al confirmar."
+                : "Copia la referencia completa del comprobante de tu banco, no solo los últimos dígitos. Con la referencia completa confirmamos tu pago más rápido."}
+            </p>
+          </div>
+        )}
+
+        {!expirado && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex flex-col gap-2">
+            <p className="text-sm font-semibold text-amber-900">Revisa tus datos antes de confirmar</p>
+            <p className="text-xs text-amber-900/80 -mt-1">Tus QR llegan a este correo. Si está mal escrito, no te llegarán.</p>
+            <div>
+              <label className="block text-xs font-medium text-neutral-700 mb-1" htmlFor="correo-revision">Correo</label>
+              <input
+                id="correo-revision"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm bg-white"
+              />
+              {sugerenciaCorreo && (
+                <button type="button" onClick={() => setEmail(sugerenciaCorreo)} className="text-xs text-amber-900 underline underline-offset-2 mt-1 text-left">
+                  ¿Quisiste decir <strong>{sugerenciaCorreo}</strong>? Toca para corregir
+                </button>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-neutral-700 mb-1" htmlFor="telefono-revision">Teléfono (WhatsApp)</label>
+              <input
+                id="telefono-revision"
+                type="tel"
+                value={telefono}
+                onChange={(e) => setTelefono(e.target.value)}
+                autoComplete="tel"
+                className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm bg-white"
+              />
+            </div>
           </div>
         )}
 
@@ -288,6 +379,7 @@ export default function CheckoutForm({
             {cargando ? "Confirmando…" : "Ya pagué — confirmar"}
           </button>
         )}
+        <BotonSoporte mensaje={`Hola, estoy comprando entradas para La Navidad Vallenata a nombre de ${nombre || "(mi nombre)"} y tengo una duda con el pago: `} />
       </div>
     );
   }
@@ -396,7 +488,20 @@ export default function CheckoutForm({
 
       <div>
         <label className="block text-sm font-medium mb-1">Correo (para enviarte los QR)</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm" />
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
+        />
+        {sugerenciaCorreo ? (
+          <button type="button" onClick={() => setEmail(sugerenciaCorreo)} className="text-xs text-amber-800 underline underline-offset-2 mt-1 text-left">
+            ¿Quisiste decir <strong>{sugerenciaCorreo}</strong>? Toca para corregir
+          </button>
+        ) : (
+          <p className="text-xs text-neutral-500 mt-1">Revísalo bien: si tiene un error, tus QR no te van a llegar.</p>
+        )}
       </div>
 
       <div>
@@ -447,6 +552,19 @@ export default function CheckoutForm({
       >
         {cargando ? "Reservando…" : cantidad > 0 ? `Continuar — $${totalEstimado.toFixed(2)}` : "Continuar"}
       </button>
+      <BotonSoporte />
     </div>
   );
+}
+
+// Precio neto (sin fee) por etapa, para el desglose Subtotal / Fee / Total.
+function netoPorEtapa(c: CotizacionCompra) {
+  const mapa = new Map<string, { etapa: string; nombreEtapa: string; cantidad: number; unitario: number; neto: number }>();
+  for (const l of c.lineas) {
+    const r = mapa.get(l.etapa) ?? { etapa: l.etapa, nombreEtapa: l.nombreEtapa, cantidad: 0, unitario: l.base, neto: 0 };
+    r.cantidad += 1;
+    r.neto = Math.round((r.neto + l.base) * 100) / 100;
+    mapa.set(l.etapa, r);
+  }
+  return [...mapa.values()];
 }

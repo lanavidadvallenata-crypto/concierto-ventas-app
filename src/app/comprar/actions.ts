@@ -5,6 +5,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarCorreoPendiente } from "@/lib/enviar-qr";
+import { codigoCompra } from "@/lib/compra";
 import { liberarSillasVencidas } from "@/lib/mapa-vip";
 import { cotizarCompra, MAX_POR_COMPRA, type CotizacionCompra, type DisponibilidadEtapa } from "@/lib/precios";
 import { METODOS_PAGO_ACTIVOS, metodoEsEnBs } from "@/lib/pagos";
@@ -128,14 +129,19 @@ const confirmarSchema = z.object({
     .toLowerCase()
     .email("Correo inválido — es la única forma de enviarte el QR de entrada."),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
-  referenciaPago: z.string().trim().min(3, "Ingresa el número de referencia del pago."),
+  // Referencia COMPLETA (Anita, 22 sep): con los últimos dígitos solos,
+  // Finanzas no puede ubicar el pago en el estado de cuenta.
+  referenciaPago: z
+    .string()
+    .trim()
+    .refine((r) => r.replace(/\s/g, "").length >= 6, "Escribe el número de referencia completo, con todos los dígitos de tu comprobante."),
   // Campo invisible anti-bots. Se valida a mano más abajo (si fuera max(0) en
   // el schema, el bot recibiría un error de validación en vez del éxito falso).
   honeypot: z.string().optional(),
 });
 
 export type ConfirmarCheckoutResult =
-  | { ok: true; avisoEmail?: string; duplicado?: boolean; cantidad: number; total: number }
+  | { ok: true; avisoEmail?: string; duplicado?: boolean; cantidad: number; total: number; codigo?: string }
   | { ok: false; error: string };
 
 // Libera el hold de ESTA compra cuando el comprador vuelve atrás a elegir otras
@@ -197,7 +203,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   // 10 minutos → no crear un segundo grupo de tickets; avisar que ya estaba.
   const { data: ticketsExistentes } = await service
     .from("tickets")
-    .select("id")
+    .select("id, grupo_id")
     .eq("comprador_email", v.compradorEmail)
     .eq("referencia_pago", v.referenciaPago)
     .eq("tipo", v.tipo)
@@ -205,7 +211,8 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     .limit(1);
 
   if (ticketsExistentes && ticketsExistentes.length > 0) {
-    return { ok: true, duplicado: true, cantidad, total: 0 };
+    const grupoExistente = ticketsExistentes[0].grupo_id as string | null;
+    return { ok: true, duplicado: true, cantidad, total: 0, codigo: grupoExistente ? codigoCompra(grupoExistente) : undefined };
   }
 
   if (v.tipo === "general") {
@@ -330,6 +337,8 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       cantidad,
       tipo: v.tipo,
       totalUsd: cotizacion.total,
+      subtotalUsd: cotizacion.base,
+      feeUsd: cotizacion.fee,
       totalBs,
       referencia: v.referenciaPago,
       grupoId,
@@ -339,5 +348,5 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     avisoEmail = "Tu compra quedó registrada, pero no pudimos enviarte el correo de confirmación — escríbenos por WhatsApp para avisarte cuando esté listo tu QR.";
   }
 
-  return { ok: true, avisoEmail, cantidad, total: cotizacion.total };
+  return { ok: true, avisoEmail, cantidad, total: cotizacion.total, codigo: codigoCompra(grupoId) };
 }

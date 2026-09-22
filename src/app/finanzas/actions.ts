@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generarTokenQR } from "@/lib/qr";
@@ -318,6 +319,45 @@ export async function reenviarQR(ticketId: string): Promise<Resultado> {
     .update({ qr_enviado_en: new Date().toISOString() })
     .in("id", verificados.map((t) => t.id));
   return { ok: true, aviso: `${entradas.length > 1 ? `${entradas.length} QR reenviados` : "QR reenviado"} a ${primero.comprador_email}.` };
+}
+
+// Corregir correo/teléfono de una compra (Anita, 22 sep): quien escribió mal
+// su correo no recibe nada. Finanzas corrige el dato de TODA la compra y
+// luego usa "Reenviar QR". Riesgo a vigilar: alguien podría pedir por
+// WhatsApp que manden las entradas de otro a su correo — por eso la pantalla
+// pide confirmar identidad (captura del pago y referencia) antes de guardar,
+// y queda en el log del servidor quién cambió qué.
+const esquemaContacto = z.object({
+  email: z.string().trim().toLowerCase().email("Ese correo no es válido — revísalo."),
+  telefono: z.string().trim().min(7, "Ese teléfono no es válido — revísalo.").max(25, "Ese teléfono es demasiado largo."),
+});
+
+export async function corregirContacto(ticketId: string, email: string, telefono: string): Promise<Resultado> {
+  const { user, error } = await requiereFinanzas();
+  if (!user) return { ok: false, error: error! };
+
+  const parsed = esquemaContacto.safeParse({ email, telefono });
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+
+  const grupo = await obtenerGrupo(ticketId);
+  if ("error" in grupo) return { ok: false, error: grupo.error };
+
+  const primero = grupo.tickets[0] as TicketGrupo & { comprador_email?: string | null };
+  const service = createServiceClient();
+  const { error: dbError } = await service
+    .from("tickets")
+    .update({ comprador_email: parsed.data.email, comprador_telefono: parsed.data.telefono })
+    .in("id", grupo.tickets.map((t) => t.id));
+  if (dbError) {
+    console.error("Error corrigiendo contacto:", dbError.message);
+    return { ok: false, error: "No se pudo guardar. Intenta de nuevo." };
+  }
+  console.log(
+    `[corregir-contacto] ${user.email ?? user.id} · compra ${primero.grupo_id ?? primero.id} · correo ${primero.comprador_email ?? "—"} → ${parsed.data.email}`
+  );
+
+  revalidatePath("/finanzas");
+  return { ok: true, aviso: `Datos guardados: ${parsed.data.email} · ${parsed.data.telefono}.` };
 }
 
 export type TicketBuscado = {

@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
+import BotonSoporte from "@/components/BotonSoporte";
 import { codigoEntrada } from "@/lib/qr";
 
 // Página pública de UNA entrada: el mismo QR que va en el correo, abierto
@@ -138,8 +139,11 @@ export default async function EntradaPublicaPage({ params }: { params: Promise<{
           <div className="px-6 pb-6" />
         )}
 
+        <div className="px-6 pb-5 flex justify-center">
+          <BotonSoporte texto="¿Problemas con tu entrada? Escríbenos por WhatsApp" />
+        </div>
         <div className="bg-[#F1ECE2] px-6 py-3 text-center">
-          <span className="text-[11px] text-[#898477]">Un evento de 6.18 Producciones · Soporte {WHATSAPP_SOPORTE_VISIBLE}</span>
+          <span className="text-[11px] text-[#898477]">Un evento de 6.18 Producciones</span>
         </div>
       </div>
     </main>
@@ -153,6 +157,9 @@ function Aviso({ titulo, detalle }: { titulo: string; detalle: string }) {
         <p className="text-[11px] uppercase tracking-[0.15em] text-[#898477]">La Navidad Vallenata</p>
         <h1 className="text-xl font-bold text-[#3D0507]">{titulo}</h1>
         <p className="text-sm text-neutral-600 leading-relaxed">{detalle}</p>
+        <div className="mt-2">
+          <BotonSoporte variante="boton" texto="Escríbenos por WhatsApp" />
+        </div>
       </div>
     </main>
   );

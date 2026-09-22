@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
+import BotonSoporte from "@/components/BotonSoporte";
 import { codigoCompra } from "@/lib/compra";
 import { codigoEntrada } from "@/lib/qr";
 
@@ -140,8 +141,13 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
         ))}
 
         <p className="text-[11px] text-[#898477] text-center px-4">
-          Cada entrada entra una sola vez. Si compartes una con dos personas, solo pasa la primera que la presente. Soporte {WHATSAPP_SOPORTE_VISIBLE}.
+          Cada entrada entra una sola vez. Si compartes una con dos personas, solo pasa la primera que la presente.
         </p>
+        <BotonSoporte
+          variante="boton"
+          texto="¿Algún problema con tus entradas? Escríbenos"
+          mensaje={`Hola, tengo un problema con mis entradas de La Navidad Vallenata (compra ${codigo}, a nombre de ${nombre}): `}
+        />
       </div>
     </main>
   );
@@ -154,6 +160,9 @@ function Aviso({ titulo, detalle }: { titulo: string; detalle: string }) {
         <p className="text-[11px] uppercase tracking-[0.15em] text-[#898477]">La Navidad Vallenata</p>
         <h1 className="text-xl font-bold text-[#3D0507]">{titulo}</h1>
         <p className="text-sm text-neutral-600 leading-relaxed">{detalle}</p>
+        <div className="mt-2">
+          <BotonSoporte variante="boton" texto="Escríbenos por WhatsApp" />
+        </div>
       </div>
     </main>
   );

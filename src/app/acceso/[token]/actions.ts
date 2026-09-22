@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPerfilActual } from "@/lib/perfil";
+import { crearMarcaIngreso } from "@/lib/marca-ingreso";
 
 // Marca el ticket como usado. Es la ÚNICA escritura de la puerta y solo
 // ocurre con el toque en "DEJAR ENTRAR" — nunca al abrir el enlace.
@@ -39,10 +40,11 @@ export async function registrarIngreso(formData: FormData) {
 
   if (marcado) {
     await service.from("accesos").insert({ ticket_id: marcado.id, resultado: "valido", escaneado_por: perfil.id });
-    redirect(`/acceso/${token}`);
+    // Solo ESTE teléfono verá el verde (ver src/lib/marca-ingreso.ts).
+    redirect(`/acceso/${token}?ok=${crearMarcaIngreso(token)}`);
   }
 
-  // No se marcó: otro carril lo validó entre que se abrió la pantalla y el
-  // toque (o dejó de estar verificado). La página lo muestra en ámbar/rojo.
+  // No se marcó: otro teléfono lo registró entre que se abrió la pantalla y
+  // el toque (o dejó de estar verificado). La página lo muestra en ROJO.
   redirect(`/acceso/${token}?repetido=1`);
 }

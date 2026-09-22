@@ -4,6 +4,7 @@ import { URL_EQUIPO } from "@/lib/dominios";
 import { urlWhatsAppSoporte, WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import { codigoCompra } from "@/lib/compra";
 import { codigoEntrada } from "@/lib/qr";
+import { TEXTO_HORARIO, avisoFueraDeHorario } from "@/lib/horario";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
@@ -129,6 +130,10 @@ export async function enviarCorreoPendiente(params: {
   cantidad?: number;
   tipo?: "vip" | "general";
   totalUsd?: number;
+  // Desglose (solo compra web, donde el precio es de lista): neto + fee 10 %.
+  // En ventas manuales el precio puede ser negociado y no se desglosa.
+  subtotalUsd?: number;
+  feeUsd?: number;
   totalBs?: number | null;
   referencia?: string | null;
   // grupo_id de la compra: asunto único + cabecera anti-agrupación (ver codigoCompra).
@@ -138,14 +143,58 @@ export async function enviarCorreoPendiente(params: {
   const codigo = params.grupoId ? codigoCompra(params.grupoId) : null;
   const nombre = escapeHtml(params.nombreComprador);
   const cantidad = params.cantidad ?? 1;
+  const filaMonto = (etiqueta: string, valor: string, fuerte = false) =>
+    `<tr><td style="padding:2px 0;font-size:13.5px;color:${fuerte ? "#303030" : "#5A5650"};${fuerte ? "font-weight:700;" : ""}">${etiqueta}</td><td align="right" style="padding:2px 0;font-size:13.5px;color:${fuerte ? "#303030" : "#5A5650"};${fuerte ? "font-weight:700;" : ""}white-space:nowrap;">${valor}</td></tr>`;
+  const desglose =
+    params.subtotalUsd != null && params.feeUsd != null && params.totalUsd != null
+      ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-top:1px solid #E4DDD0;padding-top:6px;">
+          ${filaMonto("Subtotal (precio neto)", fmtUsd(params.subtotalUsd))}
+          ${filaMonto("Fee de servicio (10 %)", fmtUsd(params.feeUsd))}
+          ${filaMonto("Total", `${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}`, true)}
+        </table>`
+      : "";
   const detalle =
     params.tipo && params.totalUsd != null
-      ? `<p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
-          <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${params.tipo === "vip" ? "VIP" : "General"}</strong> · ${fmtUsd(params.totalUsd)}${
-          params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""
-        }${params.referencia ? `<br><span style="color:#8A8782;font-size:12.5px;">Referencia de pago: ${escapeHtml(params.referencia)}</span>` : ""}
-        </p>`
+      ? `<div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
+          <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${params.tipo === "vip" ? "VIP" : "General"}</strong>${
+          desglose ? "" : ` · ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}`
+        }${desglose}${params.referencia ? `<div style="color:#8A8782;font-size:12.5px;margin-top:6px;">Referencia de pago: ${escapeHtml(params.referencia)}</div>` : ""}${
+          codigo ? `<div style="color:#8A8782;font-size:12.5px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>` : ""
+        }
+        </div>`
       : "";
+
+  // Avisos pedidos por Anita (22 sep): horario de confirmación (el de esta
+  // compra si entró fuera de horario) y revisar Promociones/Spam, porque en la
+  // primera tanda real 1 de 6 correos de QR cayó en Promociones.
+  const fueraDeHorario = avisoFueraDeHorario(new Date());
+  const avisoHorarioHtml = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FFF6E5;border-left:3px solid #D97706;border-radius:6px;margin:0 0 10px;">
+      <tr><td style="padding:12px 14px;">
+        <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#7C2D12;">Horario de confirmación</p>
+        ${fueraDeHorario ? `<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:#7C2D12;font-weight:700;">${fueraDeHorario}</p>` : ""}
+        <p style="margin:0;font-size:12.5px;line-height:1.5;color:#7C2D12;">${TEXTO_HORARIO}</p>
+      </td></tr>
+    </table>`;
+  const avisoBandejaHtml = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F1ECE2;border-left:3px solid #3D0507;border-radius:6px;margin:0 0 10px;">
+      <tr><td style="padding:12px 14px;">
+        <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#3D0507;">Revisa Promociones y Spam (No deseado)</p>
+        <p style="margin:0;font-size:12.5px;line-height:1.5;color:#5A1A1D;">Tus QR llegan en <strong>otro correo</strong> de &ldquo;La Navidad Vallenata&rdquo;${
+          codigo ? ` con tu código de compra <strong>${codigo}</strong>` : ""
+        }. Si no lo ves en tu bandeja principal, búscalo en Promociones y en Spam, y márcalo como &ldquo;No es spam&rdquo; para que no se pierda.</p>
+      </td></tr>
+    </table>`;
+  const mensajeWa = `Hola, compré entradas para La Navidad Vallenata${codigo ? ` (compra ${codigo})` : ""} a nombre de ${params.nombreComprador}. Necesito ayuda con: `;
+  const botonSoporteHtml = `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px auto 0;">
+      <tr>
+        <td align="center" style="background-color:#25D366;border-radius:8px;">
+          <a href="${urlWhatsAppSoporte(mensajeWa)}" style="display:inline-block;padding:11px 20px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13.5px;font-weight:700;color:#FFFFFF;text-decoration:none;">¿Algún dato mal escrito? Escríbenos por WhatsApp</a>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:6px 0 0;font-size:12px;color:#8A8782;text-align:center;">${WHATSAPP_SOPORTE_VISIBLE} · o responde este correo</p>`;
 
   const html = envolverCorreo(`
     <tr>
@@ -161,12 +210,18 @@ export async function enviarCorreoPendiente(params: {
         ${detalle}
         <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">En cuanto se confirme, te llegará un correo a esta misma dirección con ${
           cantidad > 1 ? "tus <strong>entradas y códigos QR</strong> de acceso (uno por persona)" : "tu <strong>entrada y código QR</strong> de acceso"
-        }. Normalmente toma poco tiempo — no necesitas hacer nada más por ahora.</p>
+        }. No necesitas hacer nada más por ahora.</p>
       </td>
     </tr>
     <tr>
-      <td style="padding:4px 28px 32px;">
-        <p style="margin:0;font-size:12.5px;line-height:1.6;color:#8A8782;border-top:1px solid #F1ECE2;padding-top:16px;">¿Alguna duda sobre tu compra? Escríbenos por WhatsApp al ${WHATSAPP_SOPORTE_VISIBLE}.</p>
+      <td style="padding:10px 28px 4px;">
+        ${avisoHorarioHtml}
+        ${avisoBandejaHtml}
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:8px 28px 30px;border-top:1px solid #F1ECE2;">
+        ${botonSoporteHtml}
       </td>
     </tr>
   `);
@@ -294,6 +349,7 @@ export async function enviarCorreoQR(params: {
             </td>
           </tr>
         </table>
+        <p style="margin:14px 0 0;font-size:12.5px;line-height:1.6;color:#8A8782;text-align:center;">¿Algún problema con tus entradas? Escríbenos por WhatsApp al <strong style="color:#303030;">${WHATSAPP_SOPORTE_VISIBLE}</strong> o responde este correo.</p>
       </td>
     </tr>
   `);

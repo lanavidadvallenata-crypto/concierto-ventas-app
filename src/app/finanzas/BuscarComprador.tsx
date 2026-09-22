@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { buscarTickets, reenviarQR, reabrirPago, type TicketBuscado } from "./actions";
+import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, type TicketBuscado } from "./actions";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
 
 const ESTADO: Record<TicketBuscado["estadoPago"], { texto: string; clase: string }> = {
@@ -22,6 +22,39 @@ export default function BuscarComprador() {
   const [error, setError] = useState<string | null>(null);
   const [accionando, setAccionando] = useState<string | null>(null);
   const [avisos, setAvisos] = useState<Record<string, { tipo: "ok" | "error"; texto: string }>>({});
+  // Corrección de correo/teléfono: una compra a la vez.
+  const [editando, setEditando] = useState<string | null>(null);
+  const [nuevoEmail, setNuevoEmail] = useState("");
+  const [nuevoTelefono, setNuevoTelefono] = useState("");
+  const [identidadConfirmada, setIdentidadConfirmada] = useState(false);
+
+  function abrirEdicion(t: TicketBuscado) {
+    setEditando(t.grupoId);
+    setNuevoEmail(t.compradorEmail ?? "");
+    setNuevoTelefono(t.compradorTelefono ?? "");
+    setIdentidadConfirmada(false);
+  }
+
+  async function guardarContacto(t: TicketBuscado) {
+    setAccionando(t.grupoId);
+    const res = await corregirContacto(t.id, nuevoEmail, nuevoTelefono);
+    setAccionando(null);
+    if (res.ok) {
+      const email = nuevoEmail.trim().toLowerCase();
+      const tel = nuevoTelefono.trim();
+      setResultados((prev) => prev?.map((x) => (x.grupoId === t.grupoId ? { ...x, compradorEmail: email, compradorTelefono: tel } : x)) ?? null);
+      setEditando(null);
+    }
+    setAvisos((prev) => ({
+      ...prev,
+      [t.grupoId]: res.ok
+        ? {
+            tipo: "ok",
+            texto: `${res.aviso ?? "Datos guardados."}${t.estadoPago === "verificado" && t.canal !== "taquilla" ? " Ahora toca “Reenviar QR” para mandarle sus entradas al correo nuevo." : ""}`,
+          }
+        : { tipo: "error", texto: res.error },
+    }));
+  }
 
   async function onBuscar(e: React.FormEvent) {
     e.preventDefault();
@@ -129,6 +162,16 @@ export default function BuscarComprador() {
                       {ocupado ? "Enviando…" : `Reenviar ${t.cantidad > 1 ? "los QR" : "QR"} por correo`}
                     </button>
                   )}
+                  {t.canal !== "taquilla" && editando !== t.grupoId && (
+                    <button
+                      type="button"
+                      onClick={() => abrirEdicion(t)}
+                      disabled={ocupado}
+                      className="mt-1 h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+                    >
+                      Corregir correo / teléfono
+                    </button>
+                  )}
                   {t.estadoPago === "rechazado" && (
                     <button
                       type="button"
@@ -140,6 +183,49 @@ export default function BuscarComprador() {
                     </button>
                   )}
                 </div>
+                {editando === t.grupoId && (
+                  <div className="mt-1 border border-amber-300 bg-amber-50 rounded-lg p-3 flex flex-col gap-2">
+                    <p className="text-xs text-amber-900">
+                      Antes de cambiar el correo, confirma que es el comprador: pídele la captura del pago y verifica la referencia
+                      {t.referenciaPago ? ` (${t.referenciaPago})` : ""} y el monto. Así nadie se queda con entradas ajenas.
+                    </p>
+                    <label className="text-xs font-medium text-neutral-700">
+                      Correo correcto
+                      <input
+                        type="email"
+                        value={nuevoEmail}
+                        onChange={(e) => setNuevoEmail(e.target.value)}
+                        className="mt-1 w-full h-10 border border-neutral-300 rounded-md px-3 text-sm bg-white"
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-neutral-700">
+                      Teléfono correcto
+                      <input
+                        type="tel"
+                        value={nuevoTelefono}
+                        onChange={(e) => setNuevoTelefono(e.target.value)}
+                        className="mt-1 w-full h-10 border border-neutral-300 rounded-md px-3 text-sm bg-white"
+                      />
+                    </label>
+                    <label className="flex items-start gap-2 text-xs text-neutral-800">
+                      <input type="checkbox" checked={identidadConfirmada} onChange={(e) => setIdentidadConfirmada(e.target.checked)} className="mt-0.5" />
+                      Verifiqué la captura del pago con la referencia y el monto.
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => guardarContacto(t)}
+                        disabled={ocupado || !identidadConfirmada || !nuevoEmail.trim() || !nuevoTelefono.trim()}
+                        className="h-9 px-3 bg-neutral-900 text-white rounded-lg text-xs font-semibold disabled:opacity-50"
+                      >
+                        {ocupado ? "Guardando…" : "Guardar datos"}
+                      </button>
+                      <button type="button" onClick={() => setEditando(null)} className="h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold">
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {aviso && (
                   <p className={`text-xs rounded-md px-3 py-2 ${aviso.tipo === "ok" ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
                     {aviso.texto}
