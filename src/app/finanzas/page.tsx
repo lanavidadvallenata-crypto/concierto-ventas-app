@@ -5,6 +5,7 @@ import Nav from "@/components/Nav";
 import PendientesList, { type CompraPendiente } from "./PendientesList";
 import TasaCambio from "./TasaCambio";
 import BuscarComprador from "./BuscarComprador";
+import AprobadasList, { type FilaAprobada } from "./AprobadasList";
 import AutoRefresh from "@/app/dashboard/AutoRefresh";
 import { seleccionarTodo } from "@/lib/db";
 
@@ -109,6 +110,67 @@ export default async function FinanzasPage() {
   const totalPendienteUsd = lista.reduce((s, c) => s + c.total, 0);
   const entradasPendientes = lista.reduce((s, c) => s + c.cantidad, 0);
 
+  // Auditoría solo para admin: compras ya verificadas, con quién las aprobó y
+  // cuándo. Consulta aparte y acotada — no toca la cola de pendientes.
+  const aprobadas: FilaAprobada[] = [];
+  if (perfil.rol === "admin") {
+    type TicketAprobado = {
+      id: string; grupo_id: string | null; comprador_nombre: string; comprador_email: string | null;
+      tipo: string; precio: number | string; precio_bs: number | string | null; metodo_pago: string;
+      referencia_pago: string | null; canal: string | null; verificado_por: string | null;
+      verificado_en: string | null; created_at: string;
+    };
+    const { data: verificados } = await service
+      .from("tickets")
+      .select(
+        "id, grupo_id, comprador_nombre, comprador_email, tipo, precio, precio_bs, metodo_pago, referencia_pago, canal, verificado_por, verificado_en, created_at"
+      )
+      .eq("estado_pago", "verificado")
+      .order("verificado_en", { ascending: false, nullsFirst: false })
+      .limit(400);
+
+    const filasVerificadas = (verificados ?? []) as TicketAprobado[];
+
+    const aprobadorIds = [...new Set(filasVerificadas.map((t) => t.verificado_por).filter(Boolean))] as string[];
+    const { data: aprobadores } = aprobadorIds.length
+      ? await service.from("perfiles").select("id, nombre").in("id", aprobadorIds)
+      : { data: [] as { id: string; nombre: string }[] };
+    const aprobadorPorId = new Map((aprobadores ?? []).map((a) => [a.id, a.nombre]));
+
+    const porGrupo = new Map<string, FilaAprobada>();
+    for (const t of filasVerificadas) {
+      const gid = t.grupo_id ?? t.id;
+      const precio = Number(t.precio);
+      const precioBs = t.precio_bs == null ? null : Number(t.precio_bs);
+      const existente = porGrupo.get(gid);
+      if (existente) {
+        existente.cantidad += 1;
+        existente.total = Math.round((existente.total + precio) * 100) / 100;
+        existente.totalBs =
+          existente.totalBs != null && precioBs != null
+            ? Math.round((existente.totalBs + precioBs) * 100) / 100
+            : existente.totalBs;
+        continue;
+      }
+      porGrupo.set(gid, {
+        grupoId: gid,
+        compradorNombre: t.comprador_nombre,
+        compradorEmail: t.comprador_email,
+        tipo: t.tipo === "vip" ? "vip" : "general",
+        cantidad: 1,
+        total: precio,
+        totalBs: precioBs,
+        metodoPago: t.metodo_pago,
+        referenciaPago: t.referencia_pago,
+        canal: t.canal ?? "web",
+        aprobadoPor: t.verificado_por ? (aprobadorPorId.get(t.verificado_por) ?? "—") : null,
+        aprobadoEn: t.verificado_en,
+        creadoEn: t.created_at,
+      });
+    }
+    aprobadas.push(...[...porGrupo.values()].slice(0, 40));
+  }
+
   return (
     <>
       <Nav perfil={perfil} />
@@ -128,6 +190,8 @@ export default async function FinanzasPage() {
         <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
 
         <BuscarComprador />
+
+        {perfil.rol === "admin" && <AprobadasList filas={aprobadas} />}
 
         <TasaCambio tasaActual={tasaActual} />
       </main>
