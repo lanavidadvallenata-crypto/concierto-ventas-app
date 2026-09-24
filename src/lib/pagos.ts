@@ -1,6 +1,6 @@
 export type MetodoPago = "pago_movil" | "transferencia" | "zelle" | "binance" | "efectivo_usd" | "efectivo_bs";
 
-export type Canal = "web" | "manual" | "taquilla";
+export type Canal = "web" | "manual" | "taquilla" | "patrocinio";
 
 export const METODOS_PAGO: {
   valor: MetodoPago;
@@ -13,12 +13,12 @@ export const METODOS_PAGO: {
 }[] = [
   // Pago móvil: activo desde el 21 sep (datos de Anita: BNC, RIF J-507237133,
   // 0424-2251711). Va primero porque es el método más usado en Venezuela.
-  { valor: "pago_movil", etiqueta: "Pago móvil", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla"] },
-  { valor: "transferencia", etiqueta: "Transferencia bancaria", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla"] },
-  { valor: "zelle", etiqueta: "Zelle", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla"] },
-  { valor: "binance", etiqueta: "Binance", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla"] },
-  { valor: "efectivo_usd", etiqueta: "Efectivo (dólares)", moneda: "USD", activo: true, canales: ["manual", "taquilla"] },
-  { valor: "efectivo_bs", etiqueta: "Efectivo (bolívares)", moneda: "VES", activo: true, canales: ["manual", "taquilla"] },
+  { valor: "pago_movil", etiqueta: "Pago móvil", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
+  { valor: "transferencia", etiqueta: "Transferencia bancaria", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
+  { valor: "zelle", etiqueta: "Zelle", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
+  { valor: "binance", etiqueta: "Binance", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
+  { valor: "efectivo_usd", etiqueta: "Efectivo (dólares)", moneda: "USD", activo: true, canales: ["manual", "taquilla", "patrocinio"] },
+  { valor: "efectivo_bs", etiqueta: "Efectivo (bolívares)", moneda: "VES", activo: true, canales: ["manual", "taquilla", "patrocinio"] },
 ];
 
 export const METODOS_PAGO_ACTIVOS = METODOS_PAGO.filter((m) => m.activo);

@@ -16,6 +16,7 @@ export default function Nav({ perfil }: { perfil: PerfilActual }) {
     { href: "/finanzas", label: "Finanzas", roles: ["finanzas", "admin"] },
     { href: "/dashboard", label: "Dashboard", roles: ["ventas", "finanzas", "admin"] },
     { href: "/acceso", label: "Acceso", roles: ["acceso", "admin"] },
+    { href: "/patrocinantes", label: "Patrocinios", roles: ["admin"] },
     { href: "/admin", label: "Admin", roles: ["admin"] },
   ];
 

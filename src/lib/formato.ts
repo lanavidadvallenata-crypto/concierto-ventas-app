@@ -36,6 +36,7 @@ export const ETIQUETA_CANAL: Record<string, string> = {
   web: "Compra web",
   manual: "Venta manual",
   taquilla: "Taquilla",
+  patrocinio: "Patrocinio",
 };
 
 export function formatoBs(monto: number): string {

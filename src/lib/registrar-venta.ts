@@ -29,6 +29,10 @@ export type DatosVentaInterna = {
   // Monto exacto cobrado en Bs cuando el vendedor lo escribió en bolívares:
   // se guarda tal cual (no se reconvierte y pierde céntimos).
   totalBsManual?: number | null;
+  // Entradas de cortesía (patrocinios): ocupan aforo igual que cualquier
+  // ticket, pero se guardan a precio 0 para no inflar la recaudación ni el
+  // ticket promedio de boletería. El monto del patrocinio vive en su tabla.
+  cortesia?: boolean;
 };
 
 export type ResultadoVentaInterna =
@@ -91,8 +95,8 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
 
   // Precio negociado: se reparte proporcionalmente entre los tickets para que
   // la suma dé exacto el total que cobró el vendedor.
-  let preciosPorTicket = preciosLista;
-  if (d.precioTotalManual != null && d.precioTotalManual > 0 && Math.abs(d.precioTotalManual - totalLista) > 0.005) {
+  let preciosPorTicket = d.cortesia ? preciosLista.map(() => 0) : preciosLista;
+  if (!d.cortesia && d.precioTotalManual != null && d.precioTotalManual > 0 && Math.abs(d.precioTotalManual - totalLista) > 0.005) {
     if (d.pisoPrecio != null && d.precioTotalManual < totalLista * d.pisoPrecio) {
       if (sillaIds.length) await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", sillaIds);
       return {
@@ -107,7 +111,7 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
   }
   const total = Math.round(preciosPorTicket.reduce((s, p) => s + p, 0) * 100) / 100;
 
-  const enBs = metodoEsEnBs(d.metodoPago);
+  const enBs = !d.cortesia && metodoEsEnBs(d.metodoPago);
   const tasa = enBs ? await obtenerTasaActual(service) : null;
   const totalBs = enBs ? (d.totalBsManual ?? (tasa ? convertirABs(total, tasa) : null)) : null;
   const bsPorTicket = repartirBs(preciosPorTicket, totalBs);
