@@ -1,8 +1,8 @@
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
 
-// Auditoría solo para admin: qué compras se aprobaron, quién las aprobó y
-// cuándo. El dato vive en tickets.verificado_por / verificado_en desde el
-// principio; esta pantalla es lo único nuevo — no cambia ningún flujo.
+// Auditoría solo para admin: qué compras se aprobaron, quién las vendió,
+// quién las aprobó y cuándo. El dato ya vivía en tickets (vendido_por,
+// verificado_por, verificado_en); esta pantalla es lo único nuevo.
 export type FilaAprobada = {
   grupoId: string;
   compradorNombre: string;
@@ -14,7 +14,10 @@ export type FilaAprobada = {
   metodoPago: string;
   referenciaPago: string | null;
   canal: string;
+  vendidoPor: string | null;
   aprobadoPor: string | null;
+  // Comparado por id de usuario, no por nombre: dos personas pueden llamarse igual.
+  mismoUsuario: boolean;
   aprobadoEn: string | null;
   creadoEn: string;
 };
@@ -23,6 +26,9 @@ export type FilaAprobada = {
 // un segundo par de ojos, y eso debe quedar claro en la auditoría.
 const CANALES_AUTOVERIFICADOS = new Set(["taquilla", "patrocinio"]);
 
+// El tiempo de espera solo significa algo en la compra web: ahí el comprador
+// reportó su pago y esperó a que alguien lo revisara. En una venta manual el
+// vendedor registra un pago ya reportado y se aprueba en el acto.
 function demora(creadoEn: string, aprobadoEn: string | null): string | null {
   if (!aprobadoEn) return null;
   const ms = new Date(aprobadoEn).getTime() - new Date(creadoEn).getTime();
@@ -51,6 +57,7 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
 
   const totalUsd = filas.reduce((s, f) => s + f.total, 0);
   const totalEntradas = filas.reduce((s, f) => s + f.cantidad, 0);
+  const sinControl = filas.filter((f) => f.mismoUsuario && !CANALES_AUTOVERIFICADOS.has(f.canal)).length;
 
   return (
     <section className="flex flex-col gap-2">
@@ -62,24 +69,30 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
         </p>
       </div>
 
+      {sinControl > 0 && (
+        <p className="text-sm rounded-lg bg-red-50 text-red-800 px-3 py-2">
+          {sinControl === 1
+            ? "1 venta fue registrada y aprobada por la misma persona"
+            : `${sinControl} ventas fueron registradas y aprobadas por la misma persona`}
+          . El control cruzado no se aplicó ahí — revísalas abajo.
+        </p>
+      )}
+
       <div className="rounded-xl border border-neutral-200 bg-white divide-y divide-neutral-100 overflow-hidden">
         {filas.map((f) => {
           const auto = CANALES_AUTOVERIFICADOS.has(f.canal);
-          const espera = auto ? null : demora(f.creadoEn, f.aprobadoEn);
+          const alerta = f.mismoUsuario && !auto;
+          const espera = f.canal === "web" ? demora(f.creadoEn, f.aprobadoEn) : null;
           return (
-            <div key={f.grupoId} className="px-4 py-3 flex flex-col gap-1">
+            <div key={f.grupoId} className={`px-4 py-3 flex flex-col gap-1 ${alerta ? "bg-red-50/40" : ""}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-medium text-sm truncate">{f.compradorNombre}</p>
-                  {f.compradorEmail && (
-                    <p className="text-xs text-neutral-400 truncate">{f.compradorEmail}</p>
-                  )}
+                  {f.compradorEmail && <p className="text-xs text-neutral-400 truncate">{f.compradorEmail}</p>}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="font-semibold text-sm tabular-nums">{formatoUsd(f.total)}</p>
-                  {f.totalBs != null && (
-                    <p className="text-xs text-neutral-400 tabular-nums">{formatoBs(f.totalBs)}</p>
-                  )}
+                  {f.totalBs != null && <p className="text-xs text-neutral-400 tabular-nums">{formatoBs(f.totalBs)}</p>}
                 </div>
               </div>
 
@@ -89,15 +102,19 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
               </p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${
-                    auto ? "bg-amber-50 text-amber-800" : "bg-green-50 text-green-800"
-                  }`}
-                >
-                  {auto
-                    ? `Automático al registrar${f.aprobadoPor ? ` · ${f.aprobadoPor}` : ""}`
-                    : `Aprobó ${f.aprobadoPor ?? "—"}`}
-                </span>
+                {alerta ? (
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-semibold bg-red-100 text-red-800">
+                    Vendió y aprobó {f.vendidoPor ?? "—"} · sin control cruzado
+                  </span>
+                ) : auto ? (
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-medium bg-amber-50 text-amber-800">
+                    Automático al registrar{f.vendidoPor ? ` · ${f.vendidoPor}` : ""}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-medium bg-green-50 text-green-800">
+                    {f.vendidoPor ? `Vendió ${f.vendidoPor} · ` : ""}Aprobó {f.aprobadoPor ?? "—"}
+                  </span>
+                )}
                 {f.aprobadoEn && (
                   <span className="text-neutral-400">
                     {horaCaracas(f.aprobadoEn)} · {haceCuanto(f.aprobadoEn)}

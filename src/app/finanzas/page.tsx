@@ -117,13 +117,13 @@ export default async function FinanzasPage() {
     type TicketAprobado = {
       id: string; grupo_id: string | null; comprador_nombre: string; comprador_email: string | null;
       tipo: string; precio: number | string; precio_bs: number | string | null; metodo_pago: string;
-      referencia_pago: string | null; canal: string | null; verificado_por: string | null;
-      verificado_en: string | null; created_at: string;
+      referencia_pago: string | null; canal: string | null; vendido_por: string | null;
+      verificado_por: string | null; verificado_en: string | null; created_at: string;
     };
     const { data: verificados } = await service
       .from("tickets")
       .select(
-        "id, grupo_id, comprador_nombre, comprador_email, tipo, precio, precio_bs, metodo_pago, referencia_pago, canal, verificado_por, verificado_en, created_at"
+        "id, grupo_id, comprador_nombre, comprador_email, tipo, precio, precio_bs, metodo_pago, referencia_pago, canal, vendido_por, verificado_por, verificado_en, created_at"
       )
       .eq("estado_pago", "verificado")
       .order("verificado_en", { ascending: false, nullsFirst: false })
@@ -131,11 +131,15 @@ export default async function FinanzasPage() {
 
     const filasVerificadas = (verificados ?? []) as TicketAprobado[];
 
-    const aprobadorIds = [...new Set(filasVerificadas.map((t) => t.verificado_por).filter(Boolean))] as string[];
-    const { data: aprobadores } = aprobadorIds.length
-      ? await service.from("perfiles").select("id, nombre").in("id", aprobadorIds)
+    // Nombres de quien vendió y de quien aprobó: en una venta manual el control
+    // anti-fraude es justamente que no sean la misma persona.
+    const personaIds = [
+      ...new Set(filasVerificadas.flatMap((t) => [t.vendido_por, t.verificado_por]).filter(Boolean)),
+    ] as string[];
+    const { data: personas } = personaIds.length
+      ? await service.from("perfiles").select("id, nombre").in("id", personaIds)
       : { data: [] as { id: string; nombre: string }[] };
-    const aprobadorPorId = new Map((aprobadores ?? []).map((a) => [a.id, a.nombre]));
+    const nombrePorId = new Map((personas ?? []).map((a) => [a.id, a.nombre]));
 
     const porGrupo = new Map<string, FilaAprobada>();
     for (const t of filasVerificadas) {
@@ -163,7 +167,9 @@ export default async function FinanzasPage() {
         metodoPago: t.metodo_pago,
         referenciaPago: t.referencia_pago,
         canal: t.canal ?? "web",
-        aprobadoPor: t.verificado_por ? (aprobadorPorId.get(t.verificado_por) ?? "—") : null,
+        vendidoPor: t.vendido_por ? (nombrePorId.get(t.vendido_por) ?? "—") : null,
+        aprobadoPor: t.verificado_por ? (nombrePorId.get(t.verificado_por) ?? "—") : null,
+        mismoUsuario: !!t.vendido_por && t.vendido_por === t.verificado_por,
         aprobadoEn: t.verificado_en,
         creadoEn: t.created_at,
       });
