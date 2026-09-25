@@ -24,8 +24,6 @@ export type DatosVentaInterna = {
   // Piso de precio negociado como fracción del cotizado (ej. 0.5 = no menos
   // del 50 %). undefined = sin piso (admin).
   pisoPrecio?: number;
-  // Taquilla (Anita, 22 sep): precio SIN el fee de servicio del 10 %.
-  sinFee?: boolean;
   // Monto exacto cobrado en Bs cuando el vendedor lo escribió en bolívares:
   // se guarda tal cual (no se reconvierte y pierde céntimos).
   totalBsManual?: number | null;
@@ -89,8 +87,9 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
       )
     : (await cotizarCompra(service, d.tipo, cantidad)).cotizacion;
 
-  // Precio de lista por ticket: con fee (web/ventas) o sin fee (taquilla).
-  const preciosLista = cotizacion.lineas.map((l) => (d.sinFee ? l.base : l.total));
+  // Precio de lista por ticket: el total de su etapa (el fee, cuando la etapa
+  // lo cobra aparte, ya viene sumado en l.total).
+  const preciosLista = cotizacion.lineas.map((l) => l.total);
   const totalLista = Math.round(preciosLista.reduce((s, p) => s + p, 0) * 100) / 100;
 
   // Precio negociado: se reparte proporcionalmente entre los tickets para que

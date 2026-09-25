@@ -338,14 +338,18 @@ export default function CheckoutForm({
               <span>${r.neto.toFixed(2)}</span>
             </div>
           ))}
-          <div className="flex items-center justify-between text-sm text-neutral-800 border-t border-dashed border-neutral-200 pt-1.5">
-            <span>Subtotal (precio neto)</span>
-            <span>${cotizacion.base.toFixed(2)}</span>
-          </div>
-          <div className="flex items-center justify-between text-sm text-neutral-800">
-            <span>Fee de servicio (10 %)</span>
-            <span>${cotizacion.fee.toFixed(2)}</span>
-          </div>
+          {cotizacion.fee > 0 && (
+            <>
+              <div className="flex items-center justify-between text-sm text-neutral-800 border-t border-dashed border-neutral-200 pt-1.5">
+                <span>Subtotal (precio neto)</span>
+                <span>${cotizacion.base.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm text-neutral-800">
+                <span>Fee de servicio (10 %)</span>
+                <span>${cotizacion.fee.toFixed(2)}</span>
+              </div>
+            </>
+          )}
           <div className="flex items-center justify-between text-base font-bold text-neutral-900 pt-1 border-t border-neutral-200 mt-0.5">
             <span>Total a pagar</span>
             <span>${cotizacion.total.toFixed(2)}</span>
@@ -476,9 +480,9 @@ export default function CheckoutForm({
         <div className="bg-evento-principal text-white rounded-lg px-4 py-3 text-sm">
           <p className="font-semibold">Preventa activa</p>
           <p className="text-marca-acento/90 text-xs mt-0.5">
-            {preventa.vip > 0 && `VIP $${(preventa.precioVip / 1.1).toFixed(0)} · quedan ${preventa.vip}`}
+            {preventa.vip > 0 && `VIP $${calcularTotal("vip", "preventa").base} · quedan ${preventa.vip}`}
             {preventa.vip > 0 && preventa.general > 0 && " · "}
-            {preventa.general > 0 && `General $${(preventa.precioGeneral / 1.1).toFixed(0)} · quedan ${preventa.general}`}
+            {preventa.general > 0 && `General $${calcularTotal("general", "preventa").base} · quedan ${preventa.general}`}
           </p>
         </div>
       )}
@@ -487,9 +491,9 @@ export default function CheckoutForm({
         {(["general", "vip"] as const).map((t) => {
           const activo = tipo === t;
           const hayPreventa = preventa && (t === "vip" ? preventa.vip : preventa.general) > 0;
-          const base = hayPreventa
-            ? (t === "vip" ? preventa!.precioVip : preventa!.precioGeneral) / 1.1
-            : calcularTotal(t).base;
+          // En preventa se muestra el precio neto (el fee va aparte en el
+          // desglose). En regular el precio ya es final: un solo número.
+          const base = hayPreventa ? calcularTotal(t, "preventa").base : calcularTotal(t).total;
           return (
             <button
               key={t}
@@ -506,7 +510,7 @@ export default function CheckoutForm({
                 {t === "vip" ? "VIP" : "General"} · ${Math.round(base)}
               </span>
               <span className={`text-[10px] font-normal ${activo ? "text-white/75" : "text-neutral-400"}`}>
-                {hayPreventa ? "preventa · + fee" : "+ fee de servicio"}
+                {hayPreventa ? "preventa · + fee" : "precio final"}
               </span>
             </button>
           );
@@ -629,7 +633,9 @@ export default function CheckoutForm({
 
       <p className="text-[11px] text-neutral-400 text-center -mb-1">
         {cantidad > 0
-          ? `${cantidad} entrada${cantidad === 1 ? "" : "s"} · total estimado $${totalEstimado.toFixed(2)} (incluye fee 10 %). Verás el desglose en el siguiente paso.`
+          ? `${cantidad} entrada${cantidad === 1 ? "" : "s"} · total estimado $${totalEstimado.toFixed(2)}${
+              enPreventa > 0 ? " (incluye fee 10 %)" : ""
+            }. Verás el desglose en el siguiente paso.`
           : "Elige tus entradas para ver el total."}
       </p>
 

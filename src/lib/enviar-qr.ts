@@ -130,8 +130,9 @@ export async function enviarCorreoPendiente(params: {
   cantidad?: number;
   tipo?: "vip" | "general";
   totalUsd?: number;
-  // Desglose (solo compra web, donde el precio es de lista): neto + fee 10 %.
-  // En ventas manuales el precio puede ser negociado y no se desglosa.
+  // Desglose neto + fee: solo cuando la etapa comprada cobra fee aparte
+  // (preventa). Con el precio final no hay nada que desglosar y se muestra un
+  // solo monto. En ventas manuales el precio puede ser negociado: tampoco.
   subtotalUsd?: number;
   feeUsd?: number;
   totalBs?: number | null;
@@ -146,7 +147,7 @@ export async function enviarCorreoPendiente(params: {
   const filaMonto = (etiqueta: string, valor: string, fuerte = false) =>
     `<tr><td style="padding:2px 0;font-size:13.5px;color:${fuerte ? "#303030" : "#5A5650"};${fuerte ? "font-weight:700;" : ""}">${etiqueta}</td><td align="right" style="padding:2px 0;font-size:13.5px;color:${fuerte ? "#303030" : "#5A5650"};${fuerte ? "font-weight:700;" : ""}white-space:nowrap;">${valor}</td></tr>`;
   const desglose =
-    params.subtotalUsd != null && params.feeUsd != null && params.totalUsd != null
+    params.subtotalUsd != null && params.feeUsd != null && params.feeUsd > 0 && params.totalUsd != null
       ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-top:1px solid #E4DDD0;padding-top:6px;">
           ${filaMonto("Subtotal (precio neto)", fmtUsd(params.subtotalUsd))}
           ${filaMonto("Fee de servicio (10 %)", fmtUsd(params.feeUsd))}

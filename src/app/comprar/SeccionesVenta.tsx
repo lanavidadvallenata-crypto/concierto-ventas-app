@@ -112,8 +112,8 @@ export function PreciosExplicados({
 }) {
   const vip = calcularTotal("vip");
   const general = calcularTotal("general");
-  const preVip = preventa && preventa.vip > 0 ? Math.round(preventa.precioVip / 1.1) : null;
-  const preGeneral = preventa && preventa.general > 0 ? Math.round(preventa.precioGeneral / 1.1) : null;
+  const preVip = preventa && preventa.vip > 0 ? calcularTotal("vip", "preventa").base : null;
+  const preGeneral = preventa && preventa.general > 0 ? calcularTotal("general", "preventa").base : null;
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
@@ -121,16 +121,16 @@ export function PreciosExplicados({
         {preVip !== null ? (
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-xl font-bold">
-              ${preVip} <span className="text-sm font-normal text-neutral-400 line-through">${vip.base}</span>
+              ${preVip} <span className="text-sm font-normal text-neutral-400 line-through">${vip.total}</span>
             </p>
             <span className="text-[10px] font-semibold uppercase tracking-wide bg-evento-acento text-white rounded-full px-2 py-0.5">
               Preventa · quedan {preventa!.vip}
             </span>
           </div>
         ) : (
-          <p className="text-xl font-bold">${vip.base}</p>
+          <p className="text-xl font-bold">${vip.total}</p>
         )}
-        <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>
+        {preVip !== null && <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>}
         <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa, zona preferencial frente a la tarima. Hasta 10 por compra.</p>
       </div>
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
@@ -138,16 +138,16 @@ export function PreciosExplicados({
         {preGeneral !== null ? (
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-xl font-bold">
-              ${preGeneral} <span className="text-sm font-normal text-neutral-400 line-through">${general.base}</span>
+              ${preGeneral} <span className="text-sm font-normal text-neutral-400 line-through">${general.total}</span>
             </p>
             <span className="text-[10px] font-semibold uppercase tracking-wide bg-evento-acento text-white rounded-full px-2 py-0.5">
               Preventa · quedan {preventa!.general}
             </span>
           </div>
         ) : (
-          <p className="text-xl font-bold">${general.base}</p>
+          <p className="text-xl font-bold">${general.total}</p>
         )}
-        <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>
+        {preGeneral !== null && <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>}
         <p className="text-xs text-neutral-500 mt-1">Acceso a zona general, sin asiento asignado. Hasta 20 por compra.</p>
       </div>
     </div>

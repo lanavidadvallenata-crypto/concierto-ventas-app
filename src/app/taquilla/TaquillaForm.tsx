@@ -38,9 +38,9 @@ export default function TaquillaForm({
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
 
   const n = tipo === "vip" ? sillas.length : cantidad;
-  // Precio de taquilla = precio regular SIN fee de servicio (Anita, 22 sep):
-  // $120 VIP / $30 General.
-  const unitario = calcularTotal(tipo).base;
+  // Precio de taquilla = el mismo de la web (Anita, 25 sep): $140 VIP /
+  // $30 General, precio final. Un solo precio en todos los canales.
+  const unitario = calcularTotal(tipo).total;
   const sugerido = Math.round(n * unitario * 100) / 100;
 
   // Métodos en bolívares: el vendedor escribe lo que cobró en Bs y se muestra
@@ -116,7 +116,7 @@ export default function TaquillaForm({
               tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
             }`}
           >
-            {t === "vip" ? `VIP · $${calcularTotal("vip").base}` : `General · $${calcularTotal("general").base}`}
+            {t === "vip" ? `VIP · $${calcularTotal("vip").total}` : `General · $${calcularTotal("general").total}`}
           </button>
         ))}
       </div>
@@ -200,7 +200,7 @@ export default function TaquillaForm({
                 </button>
               )}
             </p>
-            <p className="text-sm font-medium text-neutral-800 mt-1 tabular-nums">Equivale a ${precio.toFixed(2)} · sin fee</p>
+            <p className="text-sm font-medium text-neutral-800 mt-1 tabular-nums">Equivale a ${precio.toFixed(2)}</p>
           </div>
         ) : (
           <div>
@@ -215,7 +215,7 @@ export default function TaquillaForm({
               className="w-full h-12 border border-neutral-300 rounded-md px-3 text-lg font-semibold tabular-nums"
             />
             <p className="text-xs text-neutral-500 mt-1">
-              {n > 0 ? `${n} × $${unitario.toFixed(2)} = $${sugerido.toFixed(2)} · sin fee` : "Elige las entradas"}
+              {n > 0 ? `${n} × $${unitario.toFixed(2)} = $${sugerido.toFixed(2)}` : "Elige las entradas"}
               {precioEditado && (
                 <button type="button" onClick={reiniciarMonto} className="ml-2 underline">
                   usar sugerido

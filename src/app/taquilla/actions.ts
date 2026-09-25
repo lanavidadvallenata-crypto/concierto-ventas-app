@@ -69,7 +69,7 @@ export async function registrarVentaTaquilla(input: unknown): Promise<VentaTaqui
   const service = createServiceClient();
 
   // Monto cobrado: en Bs para métodos en bolívares (si el vendedor lo editó),
-  // en USD para el resto. Sin editar = precio de lista sin fee.
+  // en USD para el resto. Sin editar = precio de lista.
   let precioTotalManual: number | null = null;
   let totalBsManual: number | null = null;
   if (v.precioEditado) {
@@ -98,10 +98,9 @@ export async function registrarVentaTaquilla(input: unknown): Promise<VentaTaqui
     referenciaPago: referencia || null,
     precioTotalManual,
     totalBsManual,
-    // Taquilla = precio regular siempre (no consume cupo de preventa) y SIN
-    // fee de servicio (Anita, 22 sep): $120 VIP / $30 General.
+    // Taquilla = precio regular siempre (no consume cupo de preventa), al
+    // mismo precio que la web (Anita, 25 sep): $140 VIP / $30 General.
     etapaForzada: "regular",
-    sinFee: true,
     // Descuento en puerta: hasta 30 % salvo admin.
     pisoPrecio: rol === "admin" ? undefined : 0.7,
     vendidoPor: user.id,
