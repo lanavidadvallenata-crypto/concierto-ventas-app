@@ -120,11 +120,9 @@ export function PreciosExplicados({
         <p className="text-xs font-semibold uppercase tracking-wide text-evento-secundario">VIP</p>
         {preVip !== null ? (
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-xl font-bold">
-              ${preVip} <span className="text-sm font-normal text-neutral-400 line-through">${vip.total}</span>
-            </p>
+            <p className="text-xl font-bold">${preVip}</p>
             <span className="text-[10px] font-semibold uppercase tracking-wide bg-evento-acento text-white rounded-full px-2 py-0.5">
-              Preventa · quedan {preventa!.vip}
+              Preventa · quedan pocas
             </span>
           </div>
         ) : (
@@ -137,11 +135,9 @@ export function PreciosExplicados({
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">General</p>
         {preGeneral !== null ? (
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-xl font-bold">
-              ${preGeneral} <span className="text-sm font-normal text-neutral-400 line-through">${general.total}</span>
-            </p>
+            <p className="text-xl font-bold">${preGeneral}</p>
             <span className="text-[10px] font-semibold uppercase tracking-wide bg-evento-acento text-white rounded-full px-2 py-0.5">
-              Preventa · quedan {preventa!.general}
+              Preventa · quedan pocas
             </span>
           </div>
         ) : (

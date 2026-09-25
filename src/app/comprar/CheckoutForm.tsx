@@ -478,11 +478,11 @@ export default function CheckoutForm({
     <div className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
       {preventa && (preventa.vip > 0 || preventa.general > 0) && (
         <div className="bg-evento-principal text-white rounded-lg px-4 py-3 text-sm">
-          <p className="font-semibold">Preventa activa</p>
+          <p className="font-semibold">Preventa activa · quedan pocas entradas</p>
           <p className="text-marca-acento/90 text-xs mt-0.5">
-            {preventa.vip > 0 && `VIP $${calcularTotal("vip", "preventa").base} · quedan ${preventa.vip}`}
+            {preventa.vip > 0 && `VIP $${calcularTotal("vip", "preventa").base}`}
             {preventa.vip > 0 && preventa.general > 0 && " · "}
-            {preventa.general > 0 && `General $${calcularTotal("general", "preventa").base} · quedan ${preventa.general}`}
+            {preventa.general > 0 && `General $${calcularTotal("general", "preventa").base}`}
           </p>
         </div>
       )}

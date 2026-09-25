@@ -98,8 +98,7 @@ export function ProductoraHome({ evento, desdePreventa }: { evento: Evento; desd
                   <span className="text-xs text-marca-neutro-1">
                     {enPreventa ? "Preventa desde" : "Desde"}{" "}
                     <strong className="text-marca-principal text-sm">${desde}</strong>{" "}
-                    {enPreventa && <span className="line-through opacity-60">${regular}</span>}
-                    {enPreventa && <span className="opacity-60"> + fee</span>}
+                    {enPreventa && <span className="opacity-60">+ fee</span>}
                   </span>
                 )}
                 <span className="bg-marca-secundario text-white rounded-md px-4 py-2 text-sm font-semibold group-hover:opacity-90 transition-opacity">
