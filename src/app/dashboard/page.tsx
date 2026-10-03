@@ -2,7 +2,7 @@ import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { calcularTotal } from "@/lib/precios";
 import Nav from "@/components/Nav";
-import VentasChart from "./VentasChart";
+import VentasChart, { type DiaVenta } from "./VentasChart";
 import AutoRefresh from "./AutoRefresh";
 import Link from "next/link";
 import { seleccionarTodo } from "@/lib/db";
@@ -87,12 +87,19 @@ export default async function DashboardPage() {
   const preventaVip = preventaVendida.filter((t) => t.tipo === "vip").length;
   const preventaGeneral = preventaVendida.filter((t) => t.tipo === "general").length;
 
-  const porDia = new Map<string, number>();
+  // Por día, con desglose por tipo e ingreso: al tocar una barra el gráfico
+  // dice si ese día lo hizo VIP o General, no solo cuántas entradas salieron.
+  const porDia = new Map<string, DiaVenta>();
   for (const t of verificados) {
     const dia = new Date(t.created_at).toLocaleDateString("sv-SE", { timeZone: "America/Caracas" });
-    porDia.set(dia, (porDia.get(dia) ?? 0) + 1);
+    const actual = porDia.get(dia) ?? { fecha: dia, total: 0, vip: 0, general: 0, usd: 0 };
+    actual.total += 1;
+    if (t.tipo === "vip") actual.vip += 1;
+    else actual.general += 1;
+    actual.usd = Math.round((actual.usd + Number(t.precio)) * 100) / 100;
+    porDia.set(dia, actual);
   }
-  const dias = [...porDia.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-14) as [string, number][];
+  const dias = [...porDia.values()].sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-14);
 
   const vendidosTotal = verificados.length;
   const aforoTotalEntradas = aforoVip + aforoGeneral;
