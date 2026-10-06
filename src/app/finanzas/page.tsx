@@ -158,6 +158,7 @@ export default async function FinanzasPage() {
       }
       porGrupo.set(gid, {
         grupoId: gid,
+        ticketId: t.id,
         compradorNombre: t.comprador_nombre,
         compradorEmail: t.comprador_email,
         tipo: t.tipo === "vip" ? "vip" : "general",

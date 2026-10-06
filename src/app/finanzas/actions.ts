@@ -466,3 +466,92 @@ export async function actualizarTasaManual(valorTexto: string): Promise<Resultad
   revalidatePath("/ventas");
   return { ok: true };
 }
+
+// ===========================================================================
+// Anular una compra YA VERIFICADA. Solo admin.
+//
+// "Rechazar" solo opera sobre pagos pendientes, así que cuando se aprobaba un
+// pago que después no aparecía en el banco había que devolver la compra a
+// pendiente por SQL para poder rechazarla. Esto cierra ese rodeo: invalida las
+// entradas, libera cupo y sillas, y manda el mismo correo de aviso.
+//
+// Es decisión de dueña, no de operación: el rol finanzas no puede.
+// ===========================================================================
+export async function anularCompraVerificada(ticketId: string): Promise<Resultado> {
+  const { user, rol, error } = await requiereFinanzas();
+  if (!user) return { ok: false, error: error! };
+  if (rol !== "admin") {
+    return { ok: false, error: "Anular una compra ya aprobada solo lo puede hacer un administrador." };
+  }
+
+  const grupo = await obtenerGrupo(ticketId);
+  if ("error" in grupo) return { ok: false, error: grupo.error };
+
+  const verificados = grupo.tickets.filter((t) => t.estado_pago === "verificado");
+  if (verificados.length === 0) {
+    return { ok: false, error: "Esa compra no está aprobada: no hay nada que anular." };
+  }
+
+  const usados = verificados.filter((t) => t.qr_usado).length;
+  if (usados > 0) {
+    return {
+      ok: false,
+      error: `No se puede anular: ${usados} de esas entradas ya se usaron en la puerta.`,
+    };
+  }
+
+  const service = createServiceClient();
+  const ahora = new Date().toISOString();
+  const anulados: TicketGrupo[] = [];
+
+  for (const t of verificados) {
+    const { data: actualizado, error: updateError } = await service
+      .from("tickets")
+      .update({ estado_pago: "rechazado", verificado_por: user.id, verificado_en: ahora })
+      .eq("id", t.id)
+      .eq("estado_pago", "verificado")
+      .select("id")
+      .maybeSingle();
+    if (updateError || !actualizado) continue;
+    anulados.push(t);
+    if (t.tipo === "vip" && t.silla_id) {
+      await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).eq("id", t.silla_id);
+    }
+  }
+
+  revalidarTodo();
+
+  if (anulados.length === 0) return { ok: false, error: "Esa compra ya fue procesada por otra persona." };
+
+  const primero = anulados[0];
+  if (!primero.comprador_email) {
+    return { ok: true, aviso: `Compra anulada: ${anulados.length} entrada${anulados.length === 1 ? "" : "s"} sin efecto y cupo liberado. No tiene correo, avísale por WhatsApp.` };
+  }
+
+  const totalUsd = anulados.reduce((s, t) => s + t.precio, 0);
+  const totalBs = anulados.every((t) => t.precio_bs != null) ? anulados.reduce((s, t) => s + (t.precio_bs ?? 0), 0) : null;
+  try {
+    await enviarCorreoRechazo({
+      destinatario: primero.comprador_email,
+      nombreComprador: primero.comprador_nombre,
+      cantidad: anulados.length,
+      tipo: primero.tipo,
+      totalUsd: Math.round(totalUsd * 100) / 100,
+      totalBs: totalBs == null ? null : Math.round(totalBs * 100) / 100,
+      referencia: primero.referencia_pago,
+      metodoEtiqueta: ETIQUETA_METODO[primero.metodo_pago] ?? primero.metodo_pago,
+      grupoId: primero.grupo_id ?? primero.id,
+    });
+  } catch (e) {
+    console.error("Error enviando correo de anulación:", (e as Error).message);
+    return {
+      ok: true,
+      aviso: `Compra anulada y cupo liberado, pero el correo a ${primero.comprador_email} no salió. Avísale por WhatsApp.`,
+    };
+  }
+
+  return {
+    ok: true,
+    aviso: `Compra de ${primero.comprador_nombre} anulada. ${anulados.length} entrada${anulados.length === 1 ? "" : "s"} sin efecto, cupo liberado y correo enviado.`,
+  };
+}

@@ -1,3 +1,7 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { anularCompraVerificada } from "./actions";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
 
 // Auditoría solo para admin: qué compras se aprobaron, quién las vendió,
@@ -5,6 +9,8 @@ import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, hor
 // verificado_por, verificado_en); esta pantalla es lo único nuevo.
 export type FilaAprobada = {
   grupoId: string;
+  // Un ticket del grupo: es lo que pide la acción de anular.
+  ticketId: string;
   compradorNombre: string;
   compradorEmail: string | null;
   tipo: "vip" | "general";
@@ -44,6 +50,21 @@ function demora(creadoEn: string, aprobadoEn: string | null): string | null {
 }
 
 export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
+  const [mensaje, setMensaje] = useState<string | null>(null);
+  const [confirmando, setConfirmando] = useState<string | null>(null);
+  const [anuladas, setAnuladas] = useState<Set<string>>(new Set());
+  const [enviando, iniciar] = useTransition();
+
+  function anular(fila: FilaAprobada) {
+    setMensaje(null);
+    iniciar(async () => {
+      const r = await anularCompraVerificada(fila.ticketId);
+      setMensaje(r.ok ? (r.aviso ?? "Compra anulada.") : r.error);
+      if (r.ok) setAnuladas((prev) => new Set(prev).add(fila.grupoId));
+      setConfirmando(null);
+    });
+  }
+
   if (filas.length === 0) {
     return (
       <section className="flex flex-col gap-2">
@@ -69,6 +90,8 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
         </p>
       </div>
 
+      {mensaje && <p className="text-sm rounded-lg bg-neutral-100 px-3 py-2">{mensaje}</p>}
+
       {sinControl > 0 && (
         <p className="text-sm rounded-lg bg-red-50 text-red-800 px-3 py-2">
           {sinControl === 1
@@ -84,7 +107,7 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
           const alerta = f.mismoUsuario && !auto;
           const espera = f.canal === "web" ? demora(f.creadoEn, f.aprobadoEn) : null;
           return (
-            <div key={f.grupoId} className={`px-4 py-3 flex flex-col gap-1 ${alerta ? "bg-red-50/40" : ""}`}>
+            <div key={f.grupoId} className={`px-4 py-3 flex flex-col gap-1 ${alerta ? "bg-red-50/40" : ""} ${anuladas.has(f.grupoId) ? "opacity-50" : ""}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-medium text-sm truncate">{f.compradorNombre}</p>
@@ -121,6 +144,27 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
                   </span>
                 )}
                 {espera && <span className="text-neutral-400">esperó {espera}</span>}
+                {anuladas.has(f.grupoId) ? (
+                  <span className="font-semibold text-neutral-500">Anulada</span>
+                ) : confirmando === f.grupoId ? (
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={enviando}
+                      onClick={() => anular(f)}
+                      className="rounded-md bg-red-600 text-white px-3 py-1 font-semibold disabled:opacity-60"
+                    >
+                      {enviando ? "Anulando…" : "Sí, anular"}
+                    </button>
+                    <button type="button" onClick={() => setConfirmando(null)} className="text-neutral-500 underline">
+                      Cancelar
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => setConfirmando(f.grupoId)} className="text-red-600 underline">
+                    Anular compra
+                  </button>
+                )}
               </div>
             </div>
           );
