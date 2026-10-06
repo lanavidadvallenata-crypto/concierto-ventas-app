@@ -214,3 +214,196 @@ export async function anularPatrocinio(formData: FormData): Promise<ResultadoPat
   revalidar();
   return { ok: true, aviso: `Patrocinio de ${patro.empresa} anulado. Las entradas quedaron sin efecto y las sillas liberadas.` };
 }
+
+// ===========================================================================
+// CORTESÍAS — entradas que ocupan aforo pero NO son dinero ni patrocinio.
+// Canje, sorteo, prensa, staff, invitación. Precio 0, canal 'cortesia' y
+// método 'cortesia': así no entran a recaudación ni a la tabla de
+// patrocinantes, pero sí descuentan cupo real y salen con su QR.
+// ===========================================================================
+
+const esquemaCortesia = z.object({
+  beneficiario: z.string().trim().min(2, "Escribe a nombre de quién va la cortesía."),
+  motivo: z.enum(["canje", "sorteo", "prensa", "staff", "invitacion", "otro"]),
+  detalle: z.string().trim().optional(),
+  contactoEmail: z.string().trim().toLowerCase().email("Correo inválido — ahí llegan las entradas con QR."),
+  contactoTelefono: z.string().trim().optional(),
+  cantidadVip: z.coerce.number().int().min(0).max(10),
+  cantidadGeneral: z.coerce.number().int().min(0).max(20),
+  sillaIds: z.string().optional(), // JSON de uuids, solo si hay VIP
+  notas: z.string().trim().optional(),
+});
+
+export async function registrarCortesia(formData: FormData): Promise<ResultadoPatrocinio> {
+  const { user, error: authError } = await requiereAdmin();
+  if (!user) return { ok: false, error: authError! };
+
+  const parsed = esquemaCortesia.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const d = parsed.data;
+
+  if (d.cantidadVip + d.cantidadGeneral < 1) {
+    return { ok: false, error: "Indica al menos una entrada, VIP o general." };
+  }
+
+  let sillaIds: string[] = [];
+  if (d.cantidadVip > 0) {
+    try {
+      sillaIds = JSON.parse(d.sillaIds || "[]");
+    } catch {
+      sillaIds = [];
+    }
+    if (sillaIds.length !== d.cantidadVip) {
+      return { ok: false, error: `Elige exactamente ${d.cantidadVip} silla${d.cantidadVip === 1 ? "" : "s"} en el mapa.` };
+    }
+  }
+
+  const service = createServiceClient();
+  const nombre = `${d.beneficiario} — cortesía`;
+  const grupos: string[] = [];
+  const entradas: EntradaQR[] = [];
+
+  // Una cortesía mixta emite dos grupos: uno VIP y uno general. Se registran en
+  // orden y, si el segundo falla, el primero queda emitido y se avisa — no se
+  // revierte en silencio porque ya ocupa aforo.
+  const lotes: { tipo: "vip" | "general"; cantidad: number; sillas: string[] }[] = [];
+  if (d.cantidadVip > 0) lotes.push({ tipo: "vip", cantidad: d.cantidadVip, sillas: sillaIds });
+  if (d.cantidadGeneral > 0) lotes.push({ tipo: "general", cantidad: d.cantidadGeneral, sillas: [] });
+
+  for (const lote of lotes) {
+    const venta = await registrarVentaInterna(service, {
+      tipo: lote.tipo,
+      sillaIds: lote.sillas,
+      cantidad: lote.cantidad,
+      compradorNombre: nombre,
+      compradorTelefono: d.contactoTelefono || "",
+      compradorEmail: d.contactoEmail,
+      metodoPago: "cortesia",
+      referenciaPago: d.detalle || null,
+      precioTotalManual: null,
+      etapaForzada: "regular",
+      vendidoPor: user.id,
+      canal: "cortesia",
+      verificarDeInmediato: true,
+      cortesia: true,
+    });
+    if (!venta.ok) {
+      if (grupos.length > 0) {
+        revalidar();
+        return {
+          ok: false,
+          error: `Se emitieron las entradas VIP pero las generales fallaron (${venta.error}). Anula la cortesía desde la lista y vuelve a registrarla completa.`,
+        };
+      }
+      return { ok: false, error: venta.error };
+    }
+    grupos.push(venta.grupoId);
+  }
+
+  const { error: errorCortesia } = await service.from("cortesias").insert({
+    beneficiario: d.beneficiario,
+    motivo: d.motivo,
+    detalle: d.detalle || null,
+    contacto_email: d.contactoEmail,
+    contacto_telefono: d.contactoTelefono || null,
+    cantidad_vip: d.cantidadVip,
+    cantidad_general: d.cantidadGeneral,
+    grupos,
+    notas: d.notas || null,
+    creado_por: user.id,
+  });
+
+  if (errorCortesia) {
+    console.error("Error guardando cortesía:", errorCortesia.message);
+    revalidar();
+    return {
+      ok: false,
+      error: "Las entradas se emitieron, pero no se pudo guardar la ficha de la cortesía. Anótalo y avísame para revisarlo.",
+    };
+  }
+
+  // Un solo correo con todas las entradas, VIP y generales juntas.
+  for (const grupoId of grupos) {
+    const { data: tickets } = await service.from("tickets").select("id, tipo, silla_id").eq("grupo_id", grupoId);
+    for (const t of tickets ?? []) {
+      const qrToken = generarTokenQR();
+      await service.from("tickets").update({ qr_token: qrToken }).eq("id", t.id);
+      const asiento = t.tipo === "vip" ? await obtenerAsiento(service, t.silla_id) : null;
+      entradas.push({
+        qrToken,
+        tipo: t.tipo as "vip" | "general",
+        fila: asiento?.fila ?? null,
+        mesaNumero: asiento?.mesaNumero ?? null,
+        sillaNumero: asiento?.sillaNumero ?? null,
+      });
+    }
+  }
+
+  revalidar();
+
+  const total = d.cantidadVip + d.cantidadGeneral;
+  try {
+    await enviarCorreoQR({
+      destinatario: d.contactoEmail,
+      nombreComprador: d.beneficiario,
+      entradas,
+      grupoId: grupos[0],
+    });
+    for (const grupoId of grupos) {
+      await service.from("tickets").update({ qr_enviado_en: new Date().toISOString() }).eq("grupo_id", grupoId);
+    }
+  } catch (e) {
+    console.error("Error enviando QR de cortesía:", (e as Error).message);
+    return {
+      ok: true,
+      aviso: `Cortesía registrada y ${total} entrada${total === 1 ? "" : "s"} reservada${total === 1 ? "" : "s"}, pero el correo a ${d.contactoEmail} no salió. Reenvíalo desde Finanzas buscando "${d.beneficiario}".`,
+    };
+  }
+
+  return {
+    ok: true,
+    aviso: `Cortesía para ${d.beneficiario} registrada. ${total} entrada${total === 1 ? "" : "s"} enviada${total === 1 ? "" : "s"} a ${d.contactoEmail}. No suma dinero a la recaudación.`,
+  };
+}
+
+export async function anularCortesia(formData: FormData): Promise<ResultadoPatrocinio> {
+  const { user, error: authError } = await requiereAdmin();
+  if (!user) return { ok: false, error: authError! };
+
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false, error: "Falta la cortesía a anular." };
+
+  const service = createServiceClient();
+  const { data: cortesia } = await service
+    .from("cortesias")
+    .select("id, beneficiario, grupos, anulado_en")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!cortesia) return { ok: false, error: "No se encontró esa cortesía." };
+  if (cortesia.anulado_en) return { ok: false, error: "Esa cortesía ya está anulada." };
+
+  for (const grupoId of (cortesia.grupos as string[] | null) ?? []) {
+    const { data: tickets } = await service
+      .from("tickets")
+      .select("id, silla_id")
+      .eq("grupo_id", grupoId)
+      .neq("estado_pago", "rechazado");
+
+    const sillas = (tickets ?? []).map((t) => t.silla_id).filter((s): s is string => !!s);
+
+    await service
+      .from("tickets")
+      .update({ estado_pago: "rechazado", verificado_por: user.id, verificado_en: new Date().toISOString() })
+      .eq("grupo_id", grupoId);
+
+    if (sillas.length) {
+      await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", sillas);
+    }
+  }
+
+  await service.from("cortesias").update({ anulado_en: new Date().toISOString(), anulado_por: user.id }).eq("id", id);
+
+  revalidar();
+  return { ok: true, aviso: `Cortesía de ${cortesia.beneficiario} anulada. Las entradas quedaron sin efecto y el cupo liberado.` };
+}

@@ -24,7 +24,7 @@ export type FilaAprobada = {
 
 // En taquilla y patrocinios el pago se da por confirmado al registrar: no hubo
 // un segundo par de ojos, y eso debe quedar claro en la auditoría.
-const CANALES_AUTOVERIFICADOS = new Set(["taquilla", "patrocinio"]);
+const CANALES_AUTOVERIFICADOS = new Set(["taquilla", "patrocinio", "cortesia"]);
 
 // El tiempo de espera solo significa algo en la compra web: ahí el comprador
 // reportó su pago y esperó a que alguien lo revisara. En una venta manual el

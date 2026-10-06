@@ -1,6 +1,6 @@
-export type MetodoPago = "pago_movil" | "transferencia" | "zelle" | "binance" | "efectivo_usd" | "efectivo_bs";
+export type MetodoPago = "pago_movil" | "transferencia" | "zelle" | "binance" | "efectivo_usd" | "efectivo_bs" | "cortesia";
 
-export type Canal = "web" | "manual" | "taquilla" | "patrocinio";
+export type Canal = "web" | "manual" | "taquilla" | "patrocinio" | "cortesia";
 
 export const METODOS_PAGO: {
   valor: MetodoPago;
@@ -19,6 +19,9 @@ export const METODOS_PAGO: {
   { valor: "binance", etiqueta: "Binance", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
   { valor: "efectivo_usd", etiqueta: "Efectivo (dólares)", moneda: "USD", activo: true, canales: ["manual", "taquilla", "patrocinio"] },
   { valor: "efectivo_bs", etiqueta: "Efectivo (bolívares)", moneda: "VES", activo: true, canales: ["manual", "taquilla", "patrocinio"] },
+  // Solo para cortesías: dice explícitamente que aquí no hubo pago. No aparece
+  // en ningún otro canal.
+  { valor: "cortesia", etiqueta: "Sin pago (cortesía)", moneda: "USD", activo: true, canales: ["cortesia"] },
 ];
 
 export const METODOS_PAGO_ACTIVOS = METODOS_PAGO.filter((m) => m.activo);
@@ -43,6 +46,7 @@ export const INSTRUCCIONES_PAGO: Record<MetodoPago, string> = {
     "Binance Pay\nID: 818097513 · Usuario: Pagosbpt\n\nEscanea el código QR con tu app de Binance o busca el ID/usuario. Al terminar, escribe abajo tu nombre de usuario de Binance.",
   efectivo_usd: "Pago en efectivo en dólares, recibido en mano.",
   efectivo_bs: "Pago en efectivo en bolívares, recibido en mano.",
+  cortesia: "Entrada de cortesía: no hubo pago.",
 };
 
 // Mostrado como apoyo visual junto a las instrucciones cuando se elige Binance.
@@ -90,6 +94,7 @@ export const REFERENCIA_POR_METODO: Record<MetodoPago, ReglaReferencia> = {
   },
   efectivo_usd: { etiqueta: "Referencia", placeholder: "", ayuda: "", teclado: "text" },
   efectivo_bs: { etiqueta: "Referencia", placeholder: "", ayuda: "", teclado: "text" },
+  cortesia: { etiqueta: "Referencia", placeholder: "", ayuda: "", teclado: "text" },
 };
 
 // Deja el dato como lo guarda Finanzas: sin espacios ni guiones en los

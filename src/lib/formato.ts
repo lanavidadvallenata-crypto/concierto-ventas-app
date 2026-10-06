@@ -28,6 +28,7 @@ export const ETIQUETA_METODO: Record<string, string> = {
   binance: "Binance",
   efectivo_usd: "Efectivo $",
   efectivo_bs: "Efectivo Bs",
+  cortesia: "Sin pago",
 };
 
 export const METODOS_EN_BS = new Set(["pago_movil", "transferencia", "efectivo_bs"]);
@@ -37,6 +38,7 @@ export const ETIQUETA_CANAL: Record<string, string> = {
   manual: "Venta manual",
   taquilla: "Taquilla",
   patrocinio: "Patrocinio",
+  cortesia: "Cortesía",
 };
 
 export function formatoBs(monto: number): string {

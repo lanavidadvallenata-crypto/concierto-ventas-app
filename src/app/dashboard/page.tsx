@@ -23,7 +23,7 @@ const METODO_ETIQUETA: Record<string, string> = {
 
 const METODOS_ORDEN = ["transferencia", "zelle", "binance", "pago_movil", "efectivo_usd", "efectivo_bs"] as const;
 
-const CANAL_ETIQUETA: Record<string, string> = { web: "Web", manual: "Manual", taquilla: "Taquilla", patrocinio: "Patrocinios" };
+const CANAL_ETIQUETA: Record<string, string> = { web: "Web", manual: "Manual", taquilla: "Taquilla", patrocinio: "Patrocinios", cortesia: "Cortesías" };
 
 export default async function DashboardPage() {
   const perfil = await requerirPerfil();
@@ -177,13 +177,13 @@ export default async function DashboardPage() {
           </div>
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
             <p className="text-xs text-neutral-500">Por canal (verificado)</p>
-            {["web", "manual", "taquilla", "patrocinio"].map((c) => {
+            {["web", "manual", "taquilla", "patrocinio", "cortesia"].map((c) => {
               const d = porCanal.get(c) ?? { cantidad: 0, monto: 0 };
               return (
                 <div key={c} className="flex items-center justify-between text-sm">
                   <span className="text-neutral-600">{CANAL_ETIQUETA[c]}</span>
                   <span className="tabular-nums">
-                    {d.cantidad} · {c === "patrocinio" ? "cortesía" : `$${fmt(d.monto)}`}
+                    {d.cantidad} · {c === "patrocinio" || c === "cortesia" ? "sin cobro" : `$${fmt(d.monto)}`}
                   </span>
                 </div>
               );
