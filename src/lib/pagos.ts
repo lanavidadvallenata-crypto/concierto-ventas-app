@@ -11,8 +11,8 @@ export const METODOS_PAGO: {
   // evento) y en venta manual (alguien pagó en mano a un vendedor).
   canales: Canal[];
 }[] = [
-  // Pago móvil: activo desde el 21 sep (datos de Anita: BNC, RIF J-507237133,
-  // 0424-2251711). Va primero porque es el método más usado en Venezuela.
+  // Pago móvil: activo desde el 21 sep. Va primero porque es el método más
+  // usado en Venezuela. Los datos de la cuenta viven en INSTRUCCIONES_PAGO.
   { valor: "pago_movil", etiqueta: "Pago móvil", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
   { valor: "transferencia", etiqueta: "Transferencia bancaria", moneda: "VES", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
   { valor: "zelle", etiqueta: "Zelle", moneda: "USD", activo: true, canales: ["web", "manual", "taquilla", "patrocinio"] },
@@ -34,12 +34,16 @@ export function metodoEsEnBs(metodo: string) {
   return METODOS_PAGO.find((m) => m.valor === metodo)?.moneda === "VES";
 }
 
-// Datos reales confirmados por Anita (14 sept) — cuentas a nombre de Baspartu 2025.
+// Datos de cobro. Los bolívares (pago móvil y transferencia) cambiaron el 7 oct
+// por decisión de Anita: ahora van a 6.18 PRODUCCIONES, C.A. en Bancamiga —
+// antes iban a Baspartu 2025 en BNC. Zelle y Binance siguen en Baspartu.
+// Este objeto es el único lugar del sistema donde viven estos datos: la tienda
+// web los lee de aquí, así que cambiarlos aquí los cambia en todas las pantallas.
 export const INSTRUCCIONES_PAGO: Record<MetodoPago, string> = {
   pago_movil:
-    "Pago móvil BNC\nRIF: J-507237133\nTeléfono: 0424-2251711\n\nEnvía el monto exacto en bolívares (arriba) y anota los últimos 6 dígitos de la referencia que te da tu banco.",
+    "Pago móvil Bancamiga (0172)\nRIF: J-508835956\nTeléfono: 0424-2251711\n\nEnvía el monto exacto en bolívares (arriba) y anota los últimos 6 dígitos de la referencia que te da tu banco.",
   transferencia:
-    "Transferencia BNC a nombre de:\nBASPARTU 2025, C.A. — RIF J-507237133\nCuenta: 0191-0316-14-2100172759\n\nTransfiere el monto exacto en bolívares (arriba) y anota el número de referencia completo.",
+    "Transferencia Bancamiga a nombre de:\n6.18 PRODUCCIONES, C.A. — RIF J-508835956\nCuenta corriente: 0172-0401-77-4018918351\n\nTransfiere el monto exacto en bolívares (arriba) y anota el número de referencia completo.",
   zelle:
     "Zelle a nombre de:\nBaspartu 2025 LLC\nCorreo: Pagosbpt@gmail.com\nBanco: Chase Bank\n\nEnvía el Zelle y copia el código de la transacción que te da tu banco (tiene letras y números).",
   binance:
