@@ -25,9 +25,13 @@ test("los avisos salen en los días exactos, no en rangos", () => {
   assert.equal(etapaDeAviso(pendiente(0)), "hoy");
 });
 
-test("vencida: en riesgo mientras dura el margen interno, después a la lista", () => {
-  for (let d = 1; d <= DIAS_GRACIA; d++) {
-    assert.equal(etapaDeAviso(pendiente(-d)), "en_riesgo", `${d} día(s) tarde`);
+test("vencida: UN aviso de riesgo el primer día, silencio el resto del margen, después a la lista", () => {
+  // Antes el riesgo era un rango (-1 y -2): dos correos en dos días con el
+  // mismo asunto y el mismo cuerpo, justo lo que el candado de días exactos
+  // dice evitar. El segundo día del margen es del equipo, por WhatsApp.
+  assert.equal(etapaDeAviso(pendiente(-1)), "en_riesgo", "el primer día de atraso sí");
+  for (let d = 2; d <= DIAS_GRACIA; d++) {
+    assert.equal(etapaDeAviso(pendiente(-d)), null, `${d} días tarde: ya se le escribió, ahora lo llama el equipo`);
   }
   assert.equal(etapaDeAviso(pendiente(-(DIAS_GRACIA + 1))), "para_anular");
   assert.equal(etapaDeAviso(pendiente(-30)), "para_anular", "una muy vieja sigue en la lista, no desaparece");
@@ -75,7 +79,7 @@ test("cada día le toca una etapa y solo una", () => {
   assert.deepEqual(vistas.tres_dias, [3]);
   assert.deepEqual(vistas.manana, [1]);
   assert.deepEqual(vistas.hoy, [0]);
-  assert.equal(vistas.en_riesgo.length, DIAS_GRACIA);
+  assert.deepEqual(vistas.en_riesgo, [-1], "un solo día de riesgo");
   assert.ok(vistas.para_anular.length > 0);
 
   // Y ningún día cae en dos etapas: la suma de todas es la lista completa.

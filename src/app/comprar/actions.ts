@@ -12,7 +12,7 @@ import { METODOS_PAGO_ACTIVOS, metodoEsEnBs, normalizarReferencia, validarRefere
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
 import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
 import { crearPlan, planOfrecible } from "@/lib/abona618";
-import { CONDICIONES_VERSION, planPara, type Plan, type SinPlan } from "@/lib/cuotas";
+import { CONDICIONES_VERSION, aPlanPublico, hoyEnVenezuela, planConFechasVistas, planPara, type Plan, type PlanPublico, type SinPlan } from "@/lib/cuotas";
 
 // 15 minutos (antes 10): una transferencia bancaria en Venezuela desde la app
 // del banco, con la clave especial, la verificación y la referencia, se toma
@@ -47,7 +47,7 @@ export type IniciarCheckoutResult =
       // momento, o el motivo por el que no. Con el módulo apagado siempre
       // viene { hayPlan: false, motivo: "apagado" } y la pantalla no muestra
       // nada: es el estado en el que se sube a producción.
-      plan: Plan | SinPlan;
+      plan: PlanPublico | SinPlan;
     }
   | { ok: false; error: string };
 
@@ -125,7 +125,10 @@ export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarChe
     canal: "web",
   });
 
-  return { ok: true, tipo: v.tipo, sillaIds, cantidad, expiraEn, cotizacion, disponibilidad, tasaEurVes, totalBs, plan };
+  // Al navegador va el plan SIN el margen interno (graciaHasta/liberaEl):
+  // "no decírselo al comprador" incluye no mandárselo en el JSON.
+  const planPublico = plan.hayPlan ? aPlanPublico(plan) : plan;
+  return { ok: true, tipo: v.tipo, sillaIds, cantidad, expiraEn, cotizacion, disponibilidad, tasaEurVes, totalBs, plan: planPublico };
 }
 
 const confirmarSchema = z.object({
@@ -158,12 +161,29 @@ const confirmarSchema = z.object({
   // Abona618. Las dos van juntas: no se crea un plan sin la casilla marcada,
   // porque el correo de anulación cita la fecha y la hora en que se aceptaron
   // las condiciones y eso tiene que ser verdad.
-  enCuotas: z.coerce.boolean().optional(),
-  aceptoCondiciones: z.coerce.boolean().optional(),
+  // z.boolean() y no z.coerce.boolean(): coerce convierte "false", "0" y {}
+  // en true, y esta server action es pública.
+  enCuotas: z.boolean().optional(),
+  aceptoCondiciones: z.boolean().optional(),
+  // Las fechas de cuota que el comprador VIO y aceptó. Si al confirmar cruzó
+  // la medianoche y el calendario de hoy es otro, se honran estas (validadas
+  // en el servidor), no las nuevas: aceptó un plan, se le guarda ese plan.
+  planMostrado: z.object({ fechas: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(4) }).optional(),
 });
 
 export type ConfirmarCheckoutResult =
-  | { ok: true; avisoEmail?: string; duplicado?: boolean; cantidad: number; total: number; codigo?: string }
+  | {
+      ok: true;
+      avisoEmail?: string;
+      duplicado?: boolean;
+      cantidad: number;
+      total: number;
+      codigo?: string;
+      /** La pantalla de éxito tiene que saberlo: a un plan no se le promete
+       *  "te enviamos tu QR cuando confirmemos el pago". */
+      enPlan?: boolean;
+      grupoId?: string;
+    }
   | { ok: false; error: string };
 
 // Libera el hold de ESTA compra cuando el comprador vuelve atrás a elegir otras
@@ -411,7 +431,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       );
     }
 
-    const planFinal = planAhora.hayPlan
+    let planFinal: Plan | null = planAhora.hayPlan
       ? planAhora
       : honrable
         ? (() => {
@@ -419,6 +439,29 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
             return p.hayPlan ? p : null;
           })()
         : null;
+
+    // Lo que VIO contra lo que se le iba a guardar. Si cruzó la medianoche en
+    // los 15 minutos del hold, el calendario de hoy puede ser otro (o no
+    // existir): aceptó 56/42/42 y se le guardaba un pago único de $84. Se
+    // honra lo que vio, validado: fechas reales, futuras, en orden, dentro
+    // del límite. Solo con el módulo encendido — el interruptor manda.
+    if (v.planMostrado && config.activo && !config.error && !(planAhora.hayPlan === false && planAhora.motivo === "apagado")) {
+      const fechasAhora = planFinal ? planFinal.cuotas.filter((c) => !c.esInicial).map((c) => c.venceEl) : [];
+      const vistas = v.planMostrado.fechas;
+      const iguales = fechasAhora.length === vistas.length && fechasAhora.every((f, i) => f === vistas[i]);
+      if (!iguales) {
+        const honrado = planConFechasVistas(cotizacion.total, hoyEnVenezuela(), vistas);
+        if (honrado) {
+          console.warn(
+            `Abona618: el calendario cambió entre ver y confirmar — grupo ${grupoId}. ` +
+              `Hoy daría [${fechasAhora.join(", ") || "sin plan"}]; se honra lo que vio: [${vistas.join(", ")}].`
+          );
+          planFinal = honrado;
+        } else {
+          console.warn(`Abona618: el comprador mandó fechas que ya no son válidas — grupo ${grupoId}: [${vistas.join(", ")}]. Se usa el calendario de hoy.`);
+        }
+      }
+    }
 
     if (!planFinal && !planAhora.hayPlan) {
       // El comprador pidió cuotas y no se le puede dar un plan. Sus tickets
@@ -485,5 +528,13 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     avisoEmail = "Tu compra quedó registrada, pero no pudimos enviarte el correo de confirmación — escríbenos por WhatsApp para avisarte cuando esté listo tu QR.";
   }
 
-  return { ok: true, avisoEmail, cantidad, total: cotizacion.total, codigo: codigoCompra(grupoId) };
+  return {
+    ok: true,
+    avisoEmail,
+    cantidad,
+    total: cotizacion.total,
+    codigo: codigoCompra(grupoId),
+    enPlan: Boolean(planCreado),
+    grupoId,
+  };
 }

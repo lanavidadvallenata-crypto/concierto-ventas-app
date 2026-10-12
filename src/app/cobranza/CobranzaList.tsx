@@ -2,8 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
-import { registrarPagoDeCuotas, aprobarCuotas, anularPorFaltaDePago } from "./actions";
-import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox, formatoUsd } from "@/lib/formato";
+import { registrarPagoDeCuotas, aprobarCuotas, anularPorFaltaDePago, rechazarPagoAnotado } from "./actions";
+import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox, formatoUsd, parsearMontoBs } from "@/lib/formato";
 import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
 import { codigoCompra } from "@/lib/compra";
@@ -57,7 +57,7 @@ const SECCIONES: Record<Urgencia, { titulo: string; nota: string; tono: string; 
   },
   enGracia: {
     titulo: "Última llamada",
-    nota: "Ya vencieron. Si no pagan hoy, su entrada se libera.",
+    nota: "Ya vencieron y no han pagado. Llámalos antes de que pasen a la lista de anular.",
     tono: "border-red-300 bg-red-50",
     barra: "bg-red-500",
   },
@@ -114,9 +114,13 @@ type Persona = {
 function paraWhatsApp(telefono: string | null): string | null {
   if (!telefono) return null;
   const d = telefono.replace(/\D/g, "");
-  if (d.length < 10) return null;
-  if (d.startsWith("58")) return d;
-  return `58${d.replace(/^0+/, "")}`;
+  // Formatos venezolanos: 0414-1234567 (11 dígitos con el 0), 4141234567
+  // (10) o ya con el 58 (12). Cualquier otra cosa no se inventa: un enlace
+  // a un número que no existe es peor que no tener enlace.
+  if (/^58\d{10}$/.test(d)) return d;
+  if (/^0\d{10}$/.test(d)) return `58${d.slice(1)}`;
+  if (/^\d{10}$/.test(d)) return `58${d}`;
+  return null;
 }
 
 function mensajeWhatsApp(p: Persona, tasaEurVes: number | null): string {
@@ -156,8 +160,11 @@ function mensajeWhatsApp(p: Persona, tasaEurVes: number | null): string {
   // Ya reportó y está esperando al banco: pedirle plata otra vez es el error
   // que tenía esta pantalla. Aquí se tranquiliza, no se cobra.
   if (p.urgencia === "porVerificar") {
+    // Lo que pagó es la SUMA de lo anotado, no una cuota: un solo Zelle de
+    // $196 que cubre dos cuotas se le confirma como $196, o reclama.
+    const anotado = formatoUsd(Math.round(p.anotadas.reduce((s, x) => s + x.montoUsd, 0) * 100) / 100);
     return (
-      `${hola}, te escribo de La Navidad Vallenata. Recibimos tu pago de ${monto} y lo estamos ` +
+      `${hola}, te escribo de La Navidad Vallenata. Recibimos tu pago de ${anotado} y lo estamos ` +
       `confirmando con el banco; te aviso en cuanto quede listo. Tu entrada sigue apartada a tu nombre.`
     );
   }
@@ -172,6 +179,9 @@ function queHacer(p: Persona): string {
   const c = p.manda;
   switch (p.urgencia) {
     case "paraAnular":
+      if (p.anotadas.length > 0) {
+        return `Se le pasó la fecha de ${c.etiqueta} (${fechaCorta(c.venceEl)}), pero tiene un pago anotado: confírmalo o recházalo antes de decidir.`;
+      }
       return `Se le pasó la fecha de ${c.etiqueta} (${fechaCorta(c.venceEl)}). Hay que anular y revender.`;
     case "enGracia":
       return `Debe ${formatoUsd(c.montoUsd)} desde el ${fechaCorta(c.venceEl)}. Escríbele ya.`;
@@ -192,6 +202,7 @@ export default function CobranzaList({
   miRol,
   nombrePorId,
   moduloActivo,
+  configError,
   topeVip,
   tasaEurVes,
 }: {
@@ -200,6 +211,8 @@ export default function CobranzaList({
   miRol: string;
   nombrePorId: Record<string, string>;
   moduloActivo: boolean;
+  /** true = no se pudo leer abona618_config: no se sabe si está encendido. */
+  configError: boolean;
   topeVip: number;
   /** Tasa BCV del euro de hoy, para estimar los bolívares de lo que falta por
    *  cobrar. null = no se pudo leer; entonces no se estima nada. */
@@ -210,6 +223,8 @@ export default function CobranzaList({
   const [avisos, setAvisos] = useState<Record<string, Aviso>>({});
   const [abierto, setAbierto] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState<string | null>(null);
+  const [rechazando, setRechazando] = useState<string | null>(null);
+  const [motivoRechazo, setMotivoRechazo] = useState("");
 
   const puedeAprobar = miRol === "finanzas" || miRol === "admin";
 
@@ -245,6 +260,9 @@ export default function CobranzaList({
         });
       }
     }
+    for (const p of porGrupo.values()) {
+      p.pendientes.sort((a, b) => a.diasParaVencer - b.diasParaVencer);
+    }
     return [...porGrupo.values()];
   }, [lista]);
 
@@ -261,8 +279,8 @@ export default function CobranzaList({
     });
     startTransition(async () => {
       const res = await fn();
-      setProcesando(null);
-      setConfirmando(null);
+      setProcesando((actual) => (actual === id ? null : actual));
+      setConfirmando((actual) => (actual === id ? null : actual));
       if (!res.ok) {
         poner(id, { tipo: "error", texto: res.error ?? "No se pudo completar." });
         return;
@@ -276,7 +294,18 @@ export default function CobranzaList({
     <div className="space-y-5">
       <header className="space-y-2">
         <h1 className="text-lg font-semibold">Cobranza de cuotas</h1>
-        {!moduloActivo && (
+        {lista.error && (
+          <p className="text-sm rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+            <strong>No se pudo leer la base de datos.</strong> Lo que ves abajo no es real: no es que nadie deba
+            nada, es que no se pudo cargar. Recarga en un momento.
+          </p>
+        )}
+        {configError && (
+          <p className="text-xs rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+            No se pudo leer si el plan de cuotas está encendido o apagado.
+          </p>
+        )}
+        {!configError && !moduloActivo && (
           <p className="text-xs rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2 text-neutral-600">
             El plan de cuotas está <strong>apagado</strong> para compradores nuevos. Lo que aparece aquí son planes
             que ya existen y hay que seguir cobrando igual.
@@ -311,11 +340,26 @@ export default function CobranzaList({
         </p>
       </header>
 
-      {personas.length === 0 && (
+      {personas.length === 0 && !lista.error && (
         <p className="text-sm text-neutral-500 py-6 text-center">
           No hay nada por cobrar ahora mismo. Nadie debe nada.
         </p>
       )}
+
+      {/* 17. Lo que Finanzas tiene que confirmar, aunque la persona esté en
+          otra caja por tener además algo vencido. Sin esto, Finanzas barría
+          solo la caja azul y esos pagos quedaban escondidos. */}
+      {(() => {
+        const escondidos = personas.filter((p) => p.anotadas.length > 0 && p.urgencia !== "porVerificar");
+        if (escondidos.length === 0) return null;
+        return (
+          <p className="text-xs rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sky-900">
+            <strong>Finanzas:</strong> además de la caja azul, hay {escondidos.length}{" "}
+            {escondidos.length === 1 ? "pago anotado" : "pagos anotados"} esperando confirmación en otras cajas:{" "}
+            {escondidos.map((p) => `${p.nombre ?? "sin nombre"} (${codigoCompra(p.grupoId)})`).join(", ")}.
+          </p>
+        );
+      })()}
 
       {URGENCIAS.map((urgencia) => {
         const sec = SECCIONES[urgencia];
@@ -351,7 +395,9 @@ export default function CobranzaList({
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="font-semibold text-sm tabular-nums">falta {formatoUsd(p.saldo)}</div>
+                      <div className="font-semibold text-sm tabular-nums">
+                        falta {formatoUsd(Math.round((p.saldo - p.anotadas.reduce((s, x) => s + x.montoUsd, 0)) * 100) / 100)}
+                      </div>
                       <div className="text-[11px] text-neutral-600 tabular-nums">
                         {tasaEurVes ? formatoBsAprox(convertirABs(p.saldo, tasaEurVes)) : SIN_TASA}
                       </div>
@@ -366,7 +412,15 @@ export default function CobranzaList({
                       <div className={`h-full rounded-full ${sec.barra}`} style={{ width: `${avance}%` }} />
                     </div>
                     <p className="text-xs text-neutral-600 mt-1 tabular-nums">
-                      Pagó {formatoUsd(p.pagado)} de {formatoUsd(p.totalUsd)}
+                      Confirmado {formatoUsd(p.pagado)} de {formatoUsd(p.totalUsd)}
+                      {p.anotadas.length > 0 && (
+                        <>
+                          {" · "}
+                          <span className="text-sky-800">
+                            por confirmar {formatoUsd(Math.round(p.anotadas.reduce((s, x) => s + x.montoUsd, 0) * 100) / 100)}
+                          </span>
+                        </>
+                      )}
                     </p>
                   </div>
 
@@ -394,14 +448,49 @@ export default function CobranzaList({
                           </span>
                         </div>
                         {c.reportadoEn && (
-                          <div className="text-neutral-500">
-                            {ETIQUETA_METODO[c.metodoPago ?? ""] ?? c.metodoPago}
-                            {c.referenciaPago ? ` · ref. ${c.referenciaPago}` : ""}
-                            {METODOS_EN_BS.has(c.metodoPago ?? "") && c.montoBs != null ? ` · ${formatoBs(c.montoBs)}` : ""}
-                            {" · "}
-                            {c.reportadoPor
-                              ? `anotado por ${nombrePorId[c.reportadoPor] ?? "alguien del equipo"}`
-                              : "lo reportó el comprador"}
+                          <div className="text-neutral-500 flex items-center justify-between gap-2 flex-wrap">
+                            <span>
+                              {ETIQUETA_METODO[c.metodoPago ?? ""] ?? c.metodoPago}
+                              {c.referenciaPago ? ` · ref. ${c.referenciaPago}` : ""}
+                              {METODOS_EN_BS.has(c.metodoPago ?? "") && c.montoBs != null ? ` · ${formatoBs(c.montoBs)}` : ""}
+                              {" · "}
+                              {c.reportadoPor
+                                ? `anotado por ${nombrePorId[c.reportadoPor] ?? "alguien del equipo"}`
+                                : "lo reportó el comprador"}
+                            </span>
+                            {puedeAprobar && (
+                              rechazando === c.cuotaId ? (
+                                <span className="flex items-center gap-1.5 w-full">
+                                  <input
+                                    value={motivoRechazo}
+                                    onChange={(e) => setMotivoRechazo(e.target.value)}
+                                    placeholder="¿Por qué? Ej: no aparece en Bancamiga"
+                                    className="flex-1 min-w-0 h-9 rounded-md border border-neutral-300 px-2 text-xs"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={esteProcesando || motivoRechazo.trim().length < 3}
+                                    onClick={() =>
+                                      correr(p.grupoId, () => rechazarPagoAnotado({ cuotaId: c.cuotaId, motivo: motivoRechazo.trim() }))
+                                    }
+                                    className="h-9 px-2 rounded-md bg-red-600 text-white text-xs font-semibold disabled:opacity-50"
+                                  >
+                                    Rechazar
+                                  </button>
+                                  <button type="button" onClick={() => setRechazando(null)} className="h-9 px-2 text-xs text-neutral-500">
+                                    Cancelar
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => { setRechazando(c.cuotaId); setMotivoRechazo(""); }}
+                                  className="h-9 px-2 rounded-md border border-red-200 text-red-700 bg-white text-xs font-semibold"
+                                >
+                                  No llegó al banco
+                                </button>
+                              )
+                            )}
                           </div>
                         )}
                         {c.nota && <div className="text-neutral-600 italic">“{c.nota}”</div>}
@@ -476,7 +565,7 @@ export default function CobranzaList({
                       </button>
                     )}
 
-                    {p.urgencia === "paraAnular" && puedeAprobar && (
+                    {p.urgencia === "paraAnular" && puedeAprobar && p.anotadas.length === 0 && (
                       confirmando === p.grupoId ? (
                         <button
                           type="button"
@@ -500,6 +589,7 @@ export default function CobranzaList({
 
                   {abierto === p.grupoId && (
                     <FormularioPago
+                      key={`${p.grupoId}:${p.pendientes.filter((c) => !c.reportadoEn).map((c) => c.cuotaId).join(",")}`}
                       persona={p}
                       procesando={esteProcesando}
                       onEnviar={(datos) => correr(p.grupoId, () => registrarPagoDeCuotas(datos))}
@@ -536,8 +626,10 @@ function FormularioPago({
   const [montoBs, setMontoBs] = useState("");
   const [canal, setCanal] = useState<string>("whatsapp");
   const [nota, setNota] = useState("");
+  const [errorBs, setErrorBs] = useState<string | null>(null);
 
   const enBs = METODOS_EN_BS.has(metodo);
+  const bsLeido = enBs ? parsearMontoBs(montoBs) : null;
   const total = Math.round(
     anotables.filter((c) => elegidas.includes(c.cuotaId)).reduce((s, c) => s + c.montoUsd, 0) * 100
   ) / 100;
@@ -551,13 +643,22 @@ function FormularioPago({
       className="rounded-lg border border-neutral-300 bg-white p-3 space-y-2.5"
       onSubmit={(e) => {
         e.preventDefault();
+        // Solo lo que se VE marcado. Si la pantalla se refrescó y una cuota
+        // salió de la lista, su id no viaja aunque siga en el estado.
+        const visibles = new Set(anotables.map((c) => c.cuotaId));
+        const bs = enBs ? parsearMontoBs(montoBs) : null;
+        if (enBs && bs == null) {
+          setErrorBs("No entendí ese monto. Escríbelo como en el comprobante, por ejemplo 23.534,75.");
+          return;
+        }
+        setErrorBs(null);
         onEnviar({
-          cuotaIds: elegidas,
+          cuotaIds: elegidas.filter((id) => visibles.has(id)),
           grupoId: persona.grupoId,
           metodoPago: metodo,
           referenciaPago: referencia,
           canal,
-          ...(enBs && montoBs ? { montoBs: Number(montoBs.replace(",", ".")) } : {}),
+          ...(enBs && bs != null ? { montoBs: bs } : {}),
           ...(nota.trim() ? { nota: nota.trim() } : {}),
         });
       }}
@@ -624,10 +725,14 @@ function FormularioPago({
             value={montoBs}
             onChange={(e) => setMontoBs(e.target.value)}
             inputMode="decimal"
-            placeholder="Lo que dice su comprobante"
+            placeholder="Lo que dice su comprobante, ej: 23.534,75"
             className="mt-1 w-full h-11 rounded-lg border border-neutral-300 px-2 text-sm"
             required
           />
+          {montoBs && bsLeido != null && (
+            <span className="block text-[11px] text-neutral-500 mt-1 tabular-nums">Se va a guardar {formatoBs(bsLeido)}</span>
+          )}
+          {errorBs && <span className="block text-[11px] text-red-700 mt-1">{errorBs}</span>}
           {elegidas.length > 1 && (
             <span className="block text-[11px] text-neutral-500 mt-1">
               Escribe el total del comprobante. Se reparte entre las cuotas que marcaste, para que los bolívares

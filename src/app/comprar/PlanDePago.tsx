@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CONDICIONES, fechaCorta, type Plan } from "@/lib/cuotas";
+import { CONDICIONES, fechaCorta, type PlanPublico } from "@/lib/cuotas";
 
 /**
  * Abona618 en el checkout: elegir entre pagar todo o pagar en cuotas, ver el
@@ -23,7 +23,7 @@ export default function PlanDePago({
   acepto,
   onAceptar,
 }: {
-  plan: Plan;
+  plan: PlanPublico;
   total: number;
   enCuotas: boolean;
   onElegir: (v: boolean) => void;

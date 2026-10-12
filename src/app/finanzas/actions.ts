@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generarTokenQR } from "@/lib/qr";
-import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, type EntradaQR } from "@/lib/enviar-qr";
+import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, enviarCorreoPlanAnulado, type EntradaQR } from "@/lib/enviar-qr";
 import { anularPlan, leerPlanPorGrupo, planConSaldo, verificarCuota } from "@/lib/abona618";
 import { fechaCorta, usd } from "@/lib/cuotas";
 import { guardarTasaManual } from "@/lib/tasa";
@@ -138,9 +138,20 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
   // contado, así que esto no se puede dejar al criterio de quien aprueba.
   // ─────────────────────────────────────────────────────────────────────────
   const grupoId = (grupo.tickets[0].grupo_id as string | null) ?? grupo.tickets[0].id;
-  const plan = await planConSaldo(service, grupoId);
+  const candado = await planConSaldo(service, grupoId);
 
-  if (plan) {
+  if (candado.estado === "error") {
+    // FALLA CERRADO. Antes un timeout aquí se leía como "no tiene plan" y la
+    // compra seguía como de contado: entrada entregada con el 60 % sin pagar.
+    // Si no se puede leer el plan, no se entrega nada; se reintenta después.
+    return {
+      ok: false,
+      error: "No se pudo comprobar si esta compra tiene un plan de cuotas. No se aprobó nada: inténtalo de nuevo en un momento.",
+    };
+  }
+
+  if (candado.estado === "con_saldo") {
+    const plan = candado.plan;
     const cuota = plan.proxima;
     if (!cuota) {
       return {
@@ -305,6 +316,33 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
   const primero = rechazados[0];
   if (!primero.comprador_email) {
     return { ok: true, aviso: `Pago rechazado. Esta compra no tiene correo, no se avisó al comprador.${notaPlan}` };
+  }
+
+  // Una compra en plan recibe el correo de plan anulado, no el de contado: el
+  // de contado le decía "monto $280" a quien había transferido $112, y le
+  // prometía un QR "cuando el pago se confirme" sobre un plan que ya no existe.
+  if (planRechazo.anulado && planRechazo.plan) {
+    const plan = planRechazo.plan;
+    const inicial = plan.cuotas[0]?.montoUsd ?? plan.saldo;
+    try {
+      await enviarCorreoPlanAnulado({
+        destinatario: primero.comprador_email,
+        nombreComprador: primero.comprador_nombre,
+        grupoId: grupoRechazo,
+        motivo: plan.pagado > 0 ? "falta_de_pago" : "inicial_no_llego",
+        montoPendiente: plan.pagado > 0 ? plan.saldo : inicial,
+        abonado: plan.pagado,
+        aceptoEn: plan.aceptoCondicionesEn
+          ? new Date(plan.aceptoCondicionesEn).toLocaleString("es-VE", {
+              timeZone: "America/Caracas", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+            })
+          : null,
+      });
+    } catch (e) {
+      console.error("Error enviando el correo de plan anulado:", (e as Error).message);
+      return { ok: true, aviso: `Pago rechazado, pero el correo a ${primero.comprador_email} no salió. Avísale por WhatsApp.${notaPlan}` };
+    }
+    return { ok: true, aviso: `Pago rechazado.${notaPlan}` };
   }
 
   const totalUsd = rechazados.reduce((s, t) => s + t.precio, 0);

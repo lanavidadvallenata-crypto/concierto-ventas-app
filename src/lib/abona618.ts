@@ -309,37 +309,58 @@ function armarPlan(fila: Record<string, unknown>, filasCuotas: Record<string, un
   };
 }
 
-/** El plan de una compra, buscado por el grupo_id de sus tickets. */
-export async function leerPlanPorGrupo(service: SupabaseClient, grupoId: string): Promise<PlanGuardado | null> {
+/**
+ * El plan de una compra, distinguiendo "no tiene plan" de "no pude leerlo".
+ *
+ * La diferencia es la que decide si se entrega una entrada. `verificarPago`
+ * trata "sin plan" como una compra de contado y manda el QR; si un timeout de
+ * la base se confundiera con "sin plan", quien pagó el 40 % recibiría su
+ * entrada. Esta función es la que lo impide: ante cualquier error devuelve
+ * `ok: false`, y quien toma decisiones de dinero tiene que leer ese campo.
+ */
+export async function leerPlanPorGrupoEstricto(
+  service: SupabaseClient,
+  grupoId: string
+): Promise<{ ok: true; plan: PlanGuardado | null } | { ok: false; error: string }> {
   const { data: plan, error } = await service
     .from("planes_pago")
     .select("id, grupo_id, total_usd, tipo, cantidad, estado, acepto_condiciones_en, condiciones_version")
     .eq("grupo_id", grupoId)
     .maybeSingle();
 
-  if (error || !plan) {
-    if (error) console.error("Abona618: no se pudo leer el plan —", error.message);
-    return null;
+  if (error) {
+    console.error("Abona618: no se pudo leer el plan —", error.message);
+    return { ok: false, error: error.message };
   }
+  if (!plan) return { ok: true, plan: null };
 
   const { data: cuotas, error: errorCuotas } = await service.from("cuotas").select(SELECT_CUOTAS).eq("plan_id", plan.id);
   if (errorCuotas) {
     console.error("Abona618: no se pudieron leer las cuotas —", errorCuotas.message);
-    return null;
+    return { ok: false, error: errorCuotas.message };
   }
 
   if (!cuotas || cuotas.length === 0) {
-    // Un plan sin cuotas no se puede pagar: no hay nada que reportar ni que
-    // verificar. Queda con saldo completo, así que el candado del QR sigue
-    // puesto (que es lo correcto), pero hace falta arreglarlo a mano.
     console.error(
-      `Abona618: PLAN SIN CUOTAS, REVISAR A MANO — plan ${plan.id}, grupo ${plan.grupo_id}. ` +
-        "La compra no se puede completar hasta que se le creen las cuotas."
+      `Abona618: el plan ${plan.id} (grupo ${grupoId}) NO TIENE CUOTAS. Queda con saldo completo y hay que ` +
+        "arreglarlo a mano: ni el comprador ni Finanzas pueden pagarlo así."
     );
   }
 
-  return armarPlan(plan, cuotas ?? []);
+  return { ok: true, plan: armarPlan(plan as Record<string, unknown>, (cuotas ?? []) as Record<string, unknown>[]) };
 }
+
+/**
+ * El plan de una compra, o null. OJO: null significa "no hay plan" O "no se
+ * pudo leer". Sirve para pantallas y acciones que ante la duda NO hacen nada
+ * (registrar, anular, mostrar). Para decidir si se entrega una entrada se usa
+ * `leerPlanPorGrupoEstricto` o `planConSaldo`, que sí distinguen el error.
+ */
+export async function leerPlanPorGrupo(service: SupabaseClient, grupoId: string): Promise<PlanGuardado | null> {
+  const r = await leerPlanPorGrupoEstricto(service, grupoId);
+  return r.ok ? r.plan : null;
+}
+
 
 /**
  * ¿Esta compra tiene un plan con saldo? Es la pregunta que tiene que hacerse
@@ -353,11 +374,23 @@ export async function leerPlanPorGrupo(service: SupabaseClient, grupoId: string)
  * cola de Finanzas, y aprobarlos entregaría la entrada completa de alguien que
  * dejó de pagar.
  */
-export async function planConSaldo(service: SupabaseClient, grupoId: string | null): Promise<PlanGuardado | null> {
-  if (!grupoId) return null;
-  const plan = await leerPlanPorGrupo(service, grupoId);
-  if (!plan) return null;
-  return plan.saldo > 0 ? plan : null;
+export type EstadoDelCandado =
+  /** La compra no tiene plan: es de contado, se entrega al verificar. */
+  | { estado: "sin_plan" }
+  /** Tiene plan y todavía debe: el candado está puesto. */
+  | { estado: "con_saldo"; plan: PlanGuardado }
+  /** Tiene plan y ya pagó todo: se puede entregar. */
+  | { estado: "pagado"; plan: PlanGuardado }
+  /** No se pudo leer. NUNCA se trata como "sin plan": un timeout no puede
+   *  terminar en una entrada entregada con el 60 % sin pagar. */
+  | { estado: "error"; error: string };
+
+export async function planConSaldo(service: SupabaseClient, grupoId: string | null): Promise<EstadoDelCandado> {
+  if (!grupoId) return { estado: "sin_plan" };
+  const r = await leerPlanPorGrupoEstricto(service, grupoId);
+  if (!r.ok) return { estado: "error", error: r.error };
+  if (!r.plan) return { estado: "sin_plan" };
+  return r.plan.saldo > 0 ? { estado: "con_saldo", plan: r.plan } : { estado: "pagado", plan: r.plan };
 }
 
 // --------------------------------------------------------------- escribir
@@ -522,18 +555,44 @@ export async function verificarCuota(
   let completo = false;
 
   if (saldoCero) {
-    // Condicionado: el primero en llegar completa el plan y recibe la orden de
-    // entregar los QR. El segundo se encuentra el plan ya completado y no
-    // vuelve a mandarlos.
-    const { data: completado } = await service
+    // Condicionado dos veces. Por `estado in (al_dia, en_mora)`: solo un plan
+    // VIVO se completa, así que si alguien lo anuló mientras esta cuota se
+    // verificaba, no se completa un plan cuya silla ya volvió a la venta (la
+    // base además lo prohíbe con el check completado_no_anulado). Y como el
+    // primero en llegar lo cambia de estado, el segundo no recibe `completo` y
+    // los QR salen una sola vez.
+    const { data: completado, error: errorCompletar } = await service
       .from("planes_pago")
       .update({ estado: "completado", completado_en: new Date().toISOString() })
       .eq("id", plan.id)
-      .neq("estado", "completado")
+      .in("estado", ["al_dia", "en_mora"])
       .select("id")
       .maybeSingle();
-    completo = Boolean(completado);
-    plan.estado = "completado";
+
+    if (errorCompletar) {
+      // Se dice en voz alta: el dinero quedó cobrado y el plan no se cerró.
+      // El reintento repara, porque la cuota ya está verificada y esto se
+      // vuelve a intentar desde el principio.
+      console.error(`Abona618: plan ${plan.id} pagado al 100 % pero no se pudo marcar completado —`, errorCompletar.message);
+      return { ok: false, error: "El pago quedó registrado, pero no se pudo cerrar el plan. Vuelve a intentarlo." };
+    }
+
+    if (completado) {
+      completo = true;
+      plan.estado = "completado";
+    } else if (plan.estado === "completado") {
+      // Ya lo había cerrado otra persona (o un intento anterior): no es error,
+      // pero la entrega de los QR ya no es de esta llamada.
+      completo = false;
+    } else {
+      // Ni se cerró ni estaba cerrado: lo anularon en medio. Pagó todo y su
+      // silla ya es de otro. No hay salida automática buena; se frena aquí.
+      console.error(`Abona618: plan ${plan.id} pagado al 100 % pero quedó en estado ${plan.estado}. REVISAR A MANO.`);
+      return {
+        ok: false,
+        error: "El pago quedó registrado, pero esta compra fue anulada mientras se verificaba. Hay que revisarla a mano antes de entregar nada.",
+      };
+    }
   } else if (plan.estado === "en_mora") {
     // Se puso al día: sale del rojo en Finanzas y deja de recibir avisos de
     // gracia.
@@ -551,8 +610,72 @@ export async function verificarCuota(
 }
 
 /**
- * Anula el plan de una compra. Lo llama Finanzas cuando rechaza o anula la
- * compra entera, y lo llamará el cron cuando se cierre el plazo de gracia.
+ * Finanzas no encontró en el banco un pago que alguien anotó. La cuota vuelve
+ * a estar "sin reportar": recupera su fecha, vuelve a su caja de cobranza y
+ * el cron le vuelve a escribir.
+ *
+ * Hace falta porque sin esto un reporte equivocado — o inventado — congelaba
+ * la entrada para siempre: `reportado_en` no se limpiaba en ningún sitio,
+ * la cuota caía en "por confirmar" sin mirar la fecha, el cron la daba por
+ * pagada y la pantalla decía "a esta persona no hay que cobrarle nada". Una
+ * referencia de seis dígitos cualquiera sacaba una silla del inventario
+ * hasta el día del evento, y nadie tenía un botón para deshacerlo.
+ *
+ * Deja rastro: la referencia y el método que se rechazan quedan en la nota,
+ * con quién lo rechazó y por qué. Lo verificado no se toca.
+ */
+export async function rechazarReporte(
+  service: SupabaseClient,
+  d: { cuotaId: string; por: string; motivo: string }
+): Promise<{ ok: true; etiqueta: string } | { ok: false; error: string }> {
+  const { data: cuota, error } = await service
+    .from("cuotas")
+    .select("id, etiqueta, reportado_en, verificado_en, metodo_pago, referencia_pago, monto_bs, nota")
+    .eq("id", d.cuotaId)
+    .maybeSingle();
+  if (error) {
+    console.error("Abona618: no se pudo leer la cuota a rechazar —", error.message);
+    return { ok: false, error: "No se pudo leer la cuota. Intenta de nuevo." };
+  }
+  if (!cuota) return { ok: false, error: "No encontramos esa cuota." };
+  if (cuota.verificado_en) return { ok: false, error: "Esa cuota ya está cobrada y confirmada: no se puede rechazar." };
+  if (!cuota.reportado_en) return { ok: false, error: "Esa cuota no tiene ningún pago anotado." };
+
+  const rastro =
+    `Reporte rechazado por Finanzas el ${new Date().toISOString().slice(0, 10)}: ${d.motivo.trim()}. ` +
+    `Lo anotado era ${String(cuota.metodo_pago ?? "?")} ref. ${String(cuota.referencia_pago ?? "?")}` +
+    (cuota.monto_bs != null ? ` por Bs ${Number(cuota.monto_bs).toFixed(2)}` : "") +
+    ".";
+  const nota = [cuota.nota, rastro].filter(Boolean).join(" ");
+
+  const { data: fila, error: errorUpdate } = await service
+    .from("cuotas")
+    .update({
+      reportado_en: null,
+      reportado_por: null,
+      canal_reporte: null,
+      metodo_pago: null,
+      referencia_pago: null,
+      monto_bs: null,
+      tasa_aplicada: null,
+      nota,
+    })
+    .eq("id", d.cuotaId)
+    .is("verificado_en", null)
+    .select("id")
+    .maybeSingle();
+  if (errorUpdate) {
+    console.error("Abona618: no se pudo rechazar el reporte —", errorUpdate.message);
+    return { ok: false, error: "No se pudo rechazar el reporte. Intenta de nuevo." };
+  }
+  if (!fila) return { ok: false, error: "Esa cuota cambió mientras la revisabas. Recarga la pantalla." };
+  return { ok: true, etiqueta: String(cuota.etiqueta) };
+}
+
+/**
+ * Anula el plan de una compra. Lo llama una PERSONA de Finanzas cuando rechaza
+ * o anula la compra entera. El cron no anula nunca (Anita, 12 oct): detecta,
+ * marca en mora y avisa; el botón lo aprieta alguien.
  *
  * Hace falta porque rechazar una compra devolvía la silla al inventario pero
  * dejaba el plan en `al_dia`, y `contarVipEnPlan` cuenta por estado del plan:
@@ -658,6 +781,10 @@ export type ListaCobranza = {
    *  muestra dentro de la tarjeta de cada persona: sin ellas, el equipo ve lo
    *  que falta pero no lo que ya pagó, y no puede saber si le escribe o no. */
   pagadasPorGrupo: Record<string, { etiqueta: string; montoUsd: number }[]>;
+  /** true = no se pudo leer la base. La pantalla y el cron tienen que
+   *  distinguirlo de "no hay nada que cobrar": un cero que parece
+   *  tranquilizador es peor que un error visible. */
+  error: boolean;
   /** Totales para el encabezado: lo que falta cobrar y de cuántas compras. */
   saldoTotal: number;
   planesActivos: number;
@@ -672,10 +799,12 @@ const LISTA_VACIA: ListaCobranza = {
   paraAnular: [],
   masAdelante: [],
   pagadasPorGrupo: {},
+  error: false,
   saldoTotal: 0,
   planesActivos: 0,
   vipEnPlan: 0,
 };
+const LISTA_CON_ERROR: ListaCobranza = { ...LISTA_VACIA, error: true };
 
 export async function listaDeCobranza(
   service: SupabaseClient,
@@ -684,34 +813,50 @@ export async function listaDeCobranza(
   const hoy = opciones.hoy ?? hoyEnVenezuela();
   const diasProximas = opciones.diasProximas ?? 10;
 
-  const { data: planes, error } = await service
-    .from("planes_pago")
-    .select("id, grupo_id, total_usd, tipo, cantidad, estado, acepto_condiciones_en, condiciones_version")
-    .in("estado", ["al_dia", "en_mora"]);
-
+  // Las tres lecturas van paginadas con `seleccionarTodo`: PostgREST corta
+  // en 1.000 filas sin avisar (ver db.ts), y con 3 cuotas por plan eso son
+  // ~334 compras. Pasado ese punto, sin paginar, los deudores desaparecían de
+  // la pantalla y del cron en silencio, y un plan podía volver partido con el
+  // saldo mal calculado.
+  const { data: planes, error } = await seleccionarTodo<Record<string, unknown>>(
+    service,
+    "planes_pago",
+    "id, grupo_id, total_usd, tipo, cantidad, estado, acepto_condiciones_en, condiciones_version",
+    (q) => q.in("estado", ["al_dia", "en_mora"]).order("id")
+  );
   if (error) {
-    console.error("Abona618: no se pudo leer la lista de cobranza —", error.message);
-    return LISTA_VACIA;
+    console.error("Abona618: no se pudo leer la lista de cobranza —", error);
+    return LISTA_CON_ERROR;
   }
-  if (!planes || planes.length === 0) return LISTA_VACIA;
+  if (planes.length === 0) return LISTA_VACIA;
 
   const ids = planes.map((p) => String(p.id));
-  const { data: cuotasFilas, error: errorCuotas } = await service
-    .from("cuotas")
-    .select(`plan_id, ${SELECT_CUOTAS}`)
-    .in("plan_id", ids);
+  const { data: cuotasFilas, error: errorCuotas } = await seleccionarTodo<Record<string, unknown>>(
+    service,
+    "cuotas",
+    `plan_id, ${SELECT_CUOTAS}`,
+    (q) => q.in("plan_id", ids).order("id")
+  );
   if (errorCuotas) {
-    console.error("Abona618: no se pudieron leer las cuotas de la cobranza —", errorCuotas.message);
-    return LISTA_VACIA;
+    console.error("Abona618: no se pudieron leer las cuotas de la cobranza —", errorCuotas);
+    return LISTA_CON_ERROR;
   }
 
   // Los datos de contacto viven en tickets, que no tiene FK con planes_pago
   // (grupo_id no es único allí). Una consulta y un mapa, en vez de un join.
   const grupos = planes.map((p) => String(p.grupo_id));
-  const { data: tickets } = await service
-    .from("tickets")
-    .select("grupo_id, comprador_nombre, comprador_telefono, comprador_email")
-    .in("grupo_id", grupos);
+  const { data: tickets, error: errorTickets } = await seleccionarTodo<Record<string, unknown>>(
+    service,
+    "tickets",
+    "grupo_id, comprador_nombre, comprador_telefono, comprador_email",
+    (q) => q.in("grupo_id", grupos).order("id")
+  );
+  if (errorTickets) {
+    // Sin contacto no se puede cobrar: mejor decirlo que listar a todo el
+    // mundo como "sin teléfono ni correo".
+    console.error("Abona618: no se pudieron leer los contactos de la cobranza —", errorTickets);
+    return LISTA_CON_ERROR;
+  }
 
   const contacto = new Map<string, { nombre: string | null; telefono: string | null; email: string | null }>();
   for (const t of tickets ?? []) {
@@ -726,7 +871,7 @@ export async function listaDeCobranza(
   }
 
   const porPlan = new Map<string, Record<string, unknown>[]>();
-  for (const c of cuotasFilas ?? []) {
+  for (const c of cuotasFilas) {
     const k = String(c.plan_id ?? "");
     const lista = porPlan.get(k) ?? [];
     lista.push(c as Record<string, unknown>);
@@ -742,6 +887,7 @@ export async function listaDeCobranza(
     paraAnular: [],
     masAdelante: [],
     pagadasPorGrupo: {},
+    error: false,
   };
 
   for (const filaPlan of planes) {

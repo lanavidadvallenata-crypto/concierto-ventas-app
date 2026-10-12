@@ -15,7 +15,7 @@ import {
   type MetodoPago,
 } from "@/lib/pagos";
 import { iniciarCheckoutPublico, confirmarCheckoutPublico, liberarHoldPublico } from "./actions";
-import { type Plan, type SinPlan } from "@/lib/cuotas";
+import { type PlanPublico, type SinPlan } from "@/lib/cuotas";
 import PlanDePago from "./PlanDePago";
 import BotonSoporte from "@/components/BotonSoporte";
 import { sugerirCorreo } from "@/lib/correo";
@@ -68,9 +68,15 @@ export default function CheckoutForm({
   // Abona618. `plan` viene del servidor al iniciar el checkout: con el módulo
   // apagado llega { hayPlan: false, motivo: "apagado" } y nada de esto se
   // pinta, que es el estado en el que esto entra a producción.
-  const [plan, setPlan] = useState<Plan | SinPlan | null>(null);
+  const [plan, setPlan] = useState<PlanPublico | SinPlan | null>(null);
   const [enCuotas, setEnCuotas] = useState(false);
   const [aceptoCondiciones, setAceptoCondiciones] = useState(false);
+  // La pantalla de éxito de un plan no puede prometer el QR "cuando se
+  // confirme el pago": el QR llega al completar el 100 %. Y le deja el
+  // enlace a su página, que es la única copia de sus fechas hasta que
+  // Finanzas confirme la inicial.
+  const [compraEnPlan, setCompraEnPlan] = useState(false);
+  const [grupoConfirmado, setGrupoConfirmado] = useState<string | null>(null);
   // Al cambiar de paso, la pantalla sube al inicio del formulario: si no, la
   // persona queda a media página y no ve el contador ni los avisos.
   const raiz = useRef<HTMLDivElement>(null);
@@ -186,6 +192,12 @@ export default function CheckoutForm({
       honeypot,
       enCuotas,
       aceptoCondiciones,
+      // Las fechas que vio: si cruza la medianoche mientras paga, se le
+      // guarda el plan que aceptó, no el de mañana.
+      planMostrado:
+        enCuotas && plan?.hayPlan
+          ? { fechas: plan.cuotas.filter((c) => !c.esInicial).map((c) => c.venceEl) }
+          : undefined,
     });
     setCargando(false);
     setTardando(false);
@@ -197,6 +209,8 @@ export default function CheckoutForm({
     setDuplicado(res.duplicado ?? false);
     setConfirmadas(res.cantidad);
     setCodigoCompra(res.codigo ?? null);
+    setCompraEnPlan(Boolean(res.enPlan));
+    setGrupoConfirmado(res.grupoId ?? null);
     setAvisoHorario(avisoFueraDeHorario(new Date()));
     setFase("confirmado");
   }
@@ -262,8 +276,17 @@ export default function CheckoutForm({
           </span>
           <p className="text-2xl font-bold leading-tight">¡Recibimos tu compra!</p>
           <p className="text-sm text-white/85">
-            Estamos verificando tu pago. Cuando se confirme te enviamos{" "}
-            {confirmadas > 1 ? `tus ${confirmadas} entradas con sus QR` : "tu entrada con su QR"}.
+            {compraEnPlan ? (
+              <>
+                Estamos verificando tu pago inicial. {confirmadas > 1 ? "Tus entradas quedan apartadas" : "Tu entrada queda apartada"} a tu
+                nombre, y {confirmadas > 1 ? "los QR llegan" : "el QR llega"} cuando completes el total.
+              </>
+            ) : (
+              <>
+                Estamos verificando tu pago. Cuando se confirme te enviamos{" "}
+                {confirmadas > 1 ? `tus ${confirmadas} entradas con sus QR` : "tu entrada con su QR"}.
+              </>
+            )}
           </p>
           {codigoCompra && (
             <div className="mt-2 rounded-lg bg-white/10 border border-white/25 px-4 py-2 flex flex-col items-center">
@@ -282,6 +305,20 @@ export default function CheckoutForm({
             </p>
           )}
           {avisoEmail && <p className="text-sm rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2">{avisoEmail}</p>}
+          {compraEnPlan && grupoConfirmado && (
+            <a
+              href={`/compra/${grupoConfirmado}`}
+              className="rounded-xl border-2 border-marca-secundario/40 bg-marca-secundario/5 p-4 flex items-center justify-between gap-3"
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-marca-secundario">Tu plan de pago y tus fechas</span>
+                <span className="block text-xs text-neutral-700 leading-snug">
+                  Guarda este enlace: ahí ves cuánto llevas, cuánto te falta, cuándo te toca y los datos para pagar.
+                </span>
+              </span>
+              <span className="shrink-0 text-sm font-semibold text-marca-secundario">Ver →</span>
+            </a>
+          )}
           {/* Si entró fuera de horario, eso es lo primero que necesita saber. */}
           {avisoHorario ? [avisoHorarioBloque, avisoCorreo] : [avisoCorreo, avisoHorarioBloque]}
           <BotonSoporte
@@ -303,7 +340,7 @@ export default function CheckoutForm({
     const urgencia = segundosRestantes <= 120 ? "critico" : segundosRestantes <= 300 ? "aviso" : "normal";
     const enBolivares = metodo.moneda === "VES";
     const hayPlan = plan?.hayPlan === true;
-    const planActivo = hayPlan && enCuotas ? (plan as Plan) : null;
+    const planActivo = hayPlan && enCuotas ? (plan as PlanPublico) : null;
     // Lo que tiene que transferir AHORA. Si eligió cuotas es la inicial, y de
     // ahí sale también el monto en bolívares: si se le mostrara el total, se
     // equivocaría de monto y Finanzas no encontraría su pago.
@@ -392,7 +429,7 @@ export default function CheckoutForm({
 
         {hayPlan && !expirado && (
           <PlanDePago
-            plan={plan as Plan}
+            plan={plan as PlanPublico}
             total={cotizacion.total}
             enCuotas={enCuotas}
             onElegir={setEnCuotas}

@@ -64,6 +64,7 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
     let yaCorrio = false;
     // .range() de PostgREST: límites INCLUSIVOS en los dos extremos.
     let rango: { desde: number; hasta: number } | null = null;
+    let orden: { col: string; asc: boolean } | null = null;
 
     const filas = () => (d.tablas[tabla] ??= []);
 
@@ -152,6 +153,13 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
         rango = { desde, hasta };
         return api;
       },
+      // ORDER BY. Paginar con .range() sin orden devuelve filas arbitrarias
+      // entre páginas; el doble ordena de verdad para que una prueba lo note.
+      order: (col: string, opciones?: { ascending?: boolean }) => {
+        const asc = opciones?.ascending !== false;
+        orden = { col, asc };
+        return api;
+      },
       maybeSingle: () => {
         const e = error();
         if (e) return Promise.resolve({ data: null, error: e });
@@ -193,7 +201,16 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
         if (choque) return Promise.resolve(res({ data: null, error: choque }));
         const ed = errorDespues();
         if (ed) return Promise.resolve(res({ data: null, error: ed }));
-        const recortadas = rango ? afectadas.slice(rango.desde, rango.hasta + 1) : afectadas;
+        let ordenadas = afectadas;
+        if (orden) {
+          const { col, asc } = orden;
+          ordenadas = [...afectadas].sort((a, b) => {
+            const x = String(a[col] ?? "");
+            const y = String(b[col] ?? "");
+            return asc ? x.localeCompare(y) : y.localeCompare(x);
+          });
+        }
+        const recortadas = rango ? ordenadas.slice(rango.desde, rango.hasta + 1) : ordenadas;
         return Promise.resolve(res({ data: recortadas, error: null }));
       },
     };

@@ -24,6 +24,8 @@ import {
   liberaEl,
   repartir,
   planPara,
+  planConFechasVistas,
+  aPlanPublico,
   fechasDelPlan,
   hayCuotasDisponibles,
   fechaLarga,
@@ -447,4 +449,65 @@ test("el plazo de gracia NO aparece en nada que vea el comprador", () => {
   // Y la gracia por dentro sigue intacta: son dos cosas distintas.
   assert.equal(DIAS_GRACIA, 2);
   assert.equal(diasEntre("2026-10-15", graciaHasta("2026-10-15")), 2);
+});
+
+test("se honra el calendario que el comprador VIO, no el de hoy, si sigue siendo válido", () => {
+  // Entre ver la pantalla y volver con la referencia pasan hasta 15 minutos.
+  // Si en medio cruzó la medianoche, planPara de hoy da otro calendario (o
+  // ninguno): aceptó 56/42/42 y se le guardaba un pago único de $84.
+  const vio = planPara(140, "2026-10-27");
+  assert.ok(vio.hayPlan);
+  const fechasVistas = vio.cuotas.filter((c) => !c.esInicial).map((c) => c.venceEl);
+  assert.deepEqual(fechasVistas, ["2026-10-30", "2026-11-16"]);
+
+  // Confirma a las 00:03 del 28: hoy daría solo el 16 de noviembre.
+  const hoyDaria = planPara(140, "2026-10-28");
+  assert.ok(hoyDaria.hayPlan && hoyDaria.cuotas.length === 2);
+
+  const honrado = planConFechasVistas(140, "2026-10-28", fechasVistas);
+  assert.ok(honrado, "las fechas que vio siguen siendo futuras y válidas: se honran");
+  assert.deepEqual(honrado.cuotas.map((c) => [c.etiqueta, c.monto, c.venceEl]), [
+    ["Inicial", 56, "2026-10-28"],
+    ["Cuota 01", 42, "2026-10-30"],
+    ["Pago final", 42, "2026-11-16"],
+  ]);
+  // Y cada cuota honrada trae su margen interno igual que las normales.
+  assert.equal(honrado.cuotas[1].graciaHasta, "2026-11-01");
+
+  // Lo que NO se honra: nada que ya no sea un calendario posible.
+  assert.equal(planConFechasVistas(140, "2026-10-28", ["2026-10-27"]), null, "una fecha pasada");
+  assert.equal(planConFechasVistas(140, "2026-10-28", ["2026-11-30"]), null, "después del límite duro");
+  assert.equal(planConFechasVistas(140, "2026-10-28", ["2026-11-16", "2026-10-30"]), null, "fuera de orden");
+  assert.equal(planConFechasVistas(140, "2026-10-28", ["2026-10-30", "2026-10-30"]), null, "repetida");
+  assert.equal(planConFechasVistas(140, "2026-10-28", ["2026-10-30", "2026-11-05", "2026-11-16"]), null, "más cuotas de las permitidas");
+  assert.equal(planConFechasVistas(140, "2026-10-28", ["basura"]), null, "malformada");
+  assert.equal(planConFechasVistas(140, "2026-10-28", []), null, "sin fechas no hay plan");
+  assert.equal(planConFechasVistas(NaN, "2026-10-28", fechasVistas), null);
+});
+
+test("lo que viaja al navegador no trae el margen interno", () => {
+  // Las pantallas ya no lo pintaban, pero el objeto completo del plan viajaba
+  // igual en la respuesta de la server action, con graciaHasta y liberaEl por
+  // cuota, en la pantalla exacta donde el comprador acepta las condiciones.
+  const p = planPara(140, "2026-10-12");
+  assert.ok(p.hayPlan);
+  const publico = aPlanPublico(p);
+  const texto = JSON.stringify(publico);
+  assert.doesNotMatch(texto, /gracia/i);
+  assert.doesNotMatch(texto, /libera/i);
+  assert.doesNotMatch(texto, /fechaTope/);
+  assert.equal(publico.cuotas.length, p.cuotas.length);
+  assert.equal(publico.inicial, p.inicial);
+  for (const c of publico.cuotas) {
+    assert.deepEqual(Object.keys(c).sort(), ["esInicial", "etiqueta", "monto", "orden", "venceEl"]);
+  }
+});
+
+test("un total inválido revienta también después del corte, no sale como 'sin plan'", () => {
+  // Antes el guard del total estaba después de las ramas sin plan: pasado el
+  // 14 de noviembre, planPara(NaN) devolvía {hayPlan:false, motivo:"sin_margen"}
+  // en silencio en vez de lanzar.
+  assert.throws(() => planPara(NaN, "2026-11-20"), /Total inválido/);
+  assert.throws(() => planPara(0, "2026-11-20"), /Total inválido/);
+  assert.throws(() => planPara(Infinity, "2026-11-20"), /Total inválido/);
 });

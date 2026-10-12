@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { anularPlan, leerPlanPorGrupo, reportarCuota, verificarCuota, type CanalReporte } from "@/lib/abona618";
+import { anularPlan, leerPlanPorGrupo, rechazarReporte, reportarCuota, verificarCuota, type CanalReporte } from "@/lib/abona618";
 import { enviarCorreoCuotaVerificada, enviarCorreoPlanAnulado } from "@/lib/enviar-qr";
 import { fechaCorta, usd } from "@/lib/cuotas";
 import { metodoEsEnBs, normalizarReferencia, validarReferencia } from "@/lib/pagos";
@@ -95,6 +95,17 @@ export async function registrarPagoDeCuotas(input: unknown): Promise<Resultado> 
   // bolívares depende de ellos y es lo que después cuadra con el banco.
   const plan = await leerPlanPorGrupo(service, v.grupoId);
   if (!plan) return { ok: false, error: "No encontramos el plan de esa compra." };
+  if (plan.estado !== "al_dia" && plan.estado !== "en_mora") {
+    // Antes se podía anotar un pago sobre un plan anulado: quedaba registrado
+    // con sus bolívares, fuera de toda bandeja e imposible de aprobar.
+    return {
+      ok: false,
+      error:
+        plan.estado === "completado"
+          ? "Ese plan ya está pagado completo."
+          : "Esa compra ya fue anulada y su entrada volvió a la venta. Si pagó, regístralo como una compra nueva.",
+    };
+  }
 
   const ids = [...new Set(v.cuotaIds)];
   const elegidas = ids
@@ -105,6 +116,19 @@ export async function registrarPagoDeCuotas(input: unknown): Promise<Resultado> 
     return {
       ok: false,
       error: "Alguna de esas cuotas ya está cobrada o no es de esta compra. Recarga la pantalla y vuelve a intentarlo.",
+    };
+  }
+
+  // Un pago ya anotado no se pisa: si fue el comprador, su referencia es la
+  // que cuadra con el banco; si fue otra persona del equipo, la suya. Lo que
+  // corresponde es que Finanzas lo confirme o lo rechace, no reescribirlo.
+  const yaAnotadas = elegidas.filter((c) => c.reportadoEn);
+  if (yaAnotadas.length > 0) {
+    return {
+      ok: false,
+      error:
+        `${yaAnotadas.map((c) => c.etiqueta).join(" y ")} ya ${yaAnotadas.length === 1 ? "tiene" : "tienen"} un pago anotado ` +
+        "esperando a Finanzas. Si el pago anotado no es correcto, Finanzas lo rechaza con \"No llegó al banco\" y entonces se vuelve a anotar.",
     };
   }
 
@@ -185,14 +209,25 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
     if (!c.reportado_en) {
       return { ok: false, error: `Nadie ha anotado ${c.etiqueta} todavía. Regístrala primero con la referencia.` };
     }
-    // Control cruzado: quien anotó el pago no lo aprueba. El admin sí puede.
-    if (c.reportado_por === user.id && rol !== "admin") {
-      return {
-        ok: false,
-        error: "Este pago lo anotaste tú. Por control cruzado lo tiene que aprobar otra persona de Finanzas o un admin.",
-      };
-    }
   }
+
+  // Control cruzado POR CUOTA: quien anotó un pago no lo aprueba, pero sí
+  // puede aprobar los que anotó otra persona. Antes un lote con una sola
+  // cuota propia se rechazaba entero, y si dos personas de Finanzas habían
+  // anotado una cuota cada una, nadie que no fuera admin podía aprobar nada.
+  const propias = rol === "admin" ? [] : cuotasFila.filter((c) => c.reportado_por === user.id);
+  const aprobables = cuotasFila.filter((c) => !propias.includes(c));
+  if (aprobables.length === 0) {
+    return {
+      ok: false,
+      error: "Este pago lo anotaste tú. Por control cruzado lo tiene que aprobar otra persona de Finanzas o un admin.",
+    };
+  }
+  const idsAprobables = aprobables.map((c) => String(c.id));
+  const notaPropias =
+    propias.length > 0
+      ? ` ${propias.map((c) => String(c.etiqueta)).join(" y ")} ${propias.length === 1 ? "queda" : "quedan"} sin aprobar porque ${propias.length === 1 ? "la" : "las"} anotaste tú: ${propias.length === 1 ? "la" : "las"} aprueba otra persona.`
+      : "";
 
   const { data: planFila } = await service
     .from("planes_pago")
@@ -211,7 +246,7 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
   let todasYaEstaban = true;
   let ultimo: Awaited<ReturnType<typeof verificarCuota>> | null = null;
 
-  for (const id of ids) {
+  for (const id of idsAprobables) {
     const r = await verificarCuota(service, { cuotaId: id, verificadoPor: user.id });
     if (!r.ok) {
       revalidar();
@@ -221,14 +256,38 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
       };
     }
     ultimo = r;
-    etiquetas.push(r.cuota.etiqueta);
-    montoTotal = Math.round((montoTotal + r.cuota.montoUsd) * 100) / 100;
     if (r.completo) completo = true;
-    if (!r.yaEstaba) todasYaEstaban = false;
+    if (!r.yaEstaba) {
+      // Solo lo que se aprobó AHORA cuenta como "lo que acabamos de
+      // verificar": una cuota ya cobrada hace días no se le vuelve a
+      // acreditar al comprador en el correo.
+      todasYaEstaban = false;
+      etiquetas.push(r.cuota.etiqueta);
+      montoTotal = Math.round((montoTotal + r.cuota.montoUsd) * 100) / 100;
+    }
   }
 
   if (!ultimo || !ultimo.ok) return { ok: false, error: "No se pudo aprobar. Recarga la pantalla." };
   const plan = ultimo.plan;
+
+  // Reparación: el plan ya estaba completado (por este u otro intento) pero
+  // sus entradas siguen en pendiente — se cayó la entrega del QR a mitad de
+  // camino. Antes esto respondía "eso ya estaba aprobado" para siempre y el
+  // comprador, con el 100 % pagado, no tenía forma de recibir su entrada.
+  // Decidir por el ESTADO (plan completo + tickets pendientes) en vez de por
+  // la señal de un solo uso es lo que hace que el reintento repare.
+  if (!completo && plan.estado === "completado" && plan.saldo <= 0) {
+    const { data: pendientes } = await service
+      .from("tickets")
+      .select("id")
+      .eq("grupo_id", grupoId)
+      .eq("estado_pago", "pendiente")
+      .limit(1);
+    if ((pendientes ?? []).length > 0) {
+      console.warn(`Abona618: plan ${plan.id} completado con entradas aún pendientes — reparando la entrega del QR.`);
+      completo = true;
+    }
+  }
 
   const { data: tickets } = await service
     .from("tickets")
@@ -240,11 +299,15 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
 
   if (!completo) {
     revalidar();
+    if (todasYaEstaban) {
+      return {
+        ok: true,
+        aviso: `Eso ya estaba aprobado. Lleva ${usd(plan.pagado)} de ${usd(plan.totalUsd)} y le falta ${usd(plan.saldo)}. No se entregó ningún QR.${notaPropias}`,
+      };
+    }
     let aviso =
       `${queSeAprobo} ${etiquetas.length === 1 ? "aprobada" : "aprobadas"}: ${usd(montoTotal)}. ` +
-      `Lleva ${usd(plan.pagado)} de ${usd(plan.totalUsd)} y le falta ${usd(plan.saldo)}. No se entregó ningún QR.`;
-
-    if (todasYaEstaban) return { ok: true, aviso: `Eso ya estaba aprobado. ${aviso}` };
+      `Lleva ${usd(plan.pagado)} de ${usd(plan.totalUsd)} y le falta ${usd(plan.saldo)}. No se entregó ningún QR.${notaPropias}`;
 
     const correo = primero?.comprador_email as string | null | undefined;
     if (correo) {
@@ -347,6 +410,18 @@ export async function anularPorFaltaDePago(grupoId: string): Promise<Resultado> 
   if (!plan) return { ok: false, error: "No encontramos el plan de esa compra." };
   if (plan.saldo <= 0) return { ok: false, error: "Ese plan está pagado completo: no se puede anular por falta de pago." };
 
+  const enVuelo = plan.cuotas.filter((c) => c.reportadoEn && !c.verificadoEn);
+  if (enVuelo.length > 0) {
+    // "Falta de pago" con un pago anotado esperando al banco no es falta de
+    // pago. Primero Finanzas lo confirma o lo rechaza; después se decide.
+    return {
+      ok: false,
+      error:
+        `${enVuelo.map((c) => c.etiqueta).join(" y ")} ${enVuelo.length === 1 ? "tiene" : "tienen"} un pago anotado sin confirmar. ` +
+        "Confírmalo en el banco o recházalo antes de anular: no se anula a alguien con dinero en camino.",
+    };
+  }
+
   const r = await anularPlan(service, {
     grupoId,
     por: user.id,
@@ -417,5 +492,31 @@ export async function anularPorFaltaDePago(grupoId: string): Promise<Resultado> 
       `Plan anulado. ${liberadas} entrada${liberadas === 1 ? "" : "s"} de vuelta a la venta. ` +
       `Quedaron ${usd(plan.pagado)} abonados que, según las condiciones, no se devuelven.` +
       avisoCorreo,
+  };
+}
+
+/**
+ * Finanzas buscó en el banco el pago anotado y no estaba. La cuota vuelve a
+ * "sin pagar", con su fecha, y el cron le vuelve a escribir. Es el único
+ * camino para deshacer un reporte equivocado o inventado: sin esto, cualquier
+ * referencia de seis dígitos congelaba una entrada hasta el día del evento.
+ */
+export async function rechazarPagoAnotado(input: unknown): Promise<Resultado> {
+  const { user, error } = await requiereEquipo(["finanzas", "admin"]);
+  if (!user) return { ok: false, error: error! };
+
+  const parsed = z
+    .object({ cuotaId: z.string().uuid(), motivo: z.string().trim().min(3, "Di por qué: es lo que va a leer quien lo anotó.").max(300) })
+    .safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Revisa los datos." };
+
+  const service = createServiceClient();
+  const r = await rechazarReporte(service, { cuotaId: parsed.data.cuotaId, por: user.id, motivo: parsed.data.motivo });
+  if (!r.ok) return { ok: false, error: r.error };
+
+  revalidar();
+  return {
+    ok: true,
+    aviso: `${r.etiqueta} vuelve a estar pendiente de pago, con su fecha. Avísale al comprador por WhatsApp qué pasó con su referencia.`,
   };
 }

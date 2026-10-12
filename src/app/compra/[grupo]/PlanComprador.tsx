@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { reportarMiPago } from "./actions";
 import { CONDICIONES, fechaCorta, fechaLarga } from "@/lib/cuotas";
 import { convertirABs } from "@/lib/tasa";
-import { NOTA_TASA, SIN_TASA, formatoBs, formatoBsAprox } from "@/lib/formato";
+import { NOTA_TASA, SIN_TASA, formatoBs, formatoBsAprox, parsearMontoBs } from "@/lib/formato";
 
 // Lo que ve el comprador en plan cuando abre su compra. Hasta ahora esta
 // página solo sabía de entradas con QR, y a quien está pagando en cuotas le
@@ -62,6 +62,7 @@ export default function PlanComprador({
   const [metodo, setMetodo] = useState<string>("pago_movil");
   const [referencia, setReferencia] = useState("");
   const [montoBs, setMontoBs] = useState("");
+  const [cubreTodo, setCubreTodo] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
 
@@ -187,13 +188,20 @@ export default function PlanComprador({
                     e.preventDefault();
                     setAviso(null);
                     setEnviando(true);
+                    const bs = enBs ? parsearMontoBs(montoBs) : null;
+                    if (enBs && bs == null) {
+                      setEnviando(false);
+                      setAviso({ ok: false, texto: "No entendimos el monto. Escríbelo como en tu comprobante, por ejemplo 23.534,75." });
+                      return;
+                    }
                     startTransition(async () => {
                       const res = await reportarMiPago({
                         grupoId,
                         cuotaId: proxima.id,
+                        cubreTodo,
                         metodoPago: metodo,
                         referenciaPago: referencia,
-                        ...(enBs && montoBs ? { montoBs: Number(montoBs.replace(",", ".")) } : {}),
+                        ...(enBs && bs != null ? { montoBs: bs } : {}),
                       });
                       setEnviando(false);
                       if (!res.ok) {
@@ -245,9 +253,25 @@ export default function PlanComprador({
                         value={montoBs}
                         onChange={(e) => setMontoBs(e.target.value)}
                         inputMode="decimal"
+                        placeholder="Como en tu comprobante, ej: 23.534,75"
                         className="mt-1 w-full min-h-11 rounded-lg border border-neutral-300 px-2 text-sm"
                         required
                       />
+                    </label>
+                  )}
+
+                  {cuotas.filter((c) => !c.pagada && !c.reportada).length > 1 && (
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={cubreTodo}
+                        onChange={(e) => setCubreTodo(e.target.checked)}
+                        className="mt-0.5 h-5 w-5 shrink-0 accent-[#3F0A62]"
+                      />
+                      <span className="text-xs text-neutral-800 leading-relaxed">
+                        <strong>Con este pago completé todo lo que me faltaba</strong> ({usd(saldo)}). Márcalo si pagaste
+                        el resto de una sola vez; si solo pagaste esta cuota, déjalo sin marcar.
+                      </span>
                     </label>
                   )}
 
@@ -296,7 +320,7 @@ export default function PlanComprador({
             ))}
           </ol>
         )}
-        <p className="text-[11px] text-[#898477] mt-1">Fecha tope para completar: {fechaCorta(fechaTope)}.</p>
+        {fechaTope && <p className="text-[11px] text-[#898477] mt-1">Fecha tope para completar: {fechaCorta(fechaTope)}.</p>}
       </div>
     </div>
   );

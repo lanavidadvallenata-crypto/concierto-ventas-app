@@ -120,17 +120,23 @@ export default async function FinanzasPage() {
   // quién lo anotó y por dónde llegó. Aquí solo queda el aviso de cuántas hay.
   // ───────────────────────────────────────────────────────────────────────
   const gruposPendientes = [...compras.keys()];
-  const { data: planesVivos } = gruposPendientes.length
+  const { data: planesVivos, error: errorPlanes } = gruposPendientes.length
     ? await service
         .from("planes_pago")
         .select("grupo_id, estado")
         .in("grupo_id", gruposPendientes)
         .in("estado", ["al_dia", "en_mora"])
-    : { data: [] as { grupo_id: string; estado: string }[] };
+    : { data: [] as { grupo_id: string; estado: string }[], error: null };
 
+  // FALLA CERRADO. Si no se pudo saber cuáles compras tienen plan, la cola NO
+  // se muestra: antes el error se descartaba y las compras en cuotas
+  // aparecían aquí como ventas de contado por su total, con el botón de
+  // "Verificar y enviar QR" a un clic. El candado del servidor también lo
+  // frena, pero no hay por qué ofrecer el botón.
+  if (errorPlanes) console.error("Finanzas: no se pudo leer qué compras tienen plan —", errorPlanes.message);
   const enPlan = new Set((planesVivos ?? []).map((p) => String(p.grupo_id)));
-  const comprasEnPlan = [...compras.values()].filter((c) => enPlan.has(c.grupoId));
-  const lista = [...compras.values()].filter((c) => !enPlan.has(c.grupoId));
+  const comprasEnPlan = errorPlanes ? [] : [...compras.values()].filter((c) => enPlan.has(c.grupoId));
+  const lista = errorPlanes ? [] : [...compras.values()].filter((c) => !enPlan.has(c.grupoId));
   const totalPendienteUsd = lista.reduce((s, c) => s + c.total, 0);
   const entradasPendientes = lista.reduce((s, c) => s + c.cantidad, 0);
 
@@ -236,7 +242,14 @@ export default async function FinanzasPage() {
           </a>
         )}
 
-        <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
+        {errorPlanes ? (
+          <p className="text-sm rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+            No se pudo leer la base de datos para separar las compras en cuotas de las de contado. La cola no se
+            muestra para no aprobar una por error. Recarga en un momento.
+          </p>
+        ) : (
+          <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
+        )}
 
         <BuscarComprador />
 

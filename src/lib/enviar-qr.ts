@@ -244,6 +244,22 @@ export async function enviarCorreoPendiente(params: {
         }</p>
       </td>
     </tr>
+    ${
+      plan
+        ? `<tr>
+      <td style="padding:4px 28px 4px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+          <tr>
+            <td align="center" style="background-color:#3F0A62;border-radius:8px;">
+              <a href="${SITE_URL}/compra/${params.grupoId}" style="display:inline-block;padding:12px 22px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;">Ver mi plan de pago y mis fechas</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:8px 0 0;font-size:12px;color:#8A8782;text-align:center;">Guarda este enlace: es tu página de compra.</p>
+      </td>
+    </tr>`
+        : ""
+    }
     <tr>
       <td style="padding:10px 28px 4px;">
         ${avisoHorarioHtml}
@@ -608,6 +624,9 @@ export async function enviarCorreoRecordatorio(params: {
   venceEl: string;
   saldo: number;
   etapa: "tres_dias" | "manana" | "hoy";
+  /** La dedupe de verdad vive en Resend: con la misma clave, el mismo correo
+   *  no sale dos veces aunque el candado local falle o el cron se repita. */
+  idempotencyKey?: string;
 }) {
   const resend = clienteResend("el recordatorio de cuota");
   const codigo = codigoCompra(params.grupoId);
@@ -698,7 +717,7 @@ export async function enviarCorreoRecordatorio(params: {
     subject: asunto,
     html,
     headers: { "X-Entity-Ref-ID": `${params.grupoId}-${params.etiquetaCuota}-${params.etapa}` },
-  });
+  }, params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : undefined);
   if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
 
@@ -717,6 +736,7 @@ export async function enviarCorreoEnRiesgo(params: {
   monto: number;
   venceEl: string;
   abonado: number;
+  idempotencyKey?: string;
 }) {
   const resend = clienteResend("el aviso de entrada en riesgo");
   const codigo = codigoCompra(params.grupoId);
@@ -774,7 +794,7 @@ export async function enviarCorreoEnRiesgo(params: {
     subject: `Falta un pago para que tu entrada sea tuya · compra ${codigo}`,
     html,
     headers: { "X-Entity-Ref-ID": `${params.grupoId}-${params.etiquetaCuota}-riesgo` },
-  });
+  }, params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : undefined);
   if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
 
@@ -793,10 +813,25 @@ export async function enviarCorreoPlanAnulado(params: {
   abonado: number;
   /** "12 de octubre a las 3:42 p. m." */
   aceptoEn: string | null;
+  /** falta_de_pago: se le pasó la fecha de una cuota (hay dinero abonado).
+   *  inicial_no_llego: Finanzas no encontró el pago inicial en el banco; no
+   *  hay nada abonado y el texto no puede hablar de dinero retenido. */
+  motivo?: "falta_de_pago" | "inicial_no_llego";
 }) {
   const resend = clienteResend("el correo de compra anulada");
   const codigo = codigoCompra(params.grupoId);
   const nombre = escapeHtml(params.nombreComprador);
+  const motivo = params.motivo ?? "falta_de_pago";
+  const apertura =
+    motivo === "inicial_no_llego"
+      ? `No pudimos confirmar en el banco tu pago inicial de <strong>${fmtUsd(params.montoPendiente)}</strong>, así que anulamos tu reserva y tu entrada volvió a estar disponible para otra persona.`
+      : `No recibimos el pago pendiente de <strong>${fmtUsd(params.montoPendiente)}</strong> dentro de la fecha, así que anulamos tu reserva y tu entrada volvió a estar disponible para otra persona.`;
+  const retenido =
+    params.abonado > 0
+      ? `<p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">Según las condiciones del plan de pago que aceptaste${
+          params.aceptoEn ? ` el <strong style="color:#303030;">${escapeHtml(params.aceptoEn)}</strong>` : ""
+        }, los <strong style="color:#303030;">${fmtUsd(params.abonado)}</strong> abonados no se devuelven.</p>`
+      : `<p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">No tenemos ningún pago tuyo registrado para esta compra.</p>`;
 
   const html = envolverCorreo(`
     <tr>
@@ -808,12 +843,10 @@ export async function enviarCorreoPlanAnulado(params: {
             </td>
           </tr>
         </table>
-        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>. No recibimos el pago pendiente de <strong>${fmtUsd(params.montoPendiente)}</strong> dentro de la fecha, así que anulamos tu reserva y tu entrada volvió a estar disponible para otra persona.</p>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>. ${apertura}</p>
 
         <div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
-          <p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">Según las condiciones del plan de pago que aceptaste${
-            params.aceptoEn ? ` el <strong style="color:#303030;">${escapeHtml(params.aceptoEn)}</strong>` : ""
-          }, los <strong style="color:#303030;">${fmtUsd(params.abonado)}</strong> abonados no se devuelven.</p>
+          ${retenido}
           <div style="color:#8A8782;font-size:12.5px;margin-top:8px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>
         </div>
 
@@ -868,6 +901,8 @@ export async function enviarResumenCobranza(params: {
   avisosEnviados: number;
   fallos: { compra: string; etapa: string | null; error: string }[];
   saldoTotal: string;
+  /** Cuando el cron no pudo ni leer la base: no hay números, hay una alarma. */
+  fallaGeneral?: string | null;
 }) {
   const resend = clienteResend("el resumen de cobranza");
   const destinatario = process.env.EMAIL_OPERACIONES || respuestasA();
@@ -895,7 +930,14 @@ export async function enviarResumenCobranza(params: {
   const html = envolverCorreo(`
     <tr>
       <td style="padding:32px 28px 12px;">
-        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Cobranza del <strong>${escapeHtml(params.hoy)}</strong>. Se mandaron <strong>${params.avisosEnviados}</strong> ${params.avisosEnviados === 1 ? "aviso" : "avisos"} y quedan <strong>${escapeHtml(params.saldoTotal)}</strong> por cobrar.</p>
+        ${
+          params.fallaGeneral
+            ? `<div style="margin:0 0 14px;background:#FEE2E2;border-radius:8px;padding:12px 14px;">
+                 <p style="margin:0;font-size:14px;font-weight:700;color:#991B1B;">Los avisos de hoy NO salieron</p>
+                 <p style="margin:4px 0 0;font-size:12.5px;line-height:1.5;color:#7C2D12;">${escapeHtml(params.fallaGeneral)} Los recordatorios de hoy no se recuperan solos: revisa Cobranza y escribe a mano a quien le tocaba.</p>
+               </div>`
+            : `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Cobranza del <strong>${escapeHtml(params.hoy)}</strong>. Se mandaron <strong>${params.avisosEnviados}</strong> ${params.avisosEnviados === 1 ? "aviso" : "avisos"} y quedan <strong>${escapeHtml(params.saldoTotal)}</strong> por cobrar.</p>`
+        }
 
         ${
           params.paraAnular.length > 0
@@ -934,8 +976,9 @@ export async function enviarResumenCobranza(params: {
     from: remitente(),
     replyTo: respuestasA(),
     to: destinatario,
-    subject:
-      params.paraAnular.length > 0
+    subject: params.fallaGeneral
+      ? `Cobranza ${params.hoy}: los avisos NO salieron`
+      : params.paraAnular.length > 0
         ? `Cobranza ${params.hoy}: ${params.paraAnular.length} ${params.paraAnular.length === 1 ? "compra" : "compras"} por anular`
         : `Cobranza ${params.hoy}: ${params.fallos.length} ${params.fallos.length === 1 ? "aviso" : "avisos"} no salieron`,
     html,

@@ -52,6 +52,7 @@ export default async function CobranzaPage() {
           miRol={perfil.rol}
           nombrePorId={nombrePorId}
           moduloActivo={config.activo}
+          configError={Boolean(config.error)}
           topeVip={config.topeVip}
           tasaEurVes={tasaEurVes}
         />

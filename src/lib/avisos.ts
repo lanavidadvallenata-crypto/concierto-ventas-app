@@ -15,12 +15,14 @@ export type Etapa =
   | "manana"
   /** Vence hoy. */
   | "hoy"
-  /** Ya venció y está dentro del margen interno del equipo. El comprador NO
-   *  se entera de que ese margen existe: para él su entrada está en riesgo
-   *  desde ya (Anita, 12 oct). */
+  /** Venció ayer. UN solo correo, el primer día de atraso: el segundo día del
+   *  margen interno es trabajo del equipo por WhatsApp (caja "Última llamada"),
+   *  no otro correo igual con el mismo asunto. El comprador NO se entera de
+   *  que ese margen existe: para él su entrada está en riesgo desde ya
+   *  (Anita, 12 oct). */
   | "en_riesgo"
-  /** Se acabó el margen. Aquí NO se le escribe al comprador: el sistema no
-   *  anula solo, lo pone en la lista para que una persona decida. */
+  /** Sigue sin pagar. Aquí NO se le escribe al comprador: el sistema no
+   *  anula solo; está en la lista de Cobranza para que una persona decida. */
   | "para_anular";
 
 export type EstadoCuota = {
@@ -40,10 +42,12 @@ export type EstadoCuota = {
  *    Finanzas confirme. Cobrarle otra vez es el error que ya tenía la pantalla
  *    de cobranza, y por correo automático es peor, porque no hay nadie
  *    leyendo que se dé cuenta.
- * 3. Los días exactos (3, 1, 0) y no rangos: con rangos, una cuota a 3 días
- *    recibiría aviso hoy, mañana y pasado. Tres correos en tres días por el
- *    mismo pago es la forma más rápida de que alguien marque el remitente
- *    como spam, y entonces tampoco le llega el que importa.
+ * 3. Los días exactos (3, 1, 0, -1) y no rangos: con rangos, una cuota a 3
+ *    días recibiría aviso hoy, mañana y pasado. Tres correos en tres días por
+ *    el mismo pago es la forma más rápida de que alguien marque el remitente
+ *    como spam, y entonces tampoco le llega el que importa. Por lo mismo el
+ *    aviso de riesgo sale UNA vez, el primer día de atraso, y no uno por cada
+ *    día del margen interno con el mismo asunto.
  */
 export function etapaDeAviso(c: EstadoCuota): Etapa | null {
   if (c.verificado) return null;
@@ -53,7 +57,8 @@ export function etapaDeAviso(c: EstadoCuota): Etapa | null {
   if (d === 3) return "tres_dias";
   if (d === 1) return "manana";
   if (d === 0) return "hoy";
-  if (d < 0 && -d <= DIAS_GRACIA) return "en_riesgo";
+  if (d === -1) return "en_riesgo";
+  if (d < 0 && -d <= DIAS_GRACIA) return null; // resto del margen: lo trabaja el equipo
   if (d < 0) return "para_anular";
   return null;
 }

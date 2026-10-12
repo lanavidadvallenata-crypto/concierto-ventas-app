@@ -282,6 +282,10 @@ export function planPara(
 ): Plan | SinPlan {
   const { canal, tipo, vipEnPlan, cantidad = 1, topeVip = TOPE_VIP_EN_PLAN, ignorarTope = false } = opciones;
 
+  // El total se valida ANTES de cualquier rama: antes, pasado el corte, un
+  // NaN salía como "sin_margen" en silencio en vez de reventar.
+  if (!Number.isFinite(total) || total <= 0) throw new Error(`Total inválido para un plan: ${total}`);
+
   // Taquilla el día del evento: el plan no aplica, se cobra completo.
   if (canal === "taquilla") return { hayPlan: false, motivo: "taquilla" };
 
@@ -292,34 +296,35 @@ export function planPara(
   const vigentes = fechasDelPlan(hoy);
   if (vigentes.length === 0) return { hayPlan: false, motivo: "sin_margen" };
 
-  // Number.isFinite además de > 0: antes Infinity pasaba el guard y producía
-  // un plan entero con montos NaN, que se habrían escrito en la base.
-  if (!Number.isFinite(total) || total <= 0) throw new Error(`Total inválido para un plan: ${total}`);
+  return armarPlanConFechas(total, hoy, vigentes);
+}
 
+/** Construye el plan: inicial hoy + una cuota por cada fecha, 40 % y el
+ *  resto en partes iguales. Es lo único que escribe cuotas, venga el
+ *  calendario de `fechasDelPlan` o de lo que el comprador vio. */
+function armarPlanConFechas(total: number, hoy: string, fechas: readonly string[]): Plan {
   const resto = 1 - INICIAL;
-  const porcentajes = [INICIAL, ...vigentes.map(() => resto / vigentes.length)];
+  const porcentajes = [INICIAL, ...fechas.map(() => resto / fechas.length)];
   const montos = repartir(total, porcentajes);
 
   const cuotas: Cuota[] = porcentajes.map((pc, i) => {
-    const venceEl = i === 0 ? hoy : vigentes[i - 1];
+    const venceEl = i === 0 ? hoy : fechas[i - 1];
     return {
       orden: i + 1,
       etiqueta: i === 0 ? "Inicial" : i === porcentajes.length - 1 ? "Pago final" : `Cuota 0${i}`,
       porcentaje: pc,
       monto: montos[i],
       venceEl,
-      // CADA cuota tiene su propio plazo y su propia anulación (Anita, 12
-      // oct). No se espera a la fecha final: si falla la cuota del 16 de
-      // noviembre, la compra se anula el 19 y la entrada vuelve a la venta.
-      // Esperar al 27 dejaría la silla muerta nueve días con un comprador que
-      // ya dejó de pagar.
+      // CADA cuota tiene su propio margen interno y su propia anulación
+      // (Anita, 12 oct). No se espera a la fecha final: si falla la primera
+      // cuota, la compra se anula ahí y la entrada vuelve a la venta.
       graciaHasta: graciaHasta(venceEl),
       liberaEl: liberaEl(venceEl),
       esInicial: i === 0,
     };
   });
 
-  const fechaTope = vigentes[vigentes.length - 1];
+  const fechaTope = fechas[fechas.length - 1];
 
   return {
     hayPlan: true,
@@ -330,6 +335,55 @@ export function planPara(
     fechaTope,
     graciaHasta: graciaHasta(fechaTope),
     liberaEl: liberaEl(fechaTope),
+  };
+}
+
+/**
+ * El plan con EXACTAMENTE las fechas que el comprador vio y aceptó, aunque
+ * hoy el calendario diga otra cosa.
+ *
+ * Entre que ve la pantalla y vuelve con la referencia pasan hasta 15
+ * minutos, y si en medio cruzó la medianoche, `planPara` de hoy le da otro
+ * calendario (o ninguno): aceptó tres pagos de 56/42/42 y se le guardaba uno
+ * de $84 que nunca vio. Esto honra lo que vio, siempre que siga siendo un
+ * calendario válido: fechas reales, en orden, ninguna pasada, ninguna después
+ * del límite duro, y no más cuotas de las que el plan permite. Si no lo es,
+ * devuelve null y se cae al calendario de hoy.
+ *
+ * NO salta el interruptor ni el tope: eso lo decide quien llama. Esto solo
+ * garantiza que un calendario honrado sea un calendario posible.
+ */
+export function planConFechasVistas(total: number, hoy: string, fechas: string[]): Plan | null {
+  if (!Number.isFinite(total) || total <= 0) return null;
+  if (fechas.length === 0 || fechas.length > MAX_PAGOS - 1) return null;
+  try {
+    for (let i = 0; i < fechas.length; i++) {
+      if (diasEntre(hoy, fechas[i]) < 0) return null; // ya pasó
+      if (diasEntre(fechas[i], TOPE_FINAL) < 0) return null; // después del límite duro
+      if (i > 0 && diasEntre(fechas[i - 1], fechas[i]) <= 0) return null; // fuera de orden o repetida
+    }
+    return armarPlanConFechas(total, hoy, fechas);
+  } catch {
+    return null; // alguna fecha malformada: aNumeroDeDia lanza
+  }
+}
+
+/**
+ * Lo que puede viajar al navegador del comprador. Sin `graciaHasta` ni
+ * `liberaEl`: el margen interno no se le dice (Anita, 12 oct), y "no decirlo"
+ * incluye no mandárselo en un JSON aunque la pantalla no lo pinte. Lo que no
+ * se manda no se filtra.
+ */
+export type CuotaPublica = Pick<Cuota, "orden" | "etiqueta" | "monto" | "venceEl" | "esInicial">;
+export type PlanPublico = { hayPlan: true; cuotas: CuotaPublica[]; total: number; inicial: number; saldo: number };
+
+export function aPlanPublico(p: Plan): PlanPublico {
+  return {
+    hayPlan: true,
+    total: p.total,
+    inicial: p.inicial,
+    saldo: p.saldo,
+    cuotas: p.cuotas.map((c) => ({ orden: c.orden, etiqueta: c.etiqueta, monto: c.monto, venceEl: c.venceEl, esInicial: c.esInicial })),
   };
 }
 
@@ -385,8 +439,8 @@ export const CONDICIONES_VERSION = "v3";
 export const CONDICIONES: string[] = [
   "Tu entrada queda apartada a tu nombre desde que verificamos tu pago inicial. El precio se te congela: no sube aunque suba la tarifa.",
   "El QR de acceso te llega cuando completes el 100 % del pago. Antes de eso no tienes entrada válida para entrar al concierto.",
-  "Tus pagos caen en las quincenas, los días 15 y 30. Ves todas tus fechas, con su monto, antes de pagar, y te avisamos por correo antes de cada una.",
-  `Ninguna cuota pasa del ${fechaCorta(TOPE_FINAL)} de 2026: ese día tu entrada tiene que estar pagada completa.`,
+  "Tus pagos caen en las quincenas, los días 15 y 30 (si cae fin de semana, el lunes siguiente). Ves todas tus fechas, con su monto, antes de pagar, y te avisamos por correo antes de cada una.",
+  `Todas tus fechas de pago son anteriores al ${fechaCorta(TOPE_FINAL)} de 2026.`,
   "Si no pagas en la fecha de cualquiera de tus cuotas, anulamos toda la compra: no se espera a la fecha final. Tu entrada vuelve a la venta y lo que ya abonaste no se devuelve.",
   "Puedes adelantar pagos o pagar el total cuando quieras, sin recargo.",
   "El plan de cuotas no aplica en taquilla el día del evento. Ese día la entrada se paga completa.",

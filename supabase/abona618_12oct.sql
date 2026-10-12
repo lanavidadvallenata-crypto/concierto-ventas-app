@@ -25,9 +25,11 @@ create table if not exists public.planes_pago (
   tipo                   text not null check (tipo in ('vip','general')),
   cantidad               smallint not null check (cantidad > 0),
 
-  -- al_dia → en_mora → vencido (anulado automáticamente al cerrar la gracia)
+  -- al_dia → en_mora (lo marca el cron cuando algo vence) → vencido/anulado
   -- completado = pagó el 100 %, ya se le mandaron los QR
-  -- anulado    = lo anuló una persona de Finanzas, no el cron
+  -- vencido    = lo anuló una persona desde Cobranza por falta de pago
+  -- anulado    = lo anuló una persona desde Finanzas (rechazo de la compra)
+  -- El cron NUNCA anula (Anita, 12 oct): detecta, marca en mora y avisa.
   estado                 text not null default 'al_dia'
                          check (estado in ('al_dia','en_mora','vencido','completado','anulado')),
 

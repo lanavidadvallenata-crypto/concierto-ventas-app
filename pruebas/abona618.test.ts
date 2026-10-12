@@ -18,6 +18,7 @@ import {
   planConSaldo,
   resumenPlanes,
   reportarCuota,
+  rechazarReporte,
   verificarCuota,
 } from "../src/lib/abona618.ts";
 import { planPara } from "../src/lib/cuotas.ts";
@@ -382,17 +383,42 @@ test("planConSaldo es el candado que protege el QR en Finanzas", async () => {
   });
 
   // Una compra de contado no tiene plan: Finanzas aprueba como siempre.
-  assert.equal(await planConSaldo(cli(d), "g-sin-plan"), null);
-  assert.equal(await planConSaldo(cli(d), null), null);
+  assert.equal((await planConSaldo(cli(d), "g-sin-plan")).estado, "sin_plan");
+  assert.equal((await planConSaldo(cli(d), null)).estado, "sin_plan");
 
   // Con saldo, aprobar significa "dar por pagada una cuota", no entregar.
   const conSaldo = await planConSaldo(cli(d), "g-6");
-  assert.ok(conSaldo, "mientras haya saldo el candado tiene que estar puesto");
+  assert.equal(conSaldo.estado, "con_saldo", "mientras haya saldo el candado tiene que estar puesto");
 
   const plan = (await leerPlanPorGrupo(cli(d), "g-6"))!;
   for (const c of plan.cuotas) await verificarCuota(cli(d), { cuotaId: c.id, verificadoPor: "f" });
 
-  assert.equal(await planConSaldo(cli(d), "g-6"), null, "completado: el candado se suelta y el QR sale");
+  assert.equal((await planConSaldo(cli(d), "g-6")).estado, "pagado", "completado: el candado se suelta y el QR sale");
+});
+
+test("EL CANDADO FALLA CERRADO: un error de lectura NUNCA se confunde con 'sin plan'", async () => {
+  // La auditoría del 12 de octubre encontró esto reproduciéndolo: con la base
+  // caída, planConSaldo devolvía null, verificarPago leía null como "compra
+  // de contado" y entregaba el QR con el 60 % sin pagar. Un timeout no puede
+  // terminar en una entrada regalada.
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-caido", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "zelle", referenciaPago: "a@b.com", montoBsInicial: null, tasaAplicada: null,
+  });
+
+  d.fallar.cuotas = "statement timeout";
+  const sinCuotas = await planConSaldo(cli(d), "g-caido");
+  assert.equal(sinCuotas.estado, "error", "no se pudieron leer las cuotas: el candado se queda puesto");
+  delete d.fallar.cuotas;
+
+  d.fallar.planes_pago = "statement timeout";
+  const sinPlanes = await planConSaldo(cli(d), "g-caido");
+  assert.equal(sinPlanes.estado, "error", "no se pudo leer el plan: el candado se queda puesto");
+  delete d.fallar.planes_pago;
+
+  // Y con la base de vuelta, sigue con saldo: nada se perdió.
+  assert.equal((await planConSaldo(cli(d), "g-caido")).estado, "con_saldo");
 });
 
 test("un plan que se pone al día sale del rojo", async () => {
@@ -750,4 +776,94 @@ test("el resumen devuelve los grupos en curso para que el dashboard no cuente su
 
   const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
   assert.deepEqual(r.gruposEnCurso, ["g-vivo"], "el completado ya tiene sus tickets verificados: ese sí suma normal");
+});
+
+test("la cobranza pagina: 1.200 cuotas no se cortan en 1.000 y nadie desaparece", async () => {
+  // Misma trampa que ya tenía el dashboard (db.ts): PostgREST corta en 1.000
+  // filas sin avisar. listaDeCobranza no paginaba, así que a partir de ~334
+  // compras los deudores desaparecían de la pantalla Y del cron, en silencio,
+  // y un plan podía volver partido con el saldo inflado.
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  const planes = [];
+  const cuotas = [];
+  const tickets = [];
+  for (let i = 0; i < 600; i++) {
+    planes.push({ id: `p${i}`, grupo_id: `g${i}`, total_usd: 100, tipo: "general", cantidad: 1, estado: "al_dia" });
+    cuotas.push({ id: `c${i}a`, plan_id: `p${i}`, orden: 1, etiqueta: "Inicial", monto_usd: 40, vence_el: "2026-10-01", verificado_en: "2026-10-01T12:00:00Z" });
+    cuotas.push({ id: `c${i}b`, plan_id: `p${i}`, orden: 2, etiqueta: "Pago final", monto_usd: 60, vence_el: HOY, verificado_en: null });
+    tickets.push({ id: `t${i}`, grupo_id: `g${i}`, comprador_nombre: `Persona ${i}`, comprador_telefono: "04141234567", comprador_email: `p${i}@x.com` });
+  }
+  d.tablas.planes_pago = planes;
+  d.tablas.cuotas = cuotas;
+  d.tablas.tickets = tickets;
+
+  const lista = await listaDeCobranza(cli(d), { hoy: HOY });
+  assert.equal(lista.error, false);
+  assert.equal(lista.planesActivos, 600);
+  assert.equal(lista.vencenHoy.length, 600, "las 600 vencen hoy: si el paginador cortara, aquí habría 333");
+  for (const c of lista.vencenHoy) {
+    assert.equal(c.pagado, 40, `${c.grupoId}: si su inicial quedó fuera del corte, el pagado sale en 0`);
+    assert.equal(c.saldo, 60);
+    assert.ok(c.compradorEmail, "sin contacto no se puede cobrar");
+  }
+});
+
+test("si la cobranza no se puede leer, lo dice: nunca un 'nadie debe nada' falso", async () => {
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-err", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  for (const tabla of ["planes_pago", "cuotas", "tickets"]) {
+    d.fallar[tabla] = "statement timeout";
+    const lista = await listaDeCobranza(cli(d), { hoy: HOY });
+    assert.equal(lista.error, true, `falla ${tabla}: tiene que avisar`);
+    assert.equal(lista.planesActivos, 0);
+    delete d.fallar[tabla];
+  }
+  const sana = await listaDeCobranza(cli(d), { hoy: HOY });
+  assert.equal(sana.error, false);
+  assert.equal(sana.planesActivos, 1);
+});
+
+test("rechazar un reporte devuelve la cuota a 'sin pagar' con su fecha, y deja rastro", async () => {
+  // Sin esto, cualquier referencia inventada congelaba una entrada para
+  // siempre: la cuota caía en "por confirmar" sin mirar la fecha, el cron la
+  // daba por pagada y nadie tenía un botón para deshacerlo.
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-falso", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  const plan = (await leerPlanPorGrupo(cli(d), "g-falso"))!;
+  await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "f" });
+
+  const cuota01 = plan.cuotas[1];
+  await reportarCuota(cli(d), {
+    cuotaId: cuota01.id, grupoId: "g-falso", metodoPago: "pago_movil", referenciaPago: "999999", montoBs: 5000, tasa: null,
+  });
+
+  // Reportada: sale de las cajas por fecha y entra en "por verificar".
+  let lista = await listaDeCobranza(cli(d), { hoy: cuota01.venceEl });
+  assert.equal(lista.porVerificar.length, 1);
+  assert.equal(lista.vencenHoy.length, 0);
+
+  // Finanzas no lo encontró en el banco.
+  const r = await rechazarReporte(cli(d), { cuotaId: cuota01.id, por: "finanzas-1", motivo: "no aparece en Bancamiga" });
+  assert.ok(r.ok);
+
+  const despues = (await leerPlanPorGrupo(cli(d), "g-falso"))!.cuotas[1];
+  assert.equal(despues.reportadoEn, null, "vuelve a estar sin reportar");
+  assert.equal(despues.referenciaPago, null);
+  assert.match(despues.nota ?? "", /rechazado por Finanzas/i, "queda escrito qué pasó");
+  assert.match(despues.nota ?? "", /999999/, "y cuál era la referencia que no apareció");
+
+  // Vuelve a su caja por fecha: hoy vence, hay que escribirle.
+  lista = await listaDeCobranza(cli(d), { hoy: cuota01.venceEl });
+  assert.equal(lista.porVerificar.length, 0);
+  assert.equal(lista.vencenHoy.length, 1);
+
+  // Lo cobrado no se puede rechazar.
+  const cobrada = await rechazarReporte(cli(d), { cuotaId: plan.cuotas[0].id, por: "finanzas-1", motivo: "x" });
+  assert.equal(cobrada.ok, false);
 });
