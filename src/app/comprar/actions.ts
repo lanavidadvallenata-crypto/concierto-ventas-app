@@ -369,7 +369,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   // mostramos, y un cupo de sobregiro cuesta muchísimo menos que cobrarle a
   // alguien y no darle lo prometido. El tope es un control nuestro, no una
   // promesa que él rompió. Queda en el log para que se vea.
-  let planCreado: { inicialUsd: number; inicialBs: number | null; pagosRestantes: number } | undefined;
+  let planCreado: { inicialUsd: number; inicialBs: number | null } | undefined;
   let avisoPlan: string | undefined;
 
   if (v.enCuotas) {
@@ -448,11 +448,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       });
 
       if (creado.ok) {
-        planCreado = {
-          inicialUsd: planFinal.inicial,
-          inicialBs,
-          pagosRestantes: planFinal.cuotas.length - 1,
-        };
+        planCreado = { inicialUsd: planFinal.inicial, inicialBs };
       } else {
         // Los tickets YA están creados: no se borran, el comprador pagó. Pero
         // su plan no quedó registrado, así que el correo sale como compra

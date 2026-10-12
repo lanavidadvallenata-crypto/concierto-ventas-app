@@ -7,6 +7,10 @@ import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import BotonSoporte from "@/components/BotonSoporte";
 import { codigoCompra } from "@/lib/compra";
 import { codigoEntrada } from "@/lib/qr";
+import { leerPlanPorGrupo } from "@/lib/abona618";
+import { INSTRUCCIONES_PAGO } from "@/lib/pagos";
+import { graciaHasta } from "@/lib/cuotas";
+import PlanComprador, { type CuotaVista } from "./PlanComprador";
 
 // "Mis entradas": todas las entradas de UNA compra, con un botón de WhatsApp
 // por entrada para mandarle a cada invitado la suya (enlace /entrada/<token>).
@@ -22,7 +26,7 @@ import { codigoEntrada } from "@/lib/qr";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Mis entradas — La Navidad Vallenata",
+  title: "Mi compra — La Navidad Vallenata",
   robots: { index: false, follow: false },
 };
 
@@ -60,6 +64,11 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
 
   const codigo = codigoCompra(grupo);
   const nombre = tickets[0].comprador_nombre;
+
+  // Abona618: si esta compra es un plan, lo que la persona viene a ver es
+  // cuánto lleva pagado y qué le falta — no "sus entradas", que todavía no
+  // tiene. El correo de cada cuota manda justo aquí.
+  const plan = await leerPlanPorGrupo(service, grupo);
   const verificadas = tickets.filter((t) => t.estado_pago === "verificado" && t.qr_token);
   const pendientes = tickets.filter((t) => t.estado_pago === "pendiente");
   const rechazadas = tickets.filter((t) => t.estado_pago === "rechazado");
@@ -90,11 +99,35 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
           <p className="text-[11px] uppercase tracking-[0.15em] text-[#E8C9C9]">La Navidad Vallenata · 4 dic 2026</p>
           <h1 className="text-2xl font-bold mt-1 leading-tight">Mis entradas</h1>
           <p className="text-sm text-[#E8C9C9] mt-1">
-            Compra {codigo} · a nombre de {nombre} · {verificadas.length} {verificadas.length === 1 ? "entrada" : "entradas"}
+            Compra {codigo} · a nombre de {nombre} ·{" "}
+            {plan && verificadas.length === 0
+              ? `${plan.cantidad} ${plan.cantidad === 1 ? "entrada" : "entradas"} ${plan.tipo === "vip" ? "VIP" : "General"} en plan de pago`
+              : `${verificadas.length} ${verificadas.length === 1 ? "entrada" : "entradas"}`}
           </p>
         </div>
 
-        {pendientes.length > 0 ? (
+        {plan ? (
+          <PlanComprador
+            grupoId={grupo}
+            total={plan.totalUsd}
+            pagado={plan.pagado}
+            saldo={plan.saldo}
+            cuotas={plan.cuotas.map<CuotaVista>((c) => ({
+              id: c.id,
+              etiqueta: c.etiqueta,
+              monto: c.montoUsd,
+              venceEl: c.venceEl,
+              pagada: Boolean(c.verificadoEn),
+              reportada: Boolean(c.reportadoEn) && !c.verificadoEn,
+            }))}
+            fechaTope={plan.cuotas[plan.cuotas.length - 1]?.venceEl ?? ""}
+            graciaHasta={graciaHasta(plan.cuotas[plan.cuotas.length - 1]?.venceEl ?? "")}
+            instrucciones={INSTRUCCIONES_PAGO}
+          />
+        ) : pendientes.length > 0 ? (
+          // Sin plan: el texto de siempre. Con plan no se puede decir "en
+          // verificación de pago", porque no es verdad — lo que pasa es que
+          // todavía faltan pagos, y eso lo explica el panel de arriba.
           <p className="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-4 py-3">
             {pendientes.length} {pendientes.length === 1 ? "entrada está" : "entradas están"} en verificación de pago. Cuando se confirme, aparecerán aquí y te llegará el correo con los QR.
           </p>

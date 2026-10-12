@@ -144,7 +144,7 @@ export async function enviarCorreoPendiente(params: {
   // que buscar 56 en el banco, no 140 (decisión de Anita, 12 oct — "recibimos
   // tu pago inicial es lo que debe decir"). Sin este parámetro el correo sale
   // exactamente igual que siempre, que es como se queda para el contado.
-  plan?: { inicialUsd: number; inicialBs?: number | null; pagosRestantes: number };
+  plan?: { inicialUsd: number; inicialBs?: number | null };
 }) {
   const resend = clienteResend("el correo de bienvenida");
   const plan = params.plan;
@@ -199,9 +199,13 @@ export async function enviarCorreoPendiente(params: {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F1ECE2;border-left:3px solid #3D0507;border-radius:6px;margin:0 0 10px;">
       <tr><td style="padding:12px 14px;">
         <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#3D0507;">Revisa Promociones y Spam (No deseado)</p>
-        <p style="margin:0;font-size:12.5px;line-height:1.5;color:#5A1A1D;">Tus QR llegan en <strong>otro correo</strong> de &ldquo;La Navidad Vallenata&rdquo;${
+        <p style="margin:0;font-size:12.5px;line-height:1.5;color:#5A1A1D;">${
+          plan ? "Nuestros correos llegan" : "Tus QR llegan en <strong>otro correo</strong>"
+        } de &ldquo;La Navidad Vallenata&rdquo;${
           codigo ? ` con tu código de compra <strong>${codigo}</strong>` : ""
-        }. Si no lo ves en tu bandeja principal, búscalo en Promociones y en Spam, y márcalo como &ldquo;No es spam&rdquo; para que no se pierda.</p>
+        }. Si no ${plan ? "los ves" : "lo ves"} en tu bandeja principal, ${
+          plan ? "búscalos" : "búscalo"
+        } en Promociones y en Spam, y ${plan ? "márcalos" : "márcalo"} como &ldquo;No es spam&rdquo; para que no se ${plan ? "pierdan" : "pierda"}.</p>
       </td></tr>
     </table>`;
   const mensajeWa = `Hola, compré entradas para La Navidad Vallenata${codigo ? ` (compra ${codigo})` : ""} a nombre de ${params.nombreComprador}. Necesito ayuda con: `;
@@ -221,23 +225,19 @@ export async function enviarCorreoPendiente(params: {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
             <td align="center" style="padding-bottom:14px;">
-              <div style="display:inline-block;background-color:#F1ECE2;color:#3D0507;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">${plan ? "Pago inicial recibido" : "Compra recibida"}</div>
+              <div style="display:inline-block;background-color:#F1ECE2;color:#3D0507;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">Compra recibida</div>
             </td>
           </tr>
         </table>
         <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, ${
           plan
-            ? "recibimos tu <strong>pago inicial</strong> y ya estamos verificando que llegue al banco."
+            ? "recibimos tu compra y ya estamos verificando tu <strong>pago inicial</strong>."
             : "recibimos tu compra y ya estamos verificando tu pago."
         }</p>
         ${detalle}
         <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">${
           plan
-            ? `En cuanto lo confirmemos te escribimos con <strong>las fechas y los montos de tus ${
-                plan.pagosRestantes === 1 ? "pago restante" : `${plan.pagosRestantes} pagos restantes`
-              }</strong>. ${
-                cantidad > 1 ? "Tus códigos QR de acceso te llegan" : "Tu código QR de acceso te llega"
-              } cuando completes el total, no antes.`
+            ? "En cuanto se confirme, te llegará un correo a esta misma dirección con el detalle de tu plan de pago. No necesitas hacer nada más por ahora."
             : `En cuanto se confirme, te llegará un correo a esta misma dirección con ${
                 cantidad > 1 ? "tus <strong>entradas y códigos QR</strong> de acceso (uno por persona)" : "tu <strong>entrada y código QR</strong> de acceso"
               }. No necesitas hacer nada más por ahora.`
@@ -261,13 +261,7 @@ export async function enviarCorreoPendiente(params: {
     from: remitente(),
     replyTo: respuestasA(),
     to: params.destinatario,
-    subject: plan
-      ? codigo
-        ? `Recibimos tu pago inicial ${codigo} — La Navidad Vallenata`
-        : "Recibimos tu pago inicial — La Navidad Vallenata"
-      : codigo
-        ? `Recibimos tu compra ${codigo} — La Navidad Vallenata`
-        : "Recibimos tu compra — La Navidad Vallenata",
+    subject: codigo ? `Recibimos tu compra ${codigo} — La Navidad Vallenata` : "Recibimos tu compra — La Navidad Vallenata",
     html,
     ...(params.grupoId ? { headers: { "X-Entity-Ref-ID": params.grupoId } } : {}),
   });
