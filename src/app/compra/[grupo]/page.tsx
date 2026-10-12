@@ -10,7 +10,6 @@ import { codigoCompra } from "@/lib/compra";
 import { codigoEntrada } from "@/lib/qr";
 import { leerPlanPorGrupo } from "@/lib/abona618";
 import { INSTRUCCIONES_PAGO } from "@/lib/pagos";
-import { graciaHasta } from "@/lib/cuotas";
 import PlanComprador, { type CuotaVista } from "./PlanComprador";
 
 // "Mis entradas": todas las entradas de UNA compra, con un botón de WhatsApp
@@ -121,7 +120,6 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
               etiqueta: c.etiqueta,
               monto: c.montoUsd,
               venceEl: c.venceEl,
-              graciaHasta: graciaHasta(c.venceEl),
               pagada: Boolean(c.verificadoEn),
               reportada: Boolean(c.reportadoEn) && !c.verificadoEn,
               montoBsPagado: c.verificadoEn ? c.montoBs : null,

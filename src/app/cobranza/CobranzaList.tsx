@@ -49,11 +49,14 @@ function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo, tasaEurVes: number | n
   const monto = `${formatoUsd(c.montoUsd)}${enBs}`;
   const cuando = fechaCorta(c.venceEl);
 
+  // Ninguno de estos mensajes menciona los días de gracia (Anita, 12 oct):
+  // "si no, esperan hasta el último día y piden más prórroga". El comprador
+  // sabe su fecha; el margen que tiene el equipo por dentro no se regala.
   if (grupo === "enGracia") {
     return (
       `${hola}, te escribo de La Navidad Vallenata. Tu pago de ${monto} venció el ${cuando} ` +
-      `y todavía no nos ha llegado. Tienes plazo hasta hoy para completarlo; si no, tu entrada se libera ` +
-      `y lo que ya abonaste no se devuelve. ¿Te ayudo con los datos de pago?`
+      `y todavía no nos ha llegado, así que tu entrada está a punto de liberarse. ` +
+      `¿Ya lo hiciste? Si tienes la referencia mándamela ahora mismo y la registro de una.`
     );
   }
   if (grupo === "vencenHoy") {
@@ -65,8 +68,16 @@ function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo, tasaEurVes: number | n
   if (grupo === "paraAnular") {
     return (
       `${hola}, te escribo de La Navidad Vallenata. Tu pago de ${monto} venció el ${cuando} ` +
-      `y se pasó el plazo. Antes de liberar tu entrada quería confirmarte si lo pagaste. ` +
-      `Si tienes la referencia, mándamela ya mismo.`
+      `y no nos ha llegado, así que tu entrada entró en la lista para volver a la venta. ` +
+      `Si lo pagaste, mándame la referencia ya mismo y lo revisamos antes de anularla.`
+    );
+  }
+  // Ya reportó y está esperando al banco: pedirle plata otra vez es el error
+  // que tenía esta pantalla. Aquí se tranquiliza, no se cobra.
+  if (grupo === "porVerificar") {
+    return (
+      `${hola}, te escribo de La Navidad Vallenata. Recibimos tu pago de ${monto} y lo estamos ` +
+      `confirmando con el banco; te aviso en cuanto quede listo. Tu entrada sigue apartada a tu nombre.`
     );
   }
   return (

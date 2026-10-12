@@ -12,8 +12,7 @@ import {
   CONDICIONES,
   fechaCorta,
   TOPE_FINAL,
-  CADA_DIAS,
-  MAX_CUOTAS,
+  DIAS_QUINCENA,
   MAX_PAGOS,
   INICIAL,
   MARGEN_MIN_DIAS,
@@ -56,28 +55,33 @@ test("la aritmética de fechas no depende de la zona del servidor", () => {
   assert.equal(hoyEnVenezuela(new Date("2026-11-25T04:30:00Z")), "2026-11-25");
 });
 
-test("el calendario es cada 14 días desde la compra, con tope el 25", () => {
-  // La regla que pidió Anita el 12 de octubre: cobrar cada 14 días contados
-  // desde la compra, nunca en fechas fijas. Con el calendario viejo (16 y 25
-  // de noviembre) quien compraba el 12 de octubre no volvía a pagar hasta un
-  // mes después y se saltaba la quincena de fin de octubre completa.
-  assert.equal(CADA_DIAS, 14);
-  assert.equal(MAX_CUOTAS, 3, "inicial + 3 cuotas, como Cashea");
+test("se cobra en las quincenas, y ninguna cuota pasa del 25 de noviembre", () => {
+  // La regla que pidió Anita el 12 de octubre: se cobra los 15 y los 30, que
+  // es cuando se cobra en Venezuela. Antes eran fechas fijas (16 y 25 de
+  // noviembre) y quien compraba el 12 de octubre no volvía a pagar hasta un
+  // mes después, saltándose las dos quincenas de octubre completas.
+  assert.deepEqual([...DIAS_QUINCENA], [15, 30]);
+  assert.equal(MAX_PAGOS, 3, "la inicial y dos quincenas");
   assert.equal(TOPE_FINAL, "2026-11-25");
-  assert.equal(fechaLarga(TOPE_FINAL), "miércoles 25 de noviembre");
 
-  // Comprando hoy: la quincena de octubre queda cubierta.
-  assert.deepEqual(fechasDelPlan("2026-10-12"), ["2026-10-26", "2026-11-09", "2026-11-25"]);
+  // El caso de Keyla, la primera compra real a cuotas: comprando el 12 de
+  // octubre paga el 15 y el 30 del mismo mes.
+  assert.deepEqual(fechasDelPlan("2026-10-12"), ["2026-10-15", "2026-10-30"]);
 
-  // El último pago es SIEMPRE el tope, compre quien compre cuando compre.
   for (const hoy of DIAS) {
     const f = fechasDelPlan(hoy);
     if (f.length === 0) continue;
-    assert.equal(f[f.length - 1], TOPE_FINAL, `${hoy}: el último pago no es el tope`);
-    assert.ok(f.length <= MAX_CUOTAS, `${hoy}: ${f.length} cuotas, más de las permitidas`);
-    // Ninguna fecha de cobro cae en fin de semana: sin banco no hay pago que
-    // confirmar, y el plazo de gracia se consumiría solo.
+    assert.ok(f.length <= MAX_PAGOS - 1, `${hoy}: ${f.length} cuotas, más de las permitidas`);
+    assert.ok(diasEntre(f[f.length - 1], TOPE_FINAL) >= 0, `${hoy}: una cuota se pasó del tope`);
     for (const d of f) {
+      // Cada fecha es una quincena, o el lunes al que se corrió una que cayó
+      // en fin de semana. Nada de fechas inventadas a medio mes.
+      const dia = Number(d.slice(8));
+      assert.ok(
+        DIAS_QUINCENA.some((q) => dia === q || (dia > q && dia - q <= 2)),
+        `${hoy}: ${d} no es una quincena ni su corrimiento`
+      );
+      // Ninguna cae en fin de semana: sin banco no hay pago que confirmar.
       const semana = fechaLarga(d).split(" ")[0];
       assert.ok(semana !== "sábado" && semana !== "domingo", `${hoy}: cobro en ${semana} (${d})`);
     }
@@ -94,7 +98,7 @@ test("el calendario es cada 14 días desde la compra, con tope el 25", () => {
 
 test("el reparto suma exacto, siempre", () => {
   for (const total of TOTALES) {
-    for (const n of [1, 2, 3]) {
+    for (const n of [1, 2]) {
       const resto = 1 - INICIAL;
       const pcs = [INICIAL, ...Array(n).fill(resto / n)];
       if (Math.round(total * 100) < pcs.length) {
@@ -187,28 +191,29 @@ test("los cortes del crédito deslizante caen donde se decidió", () => {
     const p = planPara(140, hoy);
     return p.hayPlan ? p.cuotas.length : 0;
   };
-  assert.equal(pagos("2026-10-12"), 4, "comprando hoy: inicial + 3 cuotas");
-  assert.equal(pagos("2026-10-21"), 4, "último día con cuatro pagos");
-  assert.equal(pagos("2026-10-22"), 3, "la segunda intermedia ya no cabe antes del tope");
-  assert.equal(pagos("2026-11-04"), 3, "último día con tres pagos");
-  assert.equal(pagos("2026-11-05"), 2, "desde aquí solo queda el pago del 25");
-  assert.equal(pagos("2026-11-20"), 2, "último día con plan");
-  assert.equal(pagos("2026-11-21"), 0, "desde aquí todo es de contado");
+  assert.equal(pagos("2026-10-12"), 3, "comprando hoy: inicial, el 15 y el 30");
+  assert.equal(pagos("2026-10-27"), 3, "último día con tres pagos (30 oct y 16 nov)");
+  assert.equal(pagos("2026-10-28"), 2, "la quincena del 30 queda encima: solo el 16 de noviembre");
+  assert.equal(pagos("2026-11-13"), 2, "último día con plan");
+  assert.equal(pagos("2026-11-14"), 0, "el 16 ya queda encima y el 30 pasa del tope: contado");
+  assert.equal(pagos("2026-11-25"), 0, "el día del tope no hay plan");
   assert.equal(pagos("2026-12-04"), 0, "el día del evento no hay plan");
 
   // El corte no puede moverse en silencio: es la fecha del último cartel.
-  assert.equal(fechasDelPlan("2026-11-20").length, 1);
-  assert.equal(hayCuotasDisponibles("2026-11-20"), true);
-  assert.equal(hayCuotasDisponibles("2026-11-21"), false);
+  assert.equal(fechasDelPlan("2026-11-13").length, 1);
+  assert.equal(hayCuotasDisponibles("2026-11-13"), true);
+  assert.equal(hayCuotasDisponibles("2026-11-14"), false);
 });
 
-test("el 60 % se junta cuando queda una sola fecha", () => {
+test("el 60 % se junta cuando queda una sola quincena", () => {
   const p = planPara(140, "2026-11-12");
   assert.ok(p.hayPlan);
   assert.equal(p.cuotas.length, 2);
   assert.equal(p.cuotas[0].monto, 56);
   assert.equal(p.cuotas[1].monto, 84);
-  assert.equal(p.cuotas[1].venceEl, "2026-11-25");
+  // El 15 de noviembre cae domingo: la cuota se corre al lunes 16.
+  assert.equal(p.cuotas[1].venceEl, "2026-11-16");
+  assert.equal(fechaLarga("2026-11-15"), "domingo 15 de noviembre");
 });
 
 test("taquilla el día del evento no ofrece plan", () => {
@@ -246,7 +251,7 @@ test("un total inválido falla ruidosamente en vez de cobrar mal", () => {
   // cuota de $0.00 rompería el insert de la compra completa.
   assert.throws(() => repartir(0.02, [0.4, 0.3, 0.3]), /demasiado bajo/);
   assert.throws(() => repartir(0.03, [0.4, 0.2, 0.2, 0.2]), /demasiado bajo/, "3 céntimos no caben en 4 pagos");
-  assert.throws(() => planPara(0.03, "2026-10-12"), /demasiado bajo/);
+  assert.throws(() => planPara(0.02, "2026-10-12"), /demasiado bajo/, "2 céntimos no caben en 3 pagos");
   for (const t of [0.03, 0.04, 0.05, 0.07, 0.11]) {
     const partes = repartir(t, [0.4, 0.3, 0.3]);
     assert.equal(Math.round(partes.reduce((s, x) => s + x, 0) * 100) / 100, t, `suma de ${t}`);
@@ -259,7 +264,7 @@ test("honrar un plan por el tope salta SOLO el tope, nunca el calendario", () =>
   // noviembre resucitaba la fecha del 16 que el margen mínimo ya había
   // descartado, así que al comprador se le ofrecían 2 pagos y se le guardaban
   // 3, con una cuota que vencía en tres días y que nunca había visto.
-  for (const hoy of ["2026-10-12", "2026-11-12", "2026-11-13", "2026-11-15", "2026-11-20"]) {
+  for (const hoy of ["2026-10-12", "2026-10-27", "2026-10-28", "2026-11-05", "2026-11-13"]) {
     const ofrecido = planPara(140, hoy, { tipo: "vip", vipEnPlan: 0, cantidad: 1 });
     const honrado = planPara(140, hoy, { tipo: "vip", vipEnPlan: 999, cantidad: 1, ignorarTope: true });
     assert.ok(ofrecido.hayPlan && honrado.hayPlan, hoy);
@@ -382,7 +387,7 @@ test("los totales de carrito mixto entre etapas también suman exacto", () => {
 });
 
 test("el plazo de gracia nunca se calcula distinto en dos sitios", () => {
-  for (const f of ["2026-10-26", "2026-11-09", TOPE_FINAL]) {
+  for (const f of ["2026-10-15", "2026-10-30", "2026-11-16"]) {
     assert.equal(diasEntre(f, graciaHasta(f)), DIAS_GRACIA);
     assert.equal(diasEntre(graciaHasta(f), liberaEl(f)), 1);
   }
@@ -394,25 +399,24 @@ test("cada cuota tiene su propio plazo: no se espera a la fecha final", () => {
   // dejaría la silla muerta nueve días con alguien que ya dejó de pagar.
   const p = planPara(140, "2026-10-12");
   assert.ok(p.hayPlan);
-  assert.equal(p.cuotas.length, 4);
+  assert.equal(p.cuotas.length, 3);
 
-  const [inicial, cuota01, cuota02, final] = p.cuotas;
+  const [inicial, cuota01, final] = p.cuotas;
 
   assert.equal(inicial.monto, 56, "40 % limpio");
-  assert.deepEqual([cuota01.monto, cuota02.monto, final.monto], [28, 28, 28], "el 60 % en tres partes iguales");
+  assert.deepEqual([cuota01.monto, final.monto], [42, 42], "el 60 % en dos partes iguales");
 
-  assert.equal(cuota01.venceEl, "2026-10-26", "la quincena de fin de octubre sí se cobra");
-  assert.equal(cuota01.graciaHasta, "2026-10-28", "dos días de plazo desde su propia fecha");
-  assert.equal(cuota01.liberaEl, "2026-10-29", "y se anula al día siguiente, no en diciembre");
+  assert.equal(cuota01.venceEl, "2026-10-15", "la quincena de mediados de octubre sí se cobra");
+  assert.equal(cuota01.graciaHasta, "2026-10-17", "dos días de plazo desde su propia fecha");
+  assert.equal(cuota01.liberaEl, "2026-10-18", "y se anula al día siguiente, no en diciembre");
 
-  assert.equal(cuota02.venceEl, "2026-11-09");
-  assert.equal(final.venceEl, TOPE_FINAL);
-  assert.equal(final.graciaHasta, "2026-11-27");
-  assert.equal(final.liberaEl, "2026-11-28");
+  assert.equal(final.venceEl, "2026-10-30", "la quincena de fin de octubre");
+  assert.equal(final.graciaHasta, "2026-11-01");
+  assert.equal(final.liberaEl, "2026-11-02");
 
-  // Un mes de diferencia: eso es lo que se gana liberando por cuota en vez de
-  // esperar al final. Con el calendario viejo eran nueve días.
-  assert.equal(diasEntre(cuota01.liberaEl, final.liberaEl), 30);
+  // Dos semanas de diferencia: eso es lo que se gana liberando por cuota en
+  // vez de esperar al último pago.
+  assert.equal(diasEntre(cuota01.liberaEl, final.liberaEl), 15);
 
   // Y cada cuota libera después de su propio vencimiento, nunca antes.
   for (const c of p.cuotas) {
@@ -421,9 +425,26 @@ test("cada cuota tiene su propio plazo: no se espera a la fecha final", () => {
   }
 });
 
-test("las condiciones dicen que se anula al pasarse CUALQUIER plazo", () => {
+test("las condiciones dicen que se anula al fallar CUALQUIER cuota", () => {
   const texto = CONDICIONES.join(" ");
   assert.match(texto, /no se espera a la fecha final/i, "la regla tiene que estar escrita, no solo programada");
   assert.match(texto, /no se devuelve/i);
-  assert.match(texto, /CADA fecha/, "el plazo es por cuota, no uno solo al final");
+  assert.match(texto, /quincenas/i, "el comprador tiene que saber cuándo le toca pagar");
+});
+
+test("el plazo de gracia NO aparece en nada que vea el comprador", () => {
+  // Regla de Anita (12 oct): "los dos días de gracia no se dan en público, se
+  // manejan en privado, porque si no esperan hasta el último día y piden más
+  // prórroga". La gracia sigue existiendo por dentro — DIAS_GRACIA, graciaHasta
+  // y liberaEl son el margen del equipo — pero el comprador ve su fecha y nada
+  // más. Esta prueba cuida el texto que él lee.
+  const texto = CONDICIONES.join(" ");
+  assert.doesNotMatch(texto, /gracia/i, "las condiciones no pueden nombrar la gracia");
+  assert.doesNotMatch(texto, /plazo/i, "ni insinuarla con la palabra plazo");
+  assert.doesNotMatch(texto, /d[ií]as (extra|m[áa]s|adicionales)/i);
+  assert.doesNotMatch(texto, new RegExp(`${DIAS_GRACIA} d[ií]as`), "ni decir cuántos días son");
+
+  // Y la gracia por dentro sigue intacta: son dos cosas distintas.
+  assert.equal(DIAS_GRACIA, 2);
+  assert.equal(diasEntre("2026-10-15", graciaHasta("2026-10-15")), 2);
 });

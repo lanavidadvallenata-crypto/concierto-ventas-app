@@ -6,55 +6,51 @@
 // Cómo funciona (decidido entre Jose Luis y Anita, 9-12 oct):
 //
 //   · La inicial es SIEMPRE el 40 % y se paga al comprar.
-//   · El 60 % restante se reparte en cuotas iguales cada 14 días CONTADAS
-//     DESDE EL DÍA DE LA COMPRA, y el último pago siempre cae el 25 de
-//     noviembre. Modelo Cashea / MDticket: inicial + hasta 3 cuotas.
-//   · El plan NO cierra de golpe: se va encogiendo solo. Quien compra
-//     temprano paga en 4 veces; quien compra tarde, en 2; y a menos de 5 días
-//     del 25 de noviembre no hay plan, se vende de contado.
+//   · El 60 % restante se cobra EN LAS QUINCENAS: los días 15 y 30 de cada
+//     mes, que es cuando se cobra en Venezuela. Tres pagos en total: la
+//     inicial y las dos quincenas siguientes.
+//   · El plan se va encogiendo solo según cuándo se compre, y ninguna cuota
+//     puede caer después del 25 de noviembre.
 //
-// Por qué cada 14 días y no en fechas fijas (Anita, 12 oct): con las fechas
-// fijas del 16 y 25 de noviembre, quien compraba el 12 de octubre pagaba su
-// inicial y no volvía a pagar hasta un mes después, saltándose completa la
-// quincena de fin de octubre. Un mes sin cobrarle a alguien que apenas dejó
-// el 40 % es un mes para que se arrepienta, se gaste la plata o se le olvide.
-// Cada 14 días el cobro cae en las dos quincenas de cada mes y el comprador
-// no pierde el hilo.
+// Por qué las quincenas (Anita, 12 oct): el calendario de fechas fijas (16 y
+// 25 de noviembre) le hacía pagar la inicial el 12 de octubre y no volver a
+// cobrarle hasta un mes después, saltándose las dos quincenas de octubre. Un
+// mes sin cobrarle a alguien que apenas dejó el 40 % es un mes para que se
+// arrepienta, se gaste la plata o se le olvide. En las quincenas el comprador
+// paga el día que tiene el dinero en la mano.
 //
-// Por qué el tope es el 25 y no el 27 de noviembre: los dos días de plazo de
-// gracia tienen que caer en días de banco. Después del viernes 27 solo hay
-// sábado y domingo, y la gracia existiría nada más en el papel.
+// El plazo de gracia NO se le dice al comprador (Anita, 12 oct): si sabe que
+// tiene dos días extra, espera hasta el último y pide prórroga. El comprador
+// ve su fecha; la gracia la maneja el equipo por dentro.
 
 export const INICIAL = 0.4;
 
-// El día en que TODO el mundo tiene que estar pagado completo. Después de
-// esta fecha nadie debe nada: o pagó, o perdió lo abonado (Anita, 12 oct).
+// Los días de cobro del mes: las quincenas venezolanas.
+export const DIAS_QUINCENA = [15, 30] as const;
+
+// Límite duro: ninguna cuota puede vencer después de esta fecha. Ese día todo
+// el mundo tiene que estar pagado completo, o perdió lo abonado.
 export const TOPE_FINAL = "2026-11-25";
 
-// Ritmo de cobro, contado desde el día de la compra.
-export const CADA_DIAS = 14;
+// Pagos en total, contando la inicial. Tres: la inicial y dos quincenas.
+export const MAX_PAGOS = 3;
 
-// Cuántas cuotas van DESPUÉS de la inicial. Tres, como Cashea.
-export const MAX_CUOTAS = 3;
+// Una quincena que cae encima de la compra no cuenta como cuota: hay que
+// darle al comprador al menos estos días para llegar a ella.
+export const MARGEN_MIN_DIAS = 3;
 
-// Una cuota intermedia tiene que quedar al menos esta separación antes del
-// tope: dos pagos a tres días uno del otro no son dos cuotas, son un enredo.
-export const SEPARACION_MIN_DIAS = 7;
-
-// Si al tope le faltan menos de estos días, no hay plan: una cuota que vence
-// pasado mañana no es crédito, es una molestia.
-export const MARGEN_MIN_DIAS = 5;
-
-// Días de plazo después de cada vencimiento antes de anular, avisando todos
-// los días (Anita, 12 oct).
+// Días de plazo después de cada vencimiento antes de anular.
+//
+// INTERNO. No se le dice al comprador ni aparece en ninguna página ni correo
+// suyo (Anita, 12 oct): "si no, esperan hasta el último día y piden más
+// prórroga". El comprador ve su fecha de vencimiento y nada más; esto es
+// margen operativo para que el equipo lo llame antes de anular.
 export const DIAS_GRACIA = 2;
 
 // Tope de entradas VIP que pueden estar en plan a la vez, y el número al que
 // hay que avisarle a Anita para evaluar si se extiende (Anita, 11 y 12 oct).
 export const TOPE_VIP_EN_PLAN = 100;
 export const AVISO_TOPE_VIP = 90;
-
-export const MAX_PAGOS = MAX_CUOTAS + 1;
 
 // ---------------------------------------------------------------- fechas
 
@@ -214,30 +210,45 @@ function aDiaDeBanco(iso: string): string {
   return iso;
 }
 
+/** El día `dia` del mes dado, recortado al último día si el mes es más corto. */
+function diaDelMes(anio: number, mes: number, dia: number): string {
+  const ultimo = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+  const d = Math.min(dia, ultimo);
+  return `${anio}-${String(mes).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 /**
- * Las fechas de pago de una compra hecha el día `hoy`: una cada 14 días
- * contadas desde la compra, y el 25 de noviembre SIEMPRE de última. Devuelve
- * vacío cuando ya no hay plan posible.
+ * Las fechas de cobro de una compra hecha el día `hoy`: las quincenas que
+ * vienen después de la compra, hasta completar el plan. Vacío = no hay plan y
+ * la entrada se vende de contado.
  *
- * Las intermedias tienen que caer al menos una semana antes del tope; si no
- * caben, el plan queda en inicial + el pago del 25. Así nunca se arma un
- * calendario con dos cobros pegados.
+ * Ninguna cuota pasa del 25 de noviembre: cuando la siguiente quincena cae
+ * después, el plan se encoge, y cuando no queda ninguna, no hay plan.
  */
 export function fechasDelPlan(hoy: string): string[] {
-  if (diasEntre(hoy, TOPE_FINAL) < MARGEN_MIN_DIAS) return [];
+  const fechas: string[] = [];
+  let [anio, mes] = hoy.split("-").map(Number);
 
-  const limiteIntermedias = sumarDias(TOPE_FINAL, -SEPARACION_MIN_DIAS);
-  const intermedias: string[] = [];
-  for (let k = 1; k <= MAX_CUOTAS - 1; k++) {
-    const fecha = aDiaDeBanco(sumarDias(hoy, CADA_DIAS * k));
-    // Pasó el límite: las siguientes están más lejos todavía.
-    if (diasEntre(fecha, limiteIntermedias) < 0) break;
-    // El corrimiento al lunes podría repetir una fecha. No puede pasar con 14
-    // días de separación, pero una fecha duplicada violaría unique(plan,orden).
-    if (intermedias.includes(fecha)) continue;
-    intermedias.push(fecha);
+  // Tope de vueltas por si acaso: con el tope del 25 de noviembre nunca se
+  // recorren más de un par de meses, pero un while sin freno dentro de una
+  // server action es una caída, no un error.
+  for (let vuelta = 0; vuelta < 24 && fechas.length < MAX_PAGOS - 1; vuelta++) {
+    for (const dia of DIAS_QUINCENA) {
+      const fecha = aDiaDeBanco(diaDelMes(anio, mes, dia));
+      // Ya pasó, o cae tan encima de la compra que no es crédito.
+      if (diasEntre(hoy, fecha) < MARGEN_MIN_DIAS) continue;
+      // Se pasó del límite duro: de aquí en adelante todas se pasan.
+      if (diasEntre(fecha, TOPE_FINAL) < 0) return fechas;
+      // El corrimiento al lunes puede repetir una fecha (un 30 sábado y un 15
+      // domingo nunca coinciden, pero una fecha duplicada violaría
+      // unique(plan_id, orden) y reventaría la compra completa).
+      if (!fechas.includes(fecha)) fechas.push(fecha);
+      if (fechas.length === MAX_PAGOS - 1) break;
+    }
+    mes++;
+    if (mes > 12) { mes = 1; anio++; }
   }
-  return [...intermedias, TOPE_FINAL];
+  return fechas;
 }
 
 /** ¿Se puede ofrecer el plan en esta fecha? (sin contar tope VIP ni canal) */
@@ -369,15 +380,14 @@ export function resumenPlan(plan: Plan): string {
  * versión que aceptó su comprador, así que a nadie se le reclama algo que no
  * estaba cuando compró.
  */
-export const CONDICIONES_VERSION = "v2";
+export const CONDICIONES_VERSION = "v3";
 
 export const CONDICIONES: string[] = [
   "Tu entrada queda apartada a tu nombre desde que verificamos tu pago inicial. El precio se te congela: no sube aunque suba la tarifa.",
   "El QR de acceso te llega cuando completes el 100 % del pago. Antes de eso no tienes entrada válida para entrar al concierto.",
-  `Tus fechas de pago se cuentan desde el día de tu compra: una cada ${CADA_DIAS} días. Las ves todas, con su monto, antes de pagar.`,
-  `El último pago vence el ${fechaCorta(TOPE_FINAL)} de 2026 para todo el mundo, sin excepción: ese día tu entrada tiene que estar pagada completa.`,
-  `Después de CADA fecha tienes ${DIAS_GRACIA} días de plazo para pagar esa cuota. Te avisamos por correo antes de la fecha y durante el plazo.`,
-  "Si se te pasa el plazo de cualquiera de los pagos, anulamos toda la compra en ese momento: no se espera a la fecha final. Tu entrada vuelve a la venta y lo que ya abonaste no se devuelve.",
+  "Tus pagos caen en las quincenas, los días 15 y 30. Ves todas tus fechas, con su monto, antes de pagar, y te avisamos por correo antes de cada una.",
+  `Ninguna cuota pasa del ${fechaCorta(TOPE_FINAL)} de 2026: ese día tu entrada tiene que estar pagada completa.`,
+  "Si no pagas en la fecha de cualquiera de tus cuotas, anulamos toda la compra: no se espera a la fecha final. Tu entrada vuelve a la venta y lo que ya abonaste no se devuelve.",
   "Puedes adelantar pagos o pagar el total cuando quieras, sin recargo.",
   "El plan de cuotas no aplica en taquilla el día del evento. Ese día la entrada se paga completa.",
   "Los cupos en cuotas de la zona VIP son limitados. Cuando se agotan, VIP se vende solo de contado.",

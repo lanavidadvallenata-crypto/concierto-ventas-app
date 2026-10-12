@@ -7,7 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, type EntradaQR } from "@/lib/enviar-qr";
 import { anularPlan, leerPlanPorGrupo, planConSaldo, verificarCuota } from "@/lib/abona618";
-import { fechaCorta, graciaHasta, usd } from "@/lib/cuotas";
+import { fechaCorta, usd } from "@/lib/cuotas";
 import { guardarTasaManual } from "@/lib/tasa";
 import { obtenerAsiento } from "@/lib/asiento";
 import { ETIQUETA_METODO } from "@/lib/formato";
@@ -187,7 +187,7 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
             pendientes: r.plan.cuotas
               .filter((c) => !c.verificadoEn)
               .map((c) => ({ etiqueta: c.etiqueta, monto: c.montoUsd, venceEl: fechaCorta(c.venceEl) })),
-            proximoPlazo: r.plan.proxima ? fechaCorta(graciaHasta(r.plan.proxima.venceEl)) : null,
+            proximaFecha: r.plan.proxima ? fechaCorta(r.plan.proxima.venceEl) : null,
           });
         } catch (e) {
           console.error("Error enviando el correo de cuota verificada:", (e as Error).message);

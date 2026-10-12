@@ -72,12 +72,7 @@ export default function PlanDePago({
               <li key={c.orden} className="flex items-start justify-between gap-3 text-sm">
                 <span className="text-neutral-700 min-w-0">
                   {c.etiqueta}
-                  <span className="text-neutral-500"> · {c.esInicial ? "hoy" : `hasta el ${fechaCorta(c.venceEl)}`}</span>
-                  {!c.esInicial && (
-                    <span className="block text-xs text-neutral-500">
-                      con 2 días de plazo, hasta el {fechaCorta(c.graciaHasta)}
-                    </span>
-                  )}
+                  <span className="text-neutral-500"> · {c.esInicial ? "hoy" : `el ${fechaCorta(c.venceEl)}`}</span>
                 </span>
                 <span className="font-semibold shrink-0">${c.monto.toFixed(2)}</span>
               </li>
@@ -98,9 +93,9 @@ export default function PlanDePago({
               className="mt-0.5 h-5 w-5 shrink-0 accent-[#3F0A62]"
             />
             <span className="text-xs text-neutral-800 leading-relaxed">
-              Acepto las condiciones del plan. <strong>Cada pago tiene su fecha y dos días de plazo</strong>; si se me
-              pasa el plazo de cualquiera de ellos, se anula toda la compra en ese momento, mi entrada vuelve a la
-              venta y lo abonado no se devuelve.{" "}
+              Acepto las condiciones del plan. <strong>Cada pago tiene su fecha</strong>; si no pago en la fecha de
+              cualquiera de ellos, se anula toda la compra en ese momento, mi entrada vuelve a la venta y lo abonado
+              no se devuelve.{" "}
               <button
                 type="button"
                 onClick={(e) => {

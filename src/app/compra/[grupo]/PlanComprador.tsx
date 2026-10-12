@@ -18,8 +18,6 @@ export type CuotaVista = {
   etiqueta: string;
   monto: number;
   venceEl: string;
-  /** Último día para pagar ESTA cuota antes de que se anule la compra. */
-  graciaHasta: string;
   pagada: boolean;
   reportada: boolean;
   /** Los bolívares que de verdad entraron por esta cuota, si se pagó en Bs.
@@ -102,7 +100,7 @@ export default function PlanComprador({
                   ? "Pagada y verificada"
                   : c.reportada
                     ? "Avisaste que pagaste · estamos verificando en el banco"
-                    : `Vence el ${fechaCorta(c.venceEl)} · plazo hasta el ${fechaCorta(c.graciaHasta)}`}
+                    : `Vence el ${fechaCorta(c.venceEl)}`}
               </span>
             </span>
             <span className="shrink-0 text-right">
@@ -132,8 +130,8 @@ export default function PlanComprador({
             <p className="font-semibold mb-1">Tu QR llega cuando completes el total</p>
             <p className="text-[13px] leading-relaxed text-neutral-700">
               Tu entrada está apartada a tu nombre y el precio congelado.{" "}
-              <strong>Cada pago tiene su fecha y dos días de plazo.</strong> Si se te pasa el plazo de cualquiera de
-              ellos{proxima ? <> — el próximo es el <strong>{fechaLarga(proxima.graciaHasta)}</strong></> : null}, se
+              <strong>Cada pago tiene su fecha.</strong> Si no pagas en la fecha de cualquiera de
+              ellos{proxima ? <> — la próxima es el <strong>{fechaLarga(proxima.venceEl)}</strong></> : null}, se
               anula toda la compra, tu entrada vuelve a la venta y lo abonado no se devuelve. Te escribimos antes de
               cada fecha.
             </p>
@@ -144,8 +142,7 @@ export default function PlanComprador({
               <p className="text-sm">
                 <strong>Tu próximo pago:</strong> {usd(proxima.monto)} · vence el {fechaCorta(proxima.venceEl)}
                 <span className="block text-xs text-neutral-600 mt-0.5">
-                  Tienes hasta el <strong>{fechaCorta(proxima.graciaHasta)}</strong> para pagarlo. Después de esa
-                  fecha se anula la compra.
+                  Págalo ese día. Si no nos llega, se anula la compra y tu entrada vuelve a la venta.
                 </span>
               </p>
 
