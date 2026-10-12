@@ -127,7 +127,7 @@ test("crear un plan deja la inicial reportada y el resto limpio", async () => {
 
   const guardado = await leerPlanPorGrupo(cli(d), "g-1");
   assert.ok(guardado);
-  assert.equal(guardado.cuotas.length, 3);
+  assert.equal(guardado.cuotas.length, cuotas.length, "se guardan todas las cuotas del calendario, ni una menos");
   assert.equal(guardado.pagado, 0, "reportado no es pagado: Finanzas no ha visto el dinero");
   assert.equal(guardado.saldo, 140);
   assert.equal(guardado.proxima?.orden, 1);
@@ -153,40 +153,51 @@ test("si fallan las cuotas, el plan se borra en vez de quedar sin cobrar", async
   assert.equal((d.tablas.planes_pago ?? []).length, 0, "un plan sin cuotas es una compra que nadie va a cobrar");
 });
 
-test("el camino completo: inicial, cuota, pago final y recién ahí los QR", async () => {
+test("el camino completo: inicial, cuotas y recién al final los QR", async () => {
+  // Recorre el plan entero cuota por cuota sin dar por sentado cuántas son:
+  // el calendario cambió una vez (fechas fijas → cada 14 días) y esta prueba
+  // no puede volverse mentira la próxima vez que cambie.
   const { d, total, cuotas, tipo } = doblePlanListo();
   await crearPlan(cli(d), {
     grupoId: "g-3", total, tipo, cantidad: 1, cuotas, canal: "web",
     metodoPago: "transferencia", referenciaPago: "000111", montoBsInicial: null, tasaAplicada: null,
   });
   const plan0 = (await leerPlanPorGrupo(cli(d), "g-3"))!;
+  assert.ok(plan0.cuotas.length >= 3, "comprando hoy el calendario tiene que dar 3 pagos o más");
 
-  // 1 · Finanzas verifica la inicial. NO se entrega nada.
-  const v1 = await verificarCuota(cli(d), { cuotaId: plan0.cuotas[0].id, verificadoPor: "finanzas-1" });
-  assert.ok(v1.ok);
-  assert.equal(v1.completo, false, "con el 40 % pagado no se puede entregar el QR");
-  assert.equal(v1.plan.pagado, 56);
-  assert.equal(v1.plan.saldo, 84);
-  assert.equal(v1.plan.proxima?.etiqueta, "Cuota 01");
+  let acumulado = 0;
+  for (let i = 0; i < plan0.cuotas.length; i++) {
+    const c = plan0.cuotas[i];
+    const esUltima = i === plan0.cuotas.length - 1;
 
-  // 2 · El comprador reporta la cuota 01 y Finanzas la verifica.
-  const r2 = await reportarCuota(cli(d), {
-    cuotaId: plan0.cuotas[1].id, grupoId: "g-3", metodoPago: "pago_movil", referenciaPago: "222333", montoBs: 4000, tasa: 176,
-  });
-  assert.equal(r2.ok, true);
-  const v2 = await verificarCuota(cli(d), { cuotaId: plan0.cuotas[1].id, verificadoPor: "finanzas-1" });
-  assert.ok(v2.ok);
-  assert.equal(v2.completo, false);
-  assert.equal(v2.plan.pagado, 98);
+    // Solo la inicial nace reportada: las demás las tiene que anotar alguien.
+    if (i > 0) {
+      const rep = await reportarCuota(cli(d), {
+        cuotaId: c.id, grupoId: "g-3", metodoPago: "pago_movil",
+        referenciaPago: `22233${i}`, montoBs: 4000, tasa: 176,
+      });
+      assert.equal(rep.ok, true, `no se pudo anotar la cuota ${i + 1}`);
+    }
 
-  // 3 · El pago final. Ahora sí.
-  const v3 = await verificarCuota(cli(d), { cuotaId: plan0.cuotas[2].id, verificadoPor: "finanzas-1" });
-  assert.ok(v3.ok);
-  assert.equal(v3.completo, true, "con el 100 % verificado se entregan los QR");
-  assert.equal(v3.plan.pagado, 140);
-  assert.equal(v3.plan.saldo, 0);
-  assert.equal(v3.plan.estado, "completado");
-  assert.equal(v3.plan.proxima, null);
+    const v = await verificarCuota(cli(d), { cuotaId: c.id, verificadoPor: "finanzas-1" });
+    assert.ok(v.ok);
+    acumulado = Math.round((acumulado + c.montoUsd) * 100) / 100;
+    assert.equal(v.plan.pagado, acumulado, `tras ${c.etiqueta} lo pagado no cuadra`);
+    assert.equal(
+      v.completo,
+      esUltima,
+      esUltima
+        ? "con el 100 % verificado se entregan los QR"
+        : `con ${acumulado} de ${total} pagado NO se puede entregar el QR`
+    );
+    if (!esUltima) assert.equal(v.plan.proxima?.orden, c.orden + 1, "la próxima a cobrar es la siguiente");
+  }
+
+  const fin = (await leerPlanPorGrupo(cli(d), "g-3"))!;
+  assert.equal(fin.pagado, total);
+  assert.equal(fin.saldo, 0);
+  assert.equal(fin.estado, "completado");
+  assert.equal(fin.proxima, null);
   assert.ok(d.tablas.planes_pago[0].completado_en, "queda la hora en que se completó");
 });
 
@@ -218,11 +229,16 @@ test("CARRERA REAL: dos cuotas distintas a la vez completan el plan UNA sola vez
     metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
   });
   const plan = (await leerPlanPorGrupo(cli(d), "g-carrera"))!;
-  await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "f1" });
+  // Dejar exactamente dos sin verificar: la carrera peligrosa es entre las
+  // dos últimas, porque cualquiera de las dos podría creerse la que completa.
+  for (const c of plan.cuotas.slice(0, -2)) {
+    await verificarCuota(cli(d), { cuotaId: c.id, verificadoPor: "f1" });
+  }
+  const [penultima, ultima] = plan.cuotas.slice(-2);
 
   const [x, y] = await Promise.all([
-    verificarCuota(cli(d), { cuotaId: plan.cuotas[1].id, verificadoPor: "f1" }),
-    verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f2" }),
+    verificarCuota(cli(d), { cuotaId: penultima.id, verificadoPor: "f1" }),
+    verificarCuota(cli(d), { cuotaId: ultima.id, verificadoPor: "f2" }),
   ]);
   assert.ok(x.ok && y.ok);
   const entregas = [x, y].filter((r) => r.ok && r.completo).length;
@@ -258,11 +274,12 @@ test("verificar un pago sobre un plan muerto no lo resucita", async () => {
       metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
     });
     const plan = (await leerPlanPorGrupo(cli(d), "g-res"))!;
-    await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "f" });
-    await verificarCuota(cli(d), { cuotaId: plan.cuotas[1].id, verificadoPor: "f" });
+    for (const c of plan.cuotas.slice(0, -1)) {
+      await verificarCuota(cli(d), { cuotaId: c.id, verificadoPor: "f" });
+    }
     d.tablas.planes_pago[0].estado = estado;
 
-    const r = await verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f" });
+    const r = await verificarCuota(cli(d), { cuotaId: plan.cuotas[plan.cuotas.length - 1].id, verificadoPor: "f" });
     assert.equal(r.ok, false, `un plan ${estado} no puede pasar a completado: su silla ya se revendió`);
     assert.equal(d.tablas.planes_pago[0].estado, estado, "y su estado no se toca");
   }
@@ -279,14 +296,15 @@ test("un fallo parcial deja la cuota verificada, y el reintento SÍ repara", asy
     metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
   });
   const plan = (await leerPlanPorGrupo(cli(d), "g-parcial"))!;
-  for (const c of plan.cuotas.slice(0, 2)) await verificarCuota(cli(d), { cuotaId: c.id, verificadoPor: "f" });
+  for (const c of plan.cuotas.slice(0, -1)) await verificarCuota(cli(d), { cuotaId: c.id, verificadoPor: "f" });
+  const ultima = plan.cuotas[plan.cuotas.length - 1];
 
   d.fallarDespues["planes_pago:select"] = "statement timeout";
-  const roto = await verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f" });
+  const roto = await verificarCuota(cli(d), { cuotaId: ultima.id, verificadoPor: "f" });
   assert.equal(roto.ok, false, "se informa el fallo");
 
   delete d.fallarDespues["planes_pago:select"];
-  const reintento = await verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f" });
+  const reintento = await verificarCuota(cli(d), { cuotaId: ultima.id, verificadoPor: "f" });
   assert.ok(reintento.ok, "el reintento no puede responder 'ya la verificó otra persona' y rendirse");
   assert.equal(reintento.completo, true, "tiene que completar el plan que quedó a medias");
   assert.equal(reintento.plan.estado, "completado");

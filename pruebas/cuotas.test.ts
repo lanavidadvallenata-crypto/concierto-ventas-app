@@ -11,7 +11,10 @@ import assert from "node:assert/strict";
 import {
   CONDICIONES,
   fechaCorta,
-  FECHAS_PAGO,
+  TOPE_FINAL,
+  CADA_DIAS,
+  MAX_CUOTAS,
+  MAX_PAGOS,
   INICIAL,
   MARGEN_MIN_DIAS,
   DIAS_GRACIA,
@@ -22,7 +25,7 @@ import {
   liberaEl,
   repartir,
   planPara,
-  fechasVigentes,
+  fechasDelPlan,
   hayCuotasDisponibles,
   fechaLarga,
   hoyEnVenezuela,
@@ -53,10 +56,33 @@ test("la aritmética de fechas no depende de la zona del servidor", () => {
   assert.equal(hoyEnVenezuela(new Date("2026-11-25T04:30:00Z")), "2026-11-25");
 });
 
-test("las fechas aprobadas caen en los días que se decidieron", () => {
-  assert.deepEqual([...FECHAS_PAGO], ["2026-11-16", "2026-11-25"]);
-  assert.equal(fechaLarga("2026-11-16"), "lunes 16 de noviembre");
-  assert.equal(fechaLarga("2026-11-25"), "miércoles 25 de noviembre");
+test("el calendario es cada 14 días desde la compra, con tope el 25", () => {
+  // La regla que pidió Anita el 12 de octubre: cobrar cada 14 días contados
+  // desde la compra, nunca en fechas fijas. Con el calendario viejo (16 y 25
+  // de noviembre) quien compraba el 12 de octubre no volvía a pagar hasta un
+  // mes después y se saltaba la quincena de fin de octubre completa.
+  assert.equal(CADA_DIAS, 14);
+  assert.equal(MAX_CUOTAS, 3, "inicial + 3 cuotas, como Cashea");
+  assert.equal(TOPE_FINAL, "2026-11-25");
+  assert.equal(fechaLarga(TOPE_FINAL), "miércoles 25 de noviembre");
+
+  // Comprando hoy: la quincena de octubre queda cubierta.
+  assert.deepEqual(fechasDelPlan("2026-10-12"), ["2026-10-26", "2026-11-09", "2026-11-25"]);
+
+  // El último pago es SIEMPRE el tope, compre quien compre cuando compre.
+  for (const hoy of DIAS) {
+    const f = fechasDelPlan(hoy);
+    if (f.length === 0) continue;
+    assert.equal(f[f.length - 1], TOPE_FINAL, `${hoy}: el último pago no es el tope`);
+    assert.ok(f.length <= MAX_CUOTAS, `${hoy}: ${f.length} cuotas, más de las permitidas`);
+    // Ninguna fecha de cobro cae en fin de semana: sin banco no hay pago que
+    // confirmar, y el plazo de gracia se consumiría solo.
+    for (const d of f) {
+      const semana = fechaLarga(d).split(" ")[0];
+      assert.ok(semana !== "sábado" && semana !== "domingo", `${hoy}: cobro en ${semana} (${d})`);
+    }
+  }
+
   // Los dos días de gracia del pago final tienen que ser días de banco.
   assert.equal(fechaLarga(sumarDias("2026-11-25", 1)), "jueves 26 de noviembre");
   assert.equal(fechaLarga(graciaHasta("2026-11-25")), "viernes 27 de noviembre");
@@ -68,9 +94,16 @@ test("las fechas aprobadas caen en los días que se decidieron", () => {
 
 test("el reparto suma exacto, siempre", () => {
   for (const total of TOTALES) {
-    for (const n of [1, 2]) {
+    for (const n of [1, 2, 3]) {
       const resto = 1 - INICIAL;
       const pcs = [INICIAL, ...Array(n).fill(resto / n)];
+      if (Math.round(total * 100) < pcs.length) {
+        // No alcanza para un céntimo por pago. Imposible con los precios
+        // reales; lo que se exige es que falle en voz alta y no que produzca
+        // una cuota de $0.00 que reventaría el insert de la compra.
+        assert.throws(() => repartir(total, pcs), /demasiado bajo/);
+        continue;
+      }
       const partes = repartir(total, pcs);
       const suma = Math.round(partes.reduce((s, x) => s + x, 0) * 100) / 100;
       assert.equal(suma, Math.round(total * 100) / 100, `total ${total} en ${n + 1} pagos`);
@@ -87,6 +120,9 @@ test("barrido completo: ninguna cuota inválida en ninguna fecha ni monto", () =
   let sinPlan = 0;
   for (const hoy of DIAS) {
     for (const total of TOTALES) {
+      // Totales de céntimos: su fallo se verifica en la prueba de totales
+      // inválidos, no aquí, porque en las fechas sin plan ni se llega a repartir.
+      if (Math.round(total * 100) < MAX_PAGOS) continue;
       const plan = planPara(total, hoy);
       if (!plan.hayPlan) {
         sinPlan++;
@@ -100,7 +136,13 @@ test("barrido completo: ninguna cuota inválida en ninguna fecha ni monto", () =
       assert.equal(suma, Math.round(total * 100) / 100, `${hoy} · ${total}: las cuotas no suman el total`);
 
       // La inicial es el 40 % limpio: el residuo del redondeo va al final.
-      assert.equal(plan.inicial, Math.round(total * INICIAL * 100) / 100, `${hoy} · ${total}: inicial distinta del 40 %`);
+      // Por debajo de $1 deja de poder serlo: con 4 céntimos repartidos en 4
+      // pagos hay que quitarle un céntimo a la inicial para que ningún pago
+      // quede en cero, y un pago de $0.00 rompería el insert de la compra.
+      // Ningún precio real se acerca a eso; se exige donde tiene sentido.
+      if (Math.round(total * 100) >= 100) {
+        assert.equal(plan.inicial, Math.round(total * INICIAL * 100) / 100, `${hoy} · ${total}: inicial distinta del 40 %`);
+      }
       assert.equal(Math.round((plan.inicial + plan.saldo) * 100) / 100, Math.round(total * 100) / 100);
 
       // Ninguna cuota de monto cero o negativo: eso sería un cobro imposible.
@@ -125,7 +167,7 @@ test("barrido completo: ninguna cuota inválida en ninguna fecha ni monto", () =
       }
 
       // Nunca más pagos que fechas + inicial.
-      assert.ok(plan.cuotas.length >= 2 && plan.cuotas.length <= FECHAS_PAGO.length + 1);
+      assert.ok(plan.cuotas.length >= 2 && plan.cuotas.length <= MAX_PAGOS);
 
       // Una sola etiqueta "Pago final", y es la última.
       const finales = plan.cuotas.filter((c) => c.etiqueta === "Pago final");
@@ -145,15 +187,17 @@ test("los cortes del crédito deslizante caen donde se decidió", () => {
     const p = planPara(140, hoy);
     return p.hayPlan ? p.cuotas.length : 0;
   };
-  assert.equal(pagos("2026-10-12"), 3, "comprando hoy: tres pagos");
-  assert.equal(pagos("2026-11-11"), 3, "último día con tres pagos");
-  assert.equal(pagos("2026-11-12"), 2, "desde aquí el 16 ya no da margen");
+  assert.equal(pagos("2026-10-12"), 4, "comprando hoy: inicial + 3 cuotas");
+  assert.equal(pagos("2026-10-21"), 4, "último día con cuatro pagos");
+  assert.equal(pagos("2026-10-22"), 3, "la segunda intermedia ya no cabe antes del tope");
+  assert.equal(pagos("2026-11-04"), 3, "último día con tres pagos");
+  assert.equal(pagos("2026-11-05"), 2, "desde aquí solo queda el pago del 25");
   assert.equal(pagos("2026-11-20"), 2, "último día con plan");
   assert.equal(pagos("2026-11-21"), 0, "desde aquí todo es de contado");
   assert.equal(pagos("2026-12-04"), 0, "el día del evento no hay plan");
 
   // El corte no puede moverse en silencio: es la fecha del último cartel.
-  assert.equal(fechasVigentes("2026-11-20").length, 1);
+  assert.equal(fechasDelPlan("2026-11-20").length, 1);
   assert.equal(hayCuotasDisponibles("2026-11-20"), true);
   assert.equal(hayCuotasDisponibles("2026-11-21"), false);
 });
@@ -201,6 +245,8 @@ test("un total inválido falla ruidosamente en vez de cobrar mal", () => {
   // Menos de un céntimo por pago: imposible con los precios reales, pero una
   // cuota de $0.00 rompería el insert de la compra completa.
   assert.throws(() => repartir(0.02, [0.4, 0.3, 0.3]), /demasiado bajo/);
+  assert.throws(() => repartir(0.03, [0.4, 0.2, 0.2, 0.2]), /demasiado bajo/, "3 céntimos no caben en 4 pagos");
+  assert.throws(() => planPara(0.03, "2026-10-12"), /demasiado bajo/);
   for (const t of [0.03, 0.04, 0.05, 0.07, 0.11]) {
     const partes = repartir(t, [0.4, 0.3, 0.3]);
     assert.equal(Math.round(partes.reduce((s, x) => s + x, 0) * 100) / 100, t, `suma de ${t}`);
@@ -311,24 +357,32 @@ test("los totales de carrito mixto entre etapas también suman exacto", () => {
   }
   assert.ok(revisados > 1400, `solo se revisaron ${revisados} combinaciones`);
 
-  // Los 23 totales alcanzables que dejan residuo binario al sumar en crudo.
-  // Son inocuos porque todo el código redondea antes de comparar, pero quedan
-  // fijados aquí: la primera pantalla o reporte que compare sin redondear
-  // daría un plan como incompleto estando pagado.
-  const CON_RESIDUO = [126, 222, 228, 232, 238, 242, 252, 434, 436, 444, 446, 454, 456, 464, 466, 474, 476, 484, 486, 494, 496, 504, 506];
-  let conResiduo = 0;
-  for (const total of CON_RESIDUO) {
+  // Cuáles totales dejan residuo binario al sumar en crudo depende del
+  // reparto, y el reparto ya cambió una vez (40/30/30 → 40/20/20/20). Con una
+  // lista fija de totales esta prueba se vuelve mentira en silencio el día que
+  // vuelva a cambiar, así que se calculan sobre la marcha.
+  //
+  // El residuo en sí es inocuo porque todo el código redondea antes de
+  // comparar. Lo que se cuida es que siga siendo inocuo: el día que una
+  // pantalla o un reporte compare en crudo, un plan pagado al 100 % se vería
+  // como incompleto y el comprador no recibiría su QR.
+  const conResiduo: number[] = [];
+  for (const total of mixtos) {
+    if (total <= 0) continue;
     const p = planPara(total, "2026-10-12");
     assert.ok(p.hayPlan);
     const cruda = p.cuotas.reduce((s, c) => s + c.monto, 0);
-    if (cruda !== total) conResiduo++;
+    if (cruda !== total) conResiduo.push(total);
     assert.equal(Math.round(cruda * 100) / 100, total, `${total} tiene que cuadrar redondeado`);
   }
-  assert.ok(conResiduo > 0, "si ninguno deja residuo, esta lista dejó de ser representativa");
+  assert.ok(
+    conResiduo.length <= mixtos.size / 10,
+    `${conResiduo.length} de ${mixtos.size} totales dejan residuo: el reparto está perdiendo precisión`
+  );
 });
 
 test("el plazo de gracia nunca se calcula distinto en dos sitios", () => {
-  for (const f of FECHAS_PAGO) {
+  for (const f of ["2026-10-26", "2026-11-09", TOPE_FINAL]) {
     assert.equal(diasEntre(f, graciaHasta(f)), DIAS_GRACIA);
     assert.equal(diasEntre(graciaHasta(f), liberaEl(f)), 1);
   }
@@ -340,21 +394,25 @@ test("cada cuota tiene su propio plazo: no se espera a la fecha final", () => {
   // dejaría la silla muerta nueve días con alguien que ya dejó de pagar.
   const p = planPara(140, "2026-10-12");
   assert.ok(p.hayPlan);
-  assert.equal(p.cuotas.length, 3);
+  assert.equal(p.cuotas.length, 4);
 
-  const [, cuota01, final] = p.cuotas;
+  const [inicial, cuota01, cuota02, final] = p.cuotas;
 
-  assert.equal(cuota01.venceEl, "2026-11-16");
-  assert.equal(cuota01.graciaHasta, "2026-11-18", "dos días de plazo desde su propia fecha");
-  assert.equal(cuota01.liberaEl, "2026-11-19", "y se anula al día siguiente, no en diciembre");
-  assert.equal(fechaLarga(cuota01.graciaHasta), "miércoles 18 de noviembre", "el plazo cae en días de banco");
+  assert.equal(inicial.monto, 56, "40 % limpio");
+  assert.deepEqual([cuota01.monto, cuota02.monto, final.monto], [28, 28, 28], "el 60 % en tres partes iguales");
 
-  assert.equal(final.venceEl, "2026-11-25");
+  assert.equal(cuota01.venceEl, "2026-10-26", "la quincena de fin de octubre sí se cobra");
+  assert.equal(cuota01.graciaHasta, "2026-10-28", "dos días de plazo desde su propia fecha");
+  assert.equal(cuota01.liberaEl, "2026-10-29", "y se anula al día siguiente, no en diciembre");
+
+  assert.equal(cuota02.venceEl, "2026-11-09");
+  assert.equal(final.venceEl, TOPE_FINAL);
   assert.equal(final.graciaHasta, "2026-11-27");
   assert.equal(final.liberaEl, "2026-11-28");
 
-  // Nueve días de diferencia: eso es lo que se gana liberando por cuota.
-  assert.equal(diasEntre(cuota01.liberaEl, final.liberaEl), 9);
+  // Un mes de diferencia: eso es lo que se gana liberando por cuota en vez de
+  // esperar al final. Con el calendario viejo eran nueve días.
+  assert.equal(diasEntre(cuota01.liberaEl, final.liberaEl), 30);
 
   // Y cada cuota libera después de su propio vencimiento, nunca antes.
   for (const c of p.cuotas) {
