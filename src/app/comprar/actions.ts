@@ -11,6 +11,18 @@ import { cotizarCompra, MAX_POR_COMPRA, type CotizacionCompra, type Disponibilid
 import { METODOS_PAGO_ACTIVOS, metodoEsEnBs, normalizarReferencia, validarReferencia, validarTelefono } from "@/lib/pagos";
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
 import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
+import { crearPlan, planOfrecible } from "@/lib/abona618";
+import { planPara, type Plan, type SinPlan } from "@/lib/cuotas";
+
+// El plan que se le registra a alguien que YA pagó su inicial, cuando el que
+// se le ofreció dejó de estar disponible mientras iba al banco. Sin tope y sin
+// el margen mínimo: lo único que hace falta es que quede alguna fecha por
+// delante donde cobrarle el resto. Si no queda ninguna (después del 25 de
+// noviembre), devuelve null y la compra se atiende a mano.
+function planParaHonrar(total: number): Plan | null {
+  const p = planPara(total, undefined, { ignorarMargen: true });
+  return p.hayPlan ? p : null;
+}
 
 // 15 minutos (antes 10): una transferencia bancaria en Venezuela desde la app
 // del banco, con la clave especial, la verificación y la referencia, se toma
@@ -41,6 +53,11 @@ export type IniciarCheckoutResult =
       // Lo que el comprador tiene que pagar si paga en Bs, ya calculado y
       // redondeado — es el mismo número que se guarda en el ticket.
       totalBs: number | null;
+      // Abona618: el plan que se le puede ofrecer a ESTA compra en ESTE
+      // momento, o el motivo por el que no. Con el módulo apagado siempre
+      // viene { hayPlan: false, motivo: "apagado" } y la pantalla no muestra
+      // nada: es el estado en el que se sube a producción.
+      plan: Plan | SinPlan;
     }
   | { ok: false; error: string };
 
@@ -111,7 +128,14 @@ export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarChe
   const tasaEurVes = await obtenerTasaActual(service);
   const totalBs = tasaEurVes ? convertirABs(cotizacion.total, tasaEurVes) : null;
 
-  return { ok: true, tipo: v.tipo, sillaIds, cantidad, expiraEn, cotizacion, disponibilidad, tasaEurVes, totalBs };
+  const { plan } = await planOfrecible(service, {
+    tipo: v.tipo,
+    cantidad,
+    total: cotizacion.total,
+    canal: "web",
+  });
+
+  return { ok: true, tipo: v.tipo, sillaIds, cantidad, expiraEn, cotizacion, disponibilidad, tasaEurVes, totalBs, plan };
 }
 
 const confirmarSchema = z.object({
@@ -141,6 +165,11 @@ const confirmarSchema = z.object({
   // Campo invisible anti-bots. Se valida a mano más abajo (si fuera max(0) en
   // el schema, el bot recibiría un error de validación en vez del éxito falso).
   honeypot: z.string().optional(),
+  // Abona618. Las dos van juntas: no se crea un plan sin la casilla marcada,
+  // porque el correo de anulación cita la fecha y la hora en que se aceptaron
+  // las condiciones y eso tiene que ser verdad.
+  enCuotas: z.coerce.boolean().optional(),
+  aceptoCondiciones: z.coerce.boolean().optional(),
 });
 
 export type ConfirmarCheckoutResult =
@@ -189,6 +218,13 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   const metodo = METODOS_PAGO_ACTIVOS.find((m) => m.valor === v.metodoPago && m.canales.includes("web"));
   if (!metodo) {
     return { ok: false, error: "Ese método de pago no está disponible para compra en línea — elige otro." };
+  }
+
+  if (v.enCuotas && !v.aceptoCondiciones) {
+    return {
+      ok: false,
+      error: "Para pagar en cuotas tienes que marcar la casilla de condiciones del plan. Márcala y vuelve a enviar: tu pago sigue siendo válido.",
+    };
   }
 
   const service = createServiceClient();
@@ -333,12 +369,78 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     return { ok: false, error: "No se pudo registrar tu compra — intenta de nuevo." };
   }
 
+  // Abona618: el plan se arma con el total que acabó de cotizar el servidor,
+  // no con el que vio el cliente, y con las fechas de hoy.
+  //
+  // Se vuelve a consultar si el plan es ofrecible porque entre que el
+  // comprador vio la pantalla y volvió con la referencia pasaron hasta 15
+  // minutos. Pero si para entonces el tope de VIP se llenó, el plan se HONRA
+  // igual: el comprador ya transfirió el 40 % confiando en lo que le
+  // mostramos, y un cupo de sobregiro cuesta muchísimo menos que cobrarle a
+  // alguien y no darle lo prometido. El tope es un control nuestro, no una
+  // promesa que él rompió. Queda en el log para que se vea.
+  let planCreado: { inicialUsd: number; inicialBs: number | null; pagosRestantes: number } | undefined;
+  let avisoPlan: string | undefined;
+
+  if (v.enCuotas) {
+    const { plan: planAhora, config, vipEnPlan } = await planOfrecible(service, {
+      tipo: v.tipo,
+      cantidad,
+      total: cotizacion.total,
+      canal: "web",
+    });
+
+    if (!planAhora.hayPlan && planAhora.motivo === "tope_vip") {
+      console.warn(
+        `Abona618: plan honrado por encima del tope — grupo ${grupoId}, ${cantidad} VIP, ` +
+          `había ${vipEnPlan} de ${config.topeVip}. El comprador ya había pagado la inicial.`
+      );
+    }
+
+    // Se recalcula sin el tope para obtener los montos: la decisión de honrar
+    // ya está tomada arriba.
+    const planFinal = planAhora.hayPlan
+      ? planAhora
+      : planParaHonrar(cotizacion.total);
+
+    if (planFinal) {
+      const inicialBs = enBs && tasa ? convertirABs(planFinal.inicial, tasa) : null;
+      const creado = await crearPlan(service, {
+        grupoId,
+        total: cotizacion.total,
+        tipo: v.tipo,
+        cantidad,
+        cuotas: planFinal.cuotas,
+        canal: "web",
+        metodoPago: v.metodoPago,
+        referenciaPago: v.referenciaPago,
+        montoBsInicial: inicialBs,
+        tasaAplicada: enBs && tasa ? tasa : null,
+      });
+
+      if (creado.ok) {
+        planCreado = {
+          inicialUsd: planFinal.inicial,
+          inicialBs,
+          pagosRestantes: planFinal.cuotas.length - 1,
+        };
+      } else {
+        // Los tickets YA están creados: no se borran, el comprador pagó. Pero
+        // su plan no quedó registrado, así que el correo sale como compra
+        // normal y se le pide escribir para arreglarlo a mano.
+        console.error(`Abona618: tickets creados sin plan — grupo ${grupoId}. REVISAR A MANO.`);
+        avisoPlan =
+          "Tu pago quedó registrado, pero hubo un problema guardando tu plan de cuotas. Escríbenos por WhatsApp con tu código de compra para que lo arreglemos hoy mismo.";
+      }
+    }
+  }
+
   revalidatePath("/comprar");
   revalidatePath("/finanzas");
   revalidatePath("/ventas");
   revalidatePath("/dashboard");
 
-  let avisoEmail: string | undefined;
+  let avisoEmail: string | undefined = avisoPlan;
   try {
     await enviarCorreoPendiente({
       destinatario: v.compradorEmail,
@@ -351,6 +453,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       totalBs,
       referencia: v.referenciaPago,
       grupoId,
+      plan: planCreado,
     });
   } catch (e) {
     console.error("Error enviando correo de compra recibida:", (e as Error).message);

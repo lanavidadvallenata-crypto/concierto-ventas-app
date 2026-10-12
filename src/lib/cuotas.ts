@@ -149,9 +149,18 @@ export type SinPlan = {
   motivo: "apagado" | "sin_margen" | "taquilla" | "tope_vip";
 };
 
-/** Las fechas fijas que todavía dan margen suficiente desde `hoy`. */
-export function fechasVigentes(hoy: string): string[] {
-  return FECHAS_PAGO.filter((f) => diasEntre(hoy, f) >= MARGEN_MIN_DIAS);
+/**
+ * Las fechas fijas que todavía dan margen suficiente desde `hoy`.
+ *
+ * Con `ignorarMargen` basta que la fecha no haya pasado. Eso NO se usa para
+ * ofrecer el plan: se usa para honrar uno que ya se ofreció y se pagó, cuando
+ * la compra cruzó la medianoche del día del corte y el comprador ya transfirió
+ * su inicial. Mejor cobrarle lo que falta con poco margen que quedarse con su
+ * dinero sin un calendario donde reclamarlo.
+ */
+export function fechasVigentes(hoy: string, ignorarMargen = false): string[] {
+  const minimo = ignorarMargen ? 1 : MARGEN_MIN_DIAS;
+  return FECHAS_PAGO.filter((f) => diasEntre(hoy, f) >= minimo);
 }
 
 /** ¿Se puede ofrecer el plan en esta fecha? (sin contar tope VIP ni canal) */
@@ -176,9 +185,11 @@ export function planPara(
     /** El tope real sale de la base (abona618_config.tope_vip) para que se
      *  pueda subir sin desplegar; la constante es solo el valor inicial. */
     topeVip?: number;
+    /** Solo para honrar un plan ya pagado. Ver fechasVigentes. */
+    ignorarMargen?: boolean;
   } = {}
 ): Plan | SinPlan {
-  const { canal, tipo, vipEnPlan, cantidad = 1, topeVip = TOPE_VIP_EN_PLAN } = opciones;
+  const { canal, tipo, vipEnPlan, cantidad = 1, topeVip = TOPE_VIP_EN_PLAN, ignorarMargen = false } = opciones;
 
   // Taquilla el día del evento: el plan no aplica, se cobra completo.
   if (canal === "taquilla") return { hayPlan: false, motivo: "taquilla" };
@@ -187,7 +198,7 @@ export function planPara(
     return { hayPlan: false, motivo: "tope_vip" };
   }
 
-  const vigentes = fechasVigentes(hoy);
+  const vigentes = fechasVigentes(hoy, ignorarMargen);
   if (vigentes.length === 0) return { hayPlan: false, motivo: "sin_margen" };
 
   if (!(total > 0)) throw new Error(`Total inválido para un plan: ${total}`);

@@ -206,6 +206,31 @@ test("un total inválido falla ruidosamente en vez de cobrar mal", () => {
   }
 });
 
+test("honrar un plan ya pagado no usa el margen mínimo, pero sí necesita una fecha", () => {
+  // El caso real: compró a las 23:58 del 20 de noviembre con plan ofrecido, y
+  // volvió con la referencia a las 00:03 del 21, cuando el plan ya cerró.
+  assert.equal(planPara(140, "2026-11-21").hayPlan, false, "ofrecerlo: ya no");
+
+  const honrado = planPara(140, "2026-11-21", { ignorarMargen: true });
+  assert.ok(honrado.hayPlan, "honrarlo: sí, el comprador ya transfirió");
+  assert.equal(honrado.cuotas.length, 2);
+  assert.equal(honrado.cuotas[1].venceEl, "2026-11-25");
+  assert.equal(Math.round(honrado.cuotas.reduce((s, c) => s + c.monto, 0) * 100) / 100, 140);
+
+  // Un día antes del último vencimiento todavía se puede cobrar.
+  assert.equal(planPara(140, "2026-11-24", { ignorarMargen: true }).hayPlan, true);
+
+  // El día del vencimiento y después, no queda dónde cobrar: se atiende a
+  // mano, no se inventa una fecha.
+  assert.equal(planPara(140, "2026-11-25", { ignorarMargen: true }).hayPlan, false);
+  assert.equal(planPara(140, "2026-12-01", { ignorarMargen: true }).hayPlan, false);
+
+  // Y honrar no cambia el corte de lo que se OFRECE.
+  assert.equal(fechasVigentes("2026-11-21").length, 0);
+  assert.equal(fechasVigentes("2026-11-21", true).length, 1);
+  assert.equal(hayCuotasDisponibles("2026-11-21"), false);
+});
+
 test("el plazo de gracia nunca se calcula distinto en dos sitios", () => {
   for (const f of FECHAS_PAGO) {
     assert.equal(diasEntre(f, graciaHasta(f)), DIAS_GRACIA);
