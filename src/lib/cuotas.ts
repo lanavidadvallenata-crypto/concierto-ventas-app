@@ -287,3 +287,30 @@ export function resumenPlan(plan: Plan): string {
       (c.esInicial ? " — al comprar" : ` — hasta el ${fechaCorta(c.venceEl)}`))
     .join("\n");
 }
+
+// ---------------------------------------------------------------- condiciones
+
+/**
+ * Las condiciones que el comprador acepta con una casilla antes de pagar.
+ *
+ * Viven aquí y no en la pantalla porque las cita el correo de anulación —
+ * "según las condiciones que aceptaste el tal día a tal hora" — y porque la
+ * página de la compra las tiene que volver a mostrar tal cual. Una sola
+ * fuente: si cambian, cambian en los tres sitios a la vez.
+ *
+ * Al cambiarlas hay que subir CONDICIONES_VERSION. Cada plan guarda la
+ * versión que aceptó su comprador, así que a nadie se le reclama algo que no
+ * estaba cuando compró.
+ */
+export const CONDICIONES_VERSION = "v1";
+
+export const CONDICIONES: string[] = [
+  "Tu entrada queda apartada a tu nombre desde que verificamos tu pago inicial. El precio se te congela: no sube aunque suba la tarifa.",
+  "El QR de acceso te llega cuando completes el 100 % del pago. Antes de eso no tienes entrada válida para entrar al concierto.",
+  `Las fechas de pago son fijas e iguales para todo el mundo: ${FECHAS_PAGO.map((f) => fechaCorta(f)).join(" y ")} de 2026. No se cuentan desde el día de tu compra.`,
+  `Después de cada fecha límite tienes ${DIAS_GRACIA} días de plazo para pagar. Te avisamos por correo antes de cada fecha y durante el plazo.`,
+  "Si al terminar el plazo falta algo por pagar, anulamos la compra y la entrada se libera para volver a venderse. Lo que ya abonaste no se devuelve.",
+  "Puedes adelantar pagos o pagar el total cuando quieras, sin recargo.",
+  "El plan de cuotas no aplica en taquilla el día del evento. Ese día la entrada se paga completa.",
+  "Los cupos en cuotas de la zona VIP son limitados. Cuando se agotan, VIP se vende solo de contado.",
+];

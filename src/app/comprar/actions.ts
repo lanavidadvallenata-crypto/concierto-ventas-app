@@ -12,8 +12,7 @@ import { METODOS_PAGO_ACTIVOS, metodoEsEnBs, normalizarReferencia, validarRefere
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
 import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
 import { crearPlan, planOfrecible } from "@/lib/abona618";
-import { planPara } from "@/lib/cuotas";
-import { type Plan, type SinPlan } from "@/lib/cuotas";
+import { CONDICIONES_VERSION, planPara, type Plan, type SinPlan } from "@/lib/cuotas";
 
 // 15 minutos (antes 10): una transferencia bancaria en Venezuela desde la app
 // del banco, con la clave especial, la verificación y la referencia, se toma
@@ -439,6 +438,9 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
         cantidad,
         cuotas: planFinal.cuotas,
         canal: "web",
+        // Se guarda la versión de condiciones que el comprador vio: si
+        // cambian después, a él se le reclama lo que aceptó, no lo otro.
+        condicionesVersion: CONDICIONES_VERSION,
         metodoPago: v.metodoPago,
         referenciaPago: v.referenciaPago,
         montoBsInicial: inicialBs,

@@ -15,6 +15,8 @@ import {
   type MetodoPago,
 } from "@/lib/pagos";
 import { iniciarCheckoutPublico, confirmarCheckoutPublico, liberarHoldPublico } from "./actions";
+import { type Plan, type SinPlan } from "@/lib/cuotas";
+import PlanDePago from "./PlanDePago";
 import BotonSoporte from "@/components/BotonSoporte";
 import { sugerirCorreo } from "@/lib/correo";
 import { TEXTO_HORARIO, avisoFueraDeHorario } from "@/lib/horario";
@@ -63,6 +65,12 @@ export default function CheckoutForm({
   const [codigoCompra, setCodigoCompra] = useState<string | null>(null);
   // Duración total del apartado (para la barra del contador).
   const [duracionPago, setDuracionPago] = useState(900);
+  // Abona618. `plan` viene del servidor al iniciar el checkout: con el módulo
+  // apagado llega { hayPlan: false, motivo: "apagado" } y nada de esto se
+  // pinta, que es el estado en el que esto entra a producción.
+  const [plan, setPlan] = useState<Plan | SinPlan | null>(null);
+  const [enCuotas, setEnCuotas] = useState(false);
+  const [aceptoCondiciones, setAceptoCondiciones] = useState(false);
   // Al cambiar de paso, la pantalla sube al inicio del formulario: si no, la
   // persona queda a media página y no ve el contador ni los avisos.
   const raiz = useRef<HTMLDivElement>(null);
@@ -135,6 +143,11 @@ export default function CheckoutForm({
     setDuracionPago(Math.max(60, Math.round((new Date(res.expiraEn).getTime() - Date.now()) / 1000)));
     setCotizacion(res.cotizacion);
     setTasaCompra(res.tasaEurVes);
+    setPlan(res.plan);
+    // Cada vez que se entra al pago se empieza de cero: si vuelve atrás y
+    // cambia la cantidad, no se arrastra ni la elección ni la aceptación.
+    setEnCuotas(false);
+    setAceptoCondiciones(false);
     setFase("pago");
   }
 
@@ -147,6 +160,10 @@ export default function CheckoutForm({
     }
     if (!email.trim()) {
       setError("Revisa tu correo: es donde te llegan tus QR.");
+      return;
+    }
+    if (enCuotas && !aceptoCondiciones) {
+      setError("Marca la casilla de las condiciones del plan de pago para continuar.");
       return;
     }
     const errorTelefono = validarTelefono(telefono);
@@ -167,6 +184,8 @@ export default function CheckoutForm({
       metodoPago,
       referenciaPago: referencia,
       honeypot,
+      enCuotas,
+      aceptoCondiciones,
     });
     setCargando(false);
     setTardando(false);
@@ -191,6 +210,9 @@ export default function CheckoutForm({
     setSillas([]);
     setExpiraEn(null);
     setCotizacion(null);
+    setPlan(null);
+    setEnCuotas(false);
+    setAceptoCondiciones(false);
     setError(null);
     setFase("seleccion");
   }
@@ -280,7 +302,13 @@ export default function CheckoutForm({
     const fraccion = Math.max(0, Math.min(1, segundosRestantes / duracionPago));
     const urgencia = segundosRestantes <= 120 ? "critico" : segundosRestantes <= 300 ? "aviso" : "normal";
     const enBolivares = metodo.moneda === "VES";
-    const montoBs = enBolivares && tasaCompra ? convertirABs(cotizacion.total, tasaCompra) : null;
+    const hayPlan = plan?.hayPlan === true;
+    const planActivo = hayPlan && enCuotas ? (plan as Plan) : null;
+    // Lo que tiene que transferir AHORA. Si eligió cuotas es la inicial, y de
+    // ahí sale también el monto en bolívares: si se le mostrara el total, se
+    // equivocaría de monto y Finanzas no encontraría su pago.
+    const aPagarHoy = planActivo ? planActivo.inicial : cotizacion.total;
+    const montoBs = enBolivares && tasaCompra ? convertirABs(aPagarHoy, tasaCompra) : null;
     return (
       <div ref={raiz} className="scroll-mt-4 bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
         {/* Contador: fijo arriba mientras la persona baja a ver los datos de pago. */}
@@ -351,16 +379,36 @@ export default function CheckoutForm({
             </>
           )}
           <div className="flex items-center justify-between text-base font-bold text-neutral-900 pt-1 border-t border-neutral-200 mt-0.5">
-            <span>Total a pagar</span>
+            <span>{planActivo ? "Total de tu compra" : "Total a pagar"}</span>
             <span>${cotizacion.total.toFixed(2)}</span>
           </div>
+          {planActivo && (
+            <div className="flex items-center justify-between text-base font-bold text-marca-secundario">
+              <span>Pagas hoy</span>
+              <span>${planActivo.inicial.toFixed(2)}</span>
+            </div>
+          )}
         </div>
+
+        {hayPlan && !expirado && (
+          <PlanDePago
+            plan={plan as Plan}
+            total={cotizacion.total}
+            enCuotas={enCuotas}
+            onElegir={setEnCuotas}
+            acepto={aceptoCondiciones}
+            onAceptar={setAceptoCondiciones}
+          />
+        )}
+
         {enBolivares && (
           <p className="text-sm text-neutral-700 -mt-2">
             {montoBs !== null ? (
               <>
                 Paga exactamente <strong>Bs {montoBs.toLocaleString("es-VE", { minimumFractionDigits: 2 })}</strong>{" "}
-                <span className="text-neutral-500">(tasa BCV euro de hoy)</span>
+                <span className="text-neutral-500">
+                  {planActivo ? `(tu pago inicial de $${planActivo.inicial.toFixed(2)}, tasa BCV euro de hoy)` : "(tasa BCV euro de hoy)"}
+                </span>
               </>
             ) : (
               "Tasa del día no disponible todavía — confirma el monto en bolívares por WhatsApp antes de pagar."
@@ -466,7 +514,7 @@ export default function CheckoutForm({
             onClick={confirmarPago}
             className="bg-marca-secundario text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
           >
-            {cargando ? "Confirmando…" : "Ya pagué — confirmar"}
+            {cargando ? "Confirmando…" : planActivo ? "Ya pagué mi inicial — confirmar" : "Ya pagué — confirmar"}
           </button>
         )}
         <BotonSoporte mensaje={`Hola, estoy comprando entradas para La Navidad Vallenata a nombre de ${nombre || "(mi nombre)"} y tengo una duda con el pago: `} />
