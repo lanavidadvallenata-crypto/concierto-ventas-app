@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  fechaCorta,
   FECHAS_PAGO,
   INICIAL,
   MARGEN_MIN_DIAS,
@@ -206,29 +207,123 @@ test("un total inválido falla ruidosamente en vez de cobrar mal", () => {
   }
 });
 
-test("honrar un plan ya pagado no usa el margen mínimo, pero sí necesita una fecha", () => {
-  // El caso real: compró a las 23:58 del 20 de noviembre con plan ofrecido, y
-  // volvió con la referencia a las 00:03 del 21, cuando el plan ya cerró.
-  assert.equal(planPara(140, "2026-11-21").hayPlan, false, "ofrecerlo: ya no");
+test("honrar un plan por el tope salta SOLO el tope, nunca el calendario", () => {
+  // Esto empezó siendo `ignorarMargen`, y estaba mal: del 12 al 15 de
+  // noviembre resucitaba la fecha del 16 que el margen mínimo ya había
+  // descartado, así que al comprador se le ofrecían 2 pagos y se le guardaban
+  // 3, con una cuota que vencía en tres días y que nunca había visto.
+  for (const hoy of ["2026-10-12", "2026-11-12", "2026-11-13", "2026-11-15", "2026-11-20"]) {
+    const ofrecido = planPara(140, hoy, { tipo: "vip", vipEnPlan: 0, cantidad: 1 });
+    const honrado = planPara(140, hoy, { tipo: "vip", vipEnPlan: 999, cantidad: 1, ignorarTope: true });
+    assert.ok(ofrecido.hayPlan && honrado.hayPlan, hoy);
+    assert.deepEqual(
+      honrado.cuotas.map((c) => [c.etiqueta, c.monto, c.venceEl]),
+      ofrecido.cuotas.map((c) => [c.etiqueta, c.monto, c.venceEl]),
+      `${hoy}: lo que se guarda tiene que ser idéntico a lo que se ofreció`
+    );
+  }
 
-  const honrado = planPara(140, "2026-11-21", { ignorarMargen: true });
-  assert.ok(honrado.hayPlan, "honrarlo: sí, el comprador ya transfirió");
-  assert.equal(honrado.cuotas.length, 2);
-  assert.equal(honrado.cuotas[1].venceEl, "2026-11-25");
-  assert.equal(Math.round(honrado.cuotas.reduce((s, c) => s + c.monto, 0) * 100) / 100, 140);
+  // Y honrar el tope no abre el calendario: pasado el corte no hay plan, ni
+  // siquiera para quien ya pagó. Ese caso se atiende a mano.
+  const tarde = planPara(140, "2026-11-21", { tipo: "vip", vipEnPlan: 999, cantidad: 1, ignorarTope: true });
+  assert.equal(tarde.hayPlan, false);
+  assert.equal(tarde.hayPlan === false && tarde.motivo, "sin_margen");
 
-  // Un día antes del último vencimiento todavía se puede cobrar.
-  assert.equal(planPara(140, "2026-11-24", { ignorarMargen: true }).hayPlan, true);
+  // El tope sí se salta, que es para lo único que sirve la opción.
+  const lleno = planPara(140, "2026-10-12", { tipo: "vip", vipEnPlan: 100, cantidad: 1 });
+  assert.equal(lleno.hayPlan, false);
+  assert.equal(planPara(140, "2026-10-12", { tipo: "vip", vipEnPlan: 100, cantidad: 1, ignorarTope: true }).hayPlan, true);
+});
 
-  // El día del vencimiento y después, no queda dónde cobrar: se atiende a
-  // mano, no se inventa una fecha.
-  assert.equal(planPara(140, "2026-11-25", { ignorarMargen: true }).hayPlan, false);
-  assert.equal(planPara(140, "2026-12-01", { ignorarMargen: true }).hayPlan, false);
+test("una fecha malformada falla ruidosamente en vez de apuntar a otro día", () => {
+  // "26-11-16" daba una cuota con 36.490 días de atraso (año 26, no 2026), y
+  // "2026-02-30" se convertía en silencio en el 3 de marzo.
+  const malas = [
+    "26-11-16", "2026-2-3", "2026-11-31", "2026-02-30", "2026-13-01", "2026-00-10",
+    "2026-11-00", "2026-11-25-01", " 2026-11-25", "2026-11-25 ", "2026-11-25T00:00:00Z",
+    "2026-0x0B-25", "2026-11-1e1", "basura", "", "2026/11/25",
+  ];
+  for (const m of malas) {
+    assert.throws(() => diasEntre("2026-10-12", m), /Fecha (inválida|inexistente)/, `debería rechazar "${m}"`);
+    assert.throws(() => sumarDias(m, 1), /Fecha (inválida|inexistente)/, `debería rechazar "${m}"`);
+    assert.throws(() => fechaCorta(m), /Fecha (inválida|inexistente)/, `fechaCorta("${m}") decía "undefined de undefined"`);
+  }
+  // Las buenas siguen pasando, incluido el 29 de febrero de un año bisiesto.
+  for (const b of ["2026-11-16", "2026-11-25", "2024-02-29", "2026-01-01", "2026-12-31"]) {
+    assert.equal(sumarDias(b, 0), b);
+  }
+});
 
-  // Y honrar no cambia el corte de lo que se OFRECE.
-  assert.equal(fechasVigentes("2026-11-21").length, 0);
-  assert.equal(fechasVigentes("2026-11-21", true).length, 1);
-  assert.equal(hayCuotasDisponibles("2026-11-21"), false);
+test("repartir rechaza lo que podría colgar el proceso o perder plata", () => {
+  // Con porcentajes que no suman 1 el ajuste del residuo iteraba una vez por
+  // céntimo de déficit: repartir(1e9, [1,1,1]) no retornaba nunca. Esta
+  // función está exportada y corre dentro de server actions.
+  assert.throws(() => repartir(4200, [1, 1, 1]), /tienen que sumar 1/);
+  assert.throws(() => repartir(140, [0.4, 0.3]), /tienen que sumar 1/);
+  assert.throws(() => repartir(140, []), /perdería el total/);
+  assert.throws(() => repartir(140, [0.4, NaN, 0.6]), /sumar 1|no finito/);
+  assert.throws(() => repartir(NaN, [0.4, 0.3, 0.3]), /no finito/);
+  assert.throws(() => repartir(Infinity, [0.4, 0.3, 0.3]), /no finito/);
+
+  // Y que no tarde: 1e9 con porcentajes válidos tiene que ser instantáneo.
+  const t = Date.now();
+  repartir(1e9, [0.4, 0.3, 0.3]);
+  assert.ok(Date.now() - t < 200, "el reparto no puede depender del tamaño del total");
+});
+
+test("un total no finito no produce un plan con montos NaN", () => {
+  assert.throws(() => planPara(Infinity, "2026-10-12"), /Total inválido/);
+  assert.throws(() => planPara(-Infinity, "2026-10-12"), /Total inválido/);
+  assert.throws(() => planPara(NaN, "2026-10-12"), /Total inválido/);
+});
+
+test("los totales de carrito mixto entre etapas también suman exacto", () => {
+  // El barrido de arriba genera precio × cantidad, y así no produce los
+  // totales de una compra que cruza la preventa y el precio regular — que son
+  // justo los que dejan residuo binario. 242 = 11 generales a caballo entre
+  // $22 y $30 daba 241.99999999999997 al sumar en crudo.
+  const UNITARIOS = [20, 22, 30, 100, 110, 140];
+  const mixtos = new Set<number>();
+  for (const a of UNITARIOS) {
+    for (const b of UNITARIOS) {
+      for (let n = 1; n <= 20; n++) {
+        for (let k = 0; k <= n; k++) mixtos.add(Math.round((a * k + b * (n - k)) * 100) / 100);
+      }
+    }
+  }
+  let revisados = 0;
+  for (const total of mixtos) {
+    if (total <= 0) continue;
+    for (const hoy of ["2026-10-12", "2026-11-12"]) {
+      const p = planPara(total, hoy);
+      assert.ok(p.hayPlan);
+      // Suma CRUDA, sin redondear antes de comparar: así se detecta el residuo
+      // binario que la primera versión de esta prueba escondía.
+      const cruda = p.cuotas.reduce((s, c) => s + c.monto, 0);
+      assert.ok(
+        Math.abs(cruda - total) < 0.005,
+        `${total} en ${p.cuotas.length} pagos suma ${cruda}`
+      );
+      assert.equal(Math.round(cruda * 100) / 100, total, `${total} redondeado`);
+      revisados++;
+    }
+  }
+  assert.ok(revisados > 1400, `solo se revisaron ${revisados} combinaciones`);
+
+  // Los 23 totales alcanzables que dejan residuo binario al sumar en crudo.
+  // Son inocuos porque todo el código redondea antes de comparar, pero quedan
+  // fijados aquí: la primera pantalla o reporte que compare sin redondear
+  // daría un plan como incompleto estando pagado.
+  const CON_RESIDUO = [126, 222, 228, 232, 238, 242, 252, 434, 436, 444, 446, 454, 456, 464, 466, 474, 476, 484, 486, 494, 496, 504, 506];
+  let conResiduo = 0;
+  for (const total of CON_RESIDUO) {
+    const p = planPara(total, "2026-10-12");
+    assert.ok(p.hayPlan);
+    const cruda = p.cuotas.reduce((s, c) => s + c.monto, 0);
+    if (cruda !== total) conResiduo++;
+    assert.equal(Math.round(cruda * 100) / 100, total, `${total} tiene que cuadrar redondeado`);
+  }
+  assert.ok(conResiduo > 0, "si ninguno deja residuo, esta lista dejó de ser representativa");
 });
 
 test("el plazo de gracia nunca se calcula distinto en dos sitios", () => {

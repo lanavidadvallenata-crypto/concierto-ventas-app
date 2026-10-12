@@ -6,12 +6,22 @@
 // de condición de carrera (los UPDATE condicionados a "sigue sin verificar").
 
 type Fila = Record<string, unknown>;
-type Filtro = { col: string; op: "eq" | "is" | "in"; valor: unknown };
+type Filtro = { col: string; op: "eq" | "neq" | "is" | "in"; valor: unknown };
 
 export type Doble = {
   tablas: Record<string, Fila[]>;
-  /** Para forzar un fallo y probar el camino de error. */
+  /** Para forzar un fallo ANTES de aplicar la operación. */
   fallar: Record<string, string>;
+  /** Para forzar un fallo DESPUÉS de aplicarla, que es la forma en que falla
+   *  de verdad un timeout: el UPDATE se escribió y la respuesta no llegó. Sin
+   *  esto era imposible escribir la prueba del único fallo parcial que el
+   *  código tiene. La clave es "<tabla>:<accion>", p. ej. "planes_pago:select". */
+  fallarDespues: Record<string, string>;
+  /** Claves únicas por tabla, como en Postgres: el insert duplicado devuelve
+   *  el código 23505 en vez de crear una segunda fila en silencio. */
+  unicos: Record<string, string[]>;
+  /** Defaults de columna, que Postgres aplica y el doble antes no. */
+  defaults: Record<string, Fila>;
   llamadas: string[];
   cliente: unknown;
 };
@@ -23,13 +33,27 @@ function aplica(fila: Fila, filtros: Filtro[]): boolean {
   return filtros.every((f) => {
     const v = fila[f.col];
     if (f.op === "eq") return String(v) === String(f.valor);
+    if (f.op === "neq") return String(v) !== String(f.valor);
     if (f.op === "is") return f.valor === null ? v == null : v === f.valor;
     return Array.isArray(f.valor) && f.valor.map(String).includes(String(v));
   });
 }
 
 export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
-  const d: Doble = { tablas: { ...datos }, fallar: {}, llamadas: [], cliente: null };
+  const d: Doble = {
+    tablas: { ...datos },
+    fallar: {},
+    fallarDespues: {},
+    // Lo que declara el SQL de Abona618.
+    unicos: { planes_pago: ["grupo_id"], abona618_config: ["id"] },
+    defaults: {
+      planes_pago: { estado: "al_dia", acepto_condiciones_en: "2026-10-12T12:00:00Z", condiciones_version: "v1" },
+      cuotas: { avisos_enviados: 0 },
+      abona618_config: { activo: false, tope_vip: 100, aviso_tope_vip: 90, aviso_tope_enviado_en: null },
+    },
+    llamadas: [],
+    cliente: null,
+  };
 
   const consulta = (tabla: string) => {
     const filtros: Filtro[] = [];
@@ -40,11 +64,28 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
 
     const filas = () => (d.tablas[tabla] ??= []);
 
+    let choque: { message: string; code: string } | null = null;
+
     function correr() {
       if (yaCorrio) return;
       yaCorrio = true;
       if (accion === "insert") {
-        const nuevas = carga.map((f) => ({ id: nuevoId(), ...f }));
+        const claves = d.unicos[tabla] ?? [];
+        const porDefecto = d.defaults[tabla] ?? {};
+        const nuevas: Fila[] = [];
+        for (const f of carga) {
+          const nueva = { id: nuevoId(), ...porDefecto, ...f };
+          const repetida =
+            claves.length > 0 &&
+            filas().some((x) => claves.every((c) => f[c] !== undefined && String(x[c]) === String(f[c])));
+          if (repetida) {
+            // Postgres: unique_violation. El código lo mira quien llama.
+            choque = { message: `duplicate key value violates unique constraint on ${tabla}`, code: "23505" };
+            afectadas = [];
+            return;
+          }
+          nuevas.push(nueva);
+        }
         filas().push(...nuevas);
         afectadas = nuevas;
       } else if (accion === "update") {
@@ -58,7 +99,12 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
       }
     }
 
-    const error = () => (d.fallar[tabla] ? { message: d.fallar[tabla] } : null);
+    const error = () => (d.fallar[tabla] ? { message: d.fallar[tabla], code: "XXXXX" } : null);
+    // Falla después de aplicar: el escenario del timeout real.
+    const errorDespues = () => {
+      const m = d.fallarDespues[`${tabla}:${accion}`];
+      return m ? { message: m, code: "57014" } : null;
+    };
 
     const api: Record<string, unknown> = {
       select: (_cols?: string) => {
@@ -83,27 +129,50 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
         return api;
       },
       eq: (col: string, valor: unknown) => (filtros.push({ col, op: "eq", valor }), api),
+      neq: (col: string, valor: unknown) => (filtros.push({ col, op: "neq", valor }), api),
       is: (col: string, valor: unknown) => (filtros.push({ col, op: "is", valor }), api),
       in: (col: string, valor: unknown) => (filtros.push({ col, op: "in", valor }), api),
       maybeSingle: () => {
         const e = error();
         if (e) return Promise.resolve({ data: null, error: e });
         correr();
+        if (choque) return Promise.resolve({ data: null, error: choque });
+        const ed = errorDespues();
+        if (ed) return Promise.resolve({ data: null, error: ed });
+        // Como supabase-js: más de una fila es PGRST116, no "la primera".
+        if (afectadas.length > 1) {
+          return Promise.resolve({
+            data: null,
+            error: { message: "JSON object requested, multiple (or no) rows returned", code: "PGRST116" },
+          });
+        }
         return Promise.resolve({ data: afectadas[0] ?? null, error: null });
       },
       single: () => {
         const e = error();
         if (e) return Promise.resolve({ data: null, error: e });
         correr();
+        if (choque) return Promise.resolve({ data: null, error: choque });
+        const ed = errorDespues();
+        if (ed) return Promise.resolve({ data: null, error: ed });
+        if (afectadas.length > 1) {
+          return Promise.resolve({
+            data: null,
+            error: { message: "JSON object requested, multiple (or no) rows returned", code: "PGRST116" },
+          });
+        }
         return Promise.resolve(
-          afectadas[0] ? { data: afectadas[0], error: null } : { data: null, error: { message: "no rows" } }
+          afectadas[0] ? { data: afectadas[0], error: null } : { data: null, error: { message: "no rows", code: "PGRST116" } }
         );
       },
       // Un await directo sobre la consulta (sin maybeSingle/single).
-      then: (res: (v: { data: Fila[] | null; error: { message: string } | null }) => unknown) => {
+      then: (res: (v: { data: Fila[] | null; error: { message: string; code?: string } | null }) => unknown) => {
         const e = error();
         if (e) return Promise.resolve(res({ data: null, error: e }));
         correr();
+        if (choque) return Promise.resolve(res({ data: null, error: choque }));
+        const ed = errorDespues();
+        if (ed) return Promise.resolve(res({ data: null, error: ed }));
         return Promise.resolve(res({ data: afectadas, error: null }));
       },
     };
@@ -116,4 +185,8 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
 
 export const CONFIG_ENCENDIDA = [
   { id: 1, activo: true, tope_vip: 100, aviso_tope_vip: 90, aviso_tope_enviado_en: null },
+];
+
+export const CONFIG_APAGADA_FILA = [
+  { id: 1, activo: false, tope_vip: 100, aviso_tope_vip: 90, aviso_tope_enviado_en: null },
 ];

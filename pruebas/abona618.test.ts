@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { crearDoble, CONFIG_ENCENDIDA, type Doble } from "./doble-supabase.ts";
+import { crearDoble, CONFIG_ENCENDIDA, CONFIG_APAGADA_FILA, type Doble } from "./doble-supabase.ts";
 import {
   leerConfig,
   contarVipEnPlan,
@@ -30,14 +30,26 @@ function doblePlanListo(opciones: { tipo?: "vip" | "general"; total?: number } =
   return { d, total, cuotas: plan.cuotas, tipo: opciones.tipo ?? "vip" as const };
 }
 
-test("sin tabla de configuración el módulo queda APAGADO", async () => {
+test("sin tabla de configuración el módulo queda cerrado, con motivo de ERROR", async () => {
   const d = crearDoble();
   const config = await leerConfig(cli(d));
   assert.equal(config.activo, false);
+  assert.equal(config.error, true, "hay que poder distinguir 'no pude leer' de 'está apagado'");
 
   const r = await planOfrecible(cli(d), { tipo: "general", cantidad: 1, total: 30, hoy: HOY });
   assert.equal(r.plan.hayPlan, false);
+  assert.equal(r.plan.hayPlan === false && r.plan.motivo, "error");
+});
+
+test("con el interruptor en false el motivo es APAGADO, y eso jamás se honra", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_APAGADA_FILA) });
+  const config = await leerConfig(cli(d));
+  assert.equal(config.activo, false);
+  assert.equal(config.error, false, "la lectura funcionó: está apagado a propósito");
+
+  const r = await planOfrecible(cli(d), { tipo: "vip", cantidad: 1, total: 140, hoy: HOY });
   assert.equal(r.plan.hayPlan === false && r.plan.motivo, "apagado");
+  assert.equal(r.vipEnPlan, null, "con el módulo apagado no se mide nada: null, no cero");
 });
 
 test("si la lectura de la configuración falla, tampoco se ofrece el plan", async () => {
@@ -47,13 +59,16 @@ test("si la lectura de la configuración falla, tampoco se ofrece el plan", asyn
   assert.equal(r.plan.hayPlan, false, "un error de base nunca debe abrir el crédito");
 });
 
-test("si el conteo de VIP falla, no se compromete una silla más", async () => {
+test("si el conteo de VIP falla, el motivo es ERROR y no 'tope lleno'", async () => {
   const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA), planes_pago: [] });
   d.fallar.planes_pago = "timeout";
-  assert.equal(await contarVipEnPlan(cli(d)), Number.MAX_SAFE_INTEGER);
+  assert.equal(await contarVipEnPlan(cli(d)), null, "null es 'no se pudo medir', no un número");
+
   const r = await planOfrecible(cli(d), { tipo: "vip", cantidad: 1, total: 140, hoy: HOY });
   assert.equal(r.plan.hayPlan, false);
-  assert.equal(r.plan.hayPlan === false && r.plan.motivo, "tope_vip");
+  // Esta distinción es la que impide que un timeout termine en crédito: el
+  // checkout honra "tope_vip" y nunca honra "error".
+  assert.equal(r.plan.hayPlan === false && r.plan.motivo, "error");
 });
 
 test("el conteo de VIP solo suma los planes que están ocupando una silla", async () => {
@@ -153,7 +168,7 @@ test("el camino completo: inicial, cuota, pago final y recién ahí los QR", asy
 
   // 2 · El comprador reporta la cuota 01 y Finanzas la verifica.
   const r2 = await reportarCuota(cli(d), {
-    cuotaId: plan0.cuotas[1].id, metodoPago: "pago_movil", referenciaPago: "222333", montoBs: 4000, tasa: 176,
+    cuotaId: plan0.cuotas[1].id, grupoId: "g-3", metodoPago: "pago_movil", referenciaPago: "222333", montoBs: 4000, tasa: 176,
   });
   assert.equal(r2.ok, true);
   const v2 = await verificarCuota(cli(d), { cuotaId: plan0.cuotas[1].id, verificadoPor: "finanzas-1" });
@@ -172,7 +187,7 @@ test("el camino completo: inicial, cuota, pago final y recién ahí los QR", asy
   assert.ok(d.tablas.planes_pago[0].completado_en, "queda la hora en que se completó");
 });
 
-test("dos personas de Finanzas aprobando la misma cuota: solo una pasa", async () => {
+test("verificar dos veces la misma cuota es idempotente, no un error", async () => {
   const { d, total, cuotas, tipo } = doblePlanListo();
   await crearPlan(cli(d), {
     grupoId: "g-4", total, tipo, cantidad: 1, cuotas, canal: "web",
@@ -182,8 +197,143 @@ test("dos personas de Finanzas aprobando la misma cuota: solo una pasa", async (
 
   const a = await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "finanzas-1" });
   const b = await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "finanzas-2" });
-  assert.equal(a.ok, true);
-  assert.equal(b.ok, false, "la segunda no debe encontrar fila: si no, el correo sale dos veces");
+  assert.ok(a.ok);
+  assert.ok(b.ok, "el reintento no es un error: tiene que poder recalcular");
+  assert.equal(a.yaEstaba, false);
+  assert.equal(b.yaEstaba, true, "la segunda sabe que no fue ella: así nadie manda el correo dos veces");
+  assert.equal(b.plan.pagado, a.plan.pagado, "y el saldo no se cuenta dos veces");
+});
+
+test("CARRERA REAL: dos cuotas distintas a la vez completan el plan UNA sola vez", async () => {
+  // La prueba anterior se llamaba "dos personas a la vez" y hacía await de una
+  // y después de la otra: eso probaba un reintento, no una carrera. El caso
+  // peligroso es otro — dos cuotas DISTINTAS del mismo plan — y si las dos
+  // devuelven completo:true, el comprador recibe los QR dos veces.
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-carrera", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  const plan = (await leerPlanPorGrupo(cli(d), "g-carrera"))!;
+  await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "f1" });
+
+  const [x, y] = await Promise.all([
+    verificarCuota(cli(d), { cuotaId: plan.cuotas[1].id, verificadoPor: "f1" }),
+    verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f2" }),
+  ]);
+  assert.ok(x.ok && y.ok);
+  const entregas = [x, y].filter((r) => r.ok && r.completo).length;
+  assert.equal(entregas, 1, `el plan se completó ${entregas} veces; los QR saldrían ${entregas} veces`);
+
+  const final = (await leerPlanPorGrupo(cli(d), "g-carrera"))!;
+  assert.equal(final.saldo, 0);
+  assert.equal(final.estado, "completado");
+});
+
+test("el candado del QR no se suelta en un plan VENCIDO ni ANULADO", async () => {
+  // Esta era la inversión peor del módulo: planConSaldo devolvía null para los
+  // planes vencidos y anulados, o sea "no hay plan, aprueba normal". Un plan
+  // vencido tiene sus tickets todavía en pendiente y sigue en la cola de
+  // Finanzas: aprobarlo entregaría la entrada completa a quien dejó de pagar.
+  for (const estado of ["vencido", "anulado", "en_mora", "al_dia"]) {
+    const { d, total, cuotas, tipo } = doblePlanListo();
+    await crearPlan(cli(d), {
+      grupoId: "g-est", total, tipo, cantidad: 1, cuotas, canal: "web",
+      metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+    });
+    d.tablas.planes_pago[0].estado = estado;
+    const cand = await planConSaldo(cli(d), "g-est");
+    assert.ok(cand, `con saldo y estado "${estado}" el candado tiene que seguir puesto`);
+  }
+});
+
+test("verificar un pago sobre un plan muerto no lo resucita", async () => {
+  for (const estado of ["anulado", "vencido"]) {
+    const { d, total, cuotas, tipo } = doblePlanListo();
+    await crearPlan(cli(d), {
+      grupoId: "g-res", total, tipo, cantidad: 1, cuotas, canal: "web",
+      metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+    });
+    const plan = (await leerPlanPorGrupo(cli(d), "g-res"))!;
+    await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "f" });
+    await verificarCuota(cli(d), { cuotaId: plan.cuotas[1].id, verificadoPor: "f" });
+    d.tablas.planes_pago[0].estado = estado;
+
+    const r = await verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f" });
+    assert.equal(r.ok, false, `un plan ${estado} no puede pasar a completado: su silla ya se revendió`);
+    assert.equal(d.tablas.planes_pago[0].estado, estado, "y su estado no se toca");
+  }
+});
+
+test("un fallo parcial deja la cuota verificada, y el reintento SÍ repara", async () => {
+  // El caso real: el UPDATE de la cuota se escribe y la lectura del plan se
+  // cae por timeout. Antes esto devolvía "esa cuota ya la verificó otra
+  // persona" en el reintento y se quedaba ahí: un plan pagado al 100 % que el
+  // sistema creía incompleto, sin forma de arreglarlo desde la interfaz.
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-parcial", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  const plan = (await leerPlanPorGrupo(cli(d), "g-parcial"))!;
+  for (const c of plan.cuotas.slice(0, 2)) await verificarCuota(cli(d), { cuotaId: c.id, verificadoPor: "f" });
+
+  d.fallarDespues["planes_pago:select"] = "statement timeout";
+  const roto = await verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f" });
+  assert.equal(roto.ok, false, "se informa el fallo");
+
+  delete d.fallarDespues["planes_pago:select"];
+  const reintento = await verificarCuota(cli(d), { cuotaId: plan.cuotas[2].id, verificadoPor: "f" });
+  assert.ok(reintento.ok, "el reintento no puede responder 'ya la verificó otra persona' y rendirse");
+  assert.equal(reintento.completo, true, "tiene que completar el plan que quedó a medias");
+  assert.equal(reintento.plan.estado, "completado");
+  assert.equal(reintento.plan.saldo, 0);
+});
+
+test("no se puede reportar un pago sobre la compra de otra persona", async () => {
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-mio", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  const plan2 = planPara(30, HOY);
+  assert.ok(plan2.hayPlan);
+  await crearPlan(cli(d), {
+    grupoId: "g-ajeno", total: 30, tipo: "general", cantidad: 1, cuotas: plan2.cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "2", montoBsInicial: null, tasaAplicada: null,
+  });
+  const ajeno = (await leerPlanPorGrupo(cli(d), "g-ajeno"))!;
+
+  const r = await reportarCuota(cli(d), {
+    cuotaId: ajeno.cuotas[1].id, grupoId: "g-mio",
+    metodoPago: "zelle", referenciaPago: "INTRUSO", montoBs: null, tasa: null,
+  });
+  assert.equal(r.ok, false, "el id de una cuota no puede ser la única llave");
+  const despues = (await leerPlanPorGrupo(cli(d), "g-ajeno"))!;
+  assert.equal(despues.cuotas[1].referenciaPago, null, "y la cuota ajena queda intacta");
+});
+
+test("dos planes para la misma compra: el segundo choca, no se duplica", async () => {
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  const base = {
+    grupoId: "g-dup", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  };
+  assert.equal((await crearPlan(cli(d), base)).ok, true);
+  assert.equal((await crearPlan(cli(d), base)).ok, false, "grupo_id es unique en la base");
+  assert.equal(d.tablas.planes_pago.length, 1);
+});
+
+test("crearPlan escribe el estado y el sello de aceptación, sin depender de defaults", async () => {
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-sello", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  const fila = d.tablas.planes_pago[0];
+  assert.equal(fila.estado, "al_dia", "contarVipEnPlan filtra por estado: no puede llegar undefined");
+  assert.ok(fila.acepto_condiciones_en, "el correo de anulación cita esta fecha");
+  assert.equal(fila.condiciones_version, "v1");
 });
 
 test("un reporte tardío no borra los datos del pago que Finanzas ya confirmó", async () => {
@@ -196,7 +346,7 @@ test("un reporte tardío no borra los datos del pago que Finanzas ya confirmó",
   await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "finanzas-1" });
 
   const r = await reportarCuota(cli(d), {
-    cuotaId: plan.cuotas[0].id, metodoPago: "zelle", referenciaPago: "MALA", montoBs: null, tasa: null,
+    cuotaId: plan.cuotas[0].id, grupoId: "g-5", metodoPago: "zelle", referenciaPago: "MALA", montoBs: null, tasa: null,
   });
   assert.equal(r.ok, false);
   const despues = (await leerPlanPorGrupo(cli(d), "g-5"))!;

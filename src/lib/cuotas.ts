@@ -57,10 +57,23 @@ export function hoyEnVenezuela(ahora: Date = new Date()): string {
 
 const MS_DIA = 86_400_000;
 
+const FORMATO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
 function aNumeroDeDia(iso: string): number {
+  // Estricto a propósito. Antes bastaba con que las tres partes no fueran 0:
+  // "26-11-16" se interpretaba como el año 26 y daba una cuota con 36.490 días
+  // de atraso, y "2026-02-30" se convertía en silencio en el 3 de marzo. Una
+  // fecha de vencimiento mal leída es dinero que se reclama el día equivocado.
+  if (typeof iso !== "string" || !FORMATO_FECHA.test(iso)) {
+    throw new Error(`Fecha inválida: ${iso}`);
+  }
   const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) throw new Error(`Fecha inválida: ${iso}`);
-  return Date.UTC(y, m - 1, d) / MS_DIA;
+  const dia = Date.UTC(y, m - 1, d) / MS_DIA;
+  if (!Number.isInteger(dia)) throw new Error(`Fecha inválida: ${iso}`);
+  // Ida y vuelta: atrapa el desborde de mes y día (31 de noviembre, 30 de
+  // febrero) sin tener que conocer el calendario.
+  if (aIso(dia) !== iso) throw new Error(`Fecha inexistente: ${iso}`);
+  return dia;
 }
 
 function aIso(dia: number): string {
@@ -94,6 +107,15 @@ export function liberaEl(venceEl: string): string {
  * en la inicial, para que el comprador vea un 40 % limpio al comprar.
  */
 export function repartir(total: number, porcentajes: number[]): number[] {
+  if (!Number.isFinite(total)) throw new Error(`Total no finito: ${total}`);
+  if (porcentajes.length === 0) throw new Error("Repartir sin porcentajes perdería el total entero.");
+  const suma = porcentajes.reduce((s, p) => s + p, 0);
+  if (!Number.isFinite(suma) || Math.abs(suma - 1) > 1e-9) {
+    // Con porcentajes que no suman 1 el ajuste de abajo puede iterar millones
+    // de veces y colgar el worker. Esta función está exportada y corre dentro
+    // de server actions: el guard es la diferencia entre un error y una caída.
+    throw new Error(`Los porcentajes tienen que sumar 1, suman ${suma}`);
+  }
   const centavos = Math.round(total * 100);
   if (centavos < porcentajes.length) {
     // No alcanza para dar un céntimo a cada pago. No puede pasar con los
@@ -106,11 +128,16 @@ export function repartir(total: number, porcentajes: number[]): number[] {
   partes[partes.length - 1] += residuo;
 
   // El residuo del redondeo puede dejar el último pago en cero o negativo con
-  // totales de céntimos: se le quita al pago más grande, que siempre es la
-  // inicial, hasta que todos tengan al menos un céntimo.
+  // totales de céntimos: se le quita al pago más grande (que según el plan es
+  // la inicial o el pago final) hasta que todos tengan al menos un céntimo.
   for (let i = partes.length - 1; i >= 0; i--) {
-    while (partes[i] < 1) {
+    // Con los porcentajes validados arriba, suma(partes) === centavos y
+    // centavos >= length, así que siempre hay una parte con 2 o más céntimos y
+    // esto termina en menos de `length` vueltas. El tope es por si acaso.
+    let vueltas = 0;
+    while (partes[i] < 1 && vueltas++ < partes.length) {
       const mayor = partes.indexOf(Math.max(...partes));
+      if (mayor === i) break;
       partes[mayor] -= 1;
       partes[i] += 1;
     }
@@ -145,22 +172,15 @@ export type SinPlan = {
   /** apagado: el interruptor de la base está en false, el módulo no existe
    *  para el comprador. sin_margen: ya no queda plazo. taquilla: el día del
    *  evento se cobra completo (Anita, 12 oct). tope_vip: se agotaron los
-   *  cupos VIP en plan. */
-  motivo: "apagado" | "sin_margen" | "taquilla" | "tope_vip";
+   *  cupos VIP en plan — es el ÚNICO motivo que el checkout honra cuando el
+   *  comprador ya pagó. error: no se pudo leer la base; nunca se honra, porque
+   *  un timeout no puede terminar en "vendamos a crédito por si acaso". */
+  motivo: "apagado" | "sin_margen" | "taquilla" | "tope_vip" | "error";
 };
 
-/**
- * Las fechas fijas que todavía dan margen suficiente desde `hoy`.
- *
- * Con `ignorarMargen` basta que la fecha no haya pasado. Eso NO se usa para
- * ofrecer el plan: se usa para honrar uno que ya se ofreció y se pagó, cuando
- * la compra cruzó la medianoche del día del corte y el comprador ya transfirió
- * su inicial. Mejor cobrarle lo que falta con poco margen que quedarse con su
- * dinero sin un calendario donde reclamarlo.
- */
-export function fechasVigentes(hoy: string, ignorarMargen = false): string[] {
-  const minimo = ignorarMargen ? 1 : MARGEN_MIN_DIAS;
-  return FECHAS_PAGO.filter((f) => diasEntre(hoy, f) >= minimo);
+/** Las fechas fijas que todavía dan margen suficiente desde `hoy`. */
+export function fechasVigentes(hoy: string): string[] {
+  return FECHAS_PAGO.filter((f) => diasEntre(hoy, f) >= MARGEN_MIN_DIAS);
 }
 
 /** ¿Se puede ofrecer el plan en esta fecha? (sin contar tope VIP ni canal) */
@@ -185,23 +205,28 @@ export function planPara(
     /** El tope real sale de la base (abona618_config.tope_vip) para que se
      *  pueda subir sin desplegar; la constante es solo el valor inicial. */
     topeVip?: number;
-    /** Solo para honrar un plan ya pagado. Ver fechasVigentes. */
-    ignorarMargen?: boolean;
+    /** true salta SOLO el chequeo del tope, para honrar un plan ya pagado
+     *  cuando el tope se llenó mientras el comprador iba al banco. El
+     *  calendario y el margen mínimo se respetan igual: las cuotas que se
+     *  guardan tienen que ser las mismas que el comprador aceptó. */
+    ignorarTope?: boolean;
   } = {}
 ): Plan | SinPlan {
-  const { canal, tipo, vipEnPlan, cantidad = 1, topeVip = TOPE_VIP_EN_PLAN, ignorarMargen = false } = opciones;
+  const { canal, tipo, vipEnPlan, cantidad = 1, topeVip = TOPE_VIP_EN_PLAN, ignorarTope = false } = opciones;
 
   // Taquilla el día del evento: el plan no aplica, se cobra completo.
   if (canal === "taquilla") return { hayPlan: false, motivo: "taquilla" };
 
-  if (tipo === "vip" && vipEnPlan != null && vipEnPlan + cantidad > topeVip) {
+  if (!ignorarTope && tipo === "vip" && vipEnPlan != null && vipEnPlan + cantidad > topeVip) {
     return { hayPlan: false, motivo: "tope_vip" };
   }
 
-  const vigentes = fechasVigentes(hoy, ignorarMargen);
+  const vigentes = fechasVigentes(hoy);
   if (vigentes.length === 0) return { hayPlan: false, motivo: "sin_margen" };
 
-  if (!(total > 0)) throw new Error(`Total inválido para un plan: ${total}`);
+  // Number.isFinite además de > 0: antes Infinity pasaba el guard y producía
+  // un plan entero con montos NaN, que se habrían escrito en la base.
+  if (!Number.isFinite(total) || total <= 0) throw new Error(`Total inválido para un plan: ${total}`);
 
   const resto = 1 - INICIAL;
   const porcentajes = [INICIAL, ...vigentes.map(() => resto / vigentes.length)];
@@ -240,6 +265,7 @@ const DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "vier
 
 /** "25 de noviembre" */
 export function fechaCorta(iso: string): string {
+  aNumeroDeDia(iso); // valida: antes "basura" salía como "undefined de undefined"
   const [, m, d] = iso.split("-").map(Number);
   return `${d} de ${MESES[m - 1]}`;
 }

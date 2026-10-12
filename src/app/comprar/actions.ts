@@ -12,17 +12,8 @@ import { METODOS_PAGO_ACTIVOS, metodoEsEnBs, normalizarReferencia, validarRefere
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
 import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
 import { crearPlan, planOfrecible } from "@/lib/abona618";
-import { planPara, type Plan, type SinPlan } from "@/lib/cuotas";
-
-// El plan que se le registra a alguien que YA pagó su inicial, cuando el que
-// se le ofreció dejó de estar disponible mientras iba al banco. Sin tope y sin
-// el margen mínimo: lo único que hace falta es que quede alguna fecha por
-// delante donde cobrarle el resto. Si no queda ninguna (después del 25 de
-// noviembre), devuelve null y la compra se atiende a mano.
-function planParaHonrar(total: number): Plan | null {
-  const p = planPara(total, undefined, { ignorarMargen: true });
-  return p.hayPlan ? p : null;
-}
+import { planPara } from "@/lib/cuotas";
+import { type Plan, type SinPlan } from "@/lib/cuotas";
 
 // 15 minutos (antes 10): una transferencia bancaria en Venezuela desde la app
 // del banco, con la clave especial, la verificación y la referencia, se toma
@@ -390,18 +381,54 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       canal: "web",
     });
 
-    if (!planAhora.hayPlan && planAhora.motivo === "tope_vip") {
+    // Se honra UN SOLO caso: el tope de VIP se llenó en los minutos que el
+    // comprador tardó en ir al banco. Ese comprador vio la oferta y transfirió
+    // el 40 % confiando en ella, y un cupo de sobregiro cuesta mucho menos que
+    // cobrarle y no darle lo prometido.
+    //
+    // Cualquier otro motivo NO se honra, y la diferencia importa:
+    //
+    //   · apagado  — `enCuotas` es un campo del formulario y esta server
+    //     action es pública. Honrarlo aquí convertía el interruptor de
+    //     emergencia en decoración: con el módulo apagado, un POST con
+    //     enCuotas:true conseguía un plan igual. Ese era el agujero.
+    //   · error    — un timeout leyendo la base no puede terminar en "demos
+    //     crédito por si acaso".
+    //   · sin_margen — ya no hay fechas donde cobrar el resto.
+    //   · taquilla — el plan no aplica el día del evento (Anita, 12 oct).
+    //
+    // Y cuando sí se honra, el plan se recalcula ignorando SOLO el tope: el
+    // calendario y el margen mínimo se respetan, para que las cuotas que se
+    // guardan sean exactamente las que el comprador aceptó. Saltarse también
+    // el margen hacía que entre el 12 y el 15 de noviembre se le guardara una
+    // cuota que vencía en tres días y que nunca había visto.
+    const honrable = !planAhora.hayPlan && planAhora.motivo === "tope_vip";
+
+    if (!planAhora.hayPlan) {
       console.warn(
-        `Abona618: plan honrado por encima del tope — grupo ${grupoId}, ${cantidad} VIP, ` +
-          `había ${vipEnPlan} de ${config.topeVip}. El comprador ya había pagado la inicial.`
+        `Abona618: compra con enCuotas pero el plan no está disponible — grupo ${grupoId}, ` +
+          `motivo "${planAhora.motivo}", ${cantidad} ${v.tipo}, VIP en plan ${vipEnPlan ?? "sin medir"} ` +
+          `de ${config.topeVip}. ${honrable ? "Se honra: el comprador ya había pagado." : "NO se crea plan."}`
       );
     }
 
-    // Se recalcula sin el tope para obtener los montos: la decisión de honrar
-    // ya está tomada arriba.
     const planFinal = planAhora.hayPlan
       ? planAhora
-      : planParaHonrar(cotizacion.total);
+      : honrable
+        ? (() => {
+            const p = planPara(cotizacion.total, undefined, { ignorarTope: true });
+            return p.hayPlan ? p : null;
+          })()
+        : null;
+
+    if (!planFinal && !planAhora.hayPlan) {
+      // El comprador pidió cuotas y no se le puede dar un plan. Sus tickets
+      // existen y su pago vale, así que no se le rechaza la compra: se le
+      // avisa y Finanzas lo resuelve viendo cuánto entró de verdad.
+      avisoPlan =
+        "Tu pago quedó registrado, pero no pudimos activar el plan de cuotas para esta compra. " +
+        "Escríbenos por WhatsApp con tu código de compra y lo resolvemos hoy mismo.";
+    }
 
     if (planFinal) {
       const inicialBs = enBs && tasa ? convertirABs(planFinal.inicial, tasa) : null;
