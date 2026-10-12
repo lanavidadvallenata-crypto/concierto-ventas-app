@@ -10,6 +10,7 @@ import { crearDoble, CONFIG_ENCENDIDA, CONFIG_APAGADA_FILA, type Doble } from ".
 import {
   anularPlan,
   leerConfig,
+  listaDeCobranza,
   contarVipEnPlan,
   planOfrecible,
   crearPlan,
@@ -453,4 +454,141 @@ test("anular una compra sin plan no hace nada ni falla", async () => {
   assert.equal(r.plan, null);
   const sinGrupo = await anularPlan(cli(d), { grupoId: null, por: "f", motivo: "anulado" });
   assert.equal(sinGrupo.anulado, false);
+});
+
+// ─────────────────────────── la lista de cobranza del equipo ───────────────
+
+function cuotaFalsa(orden: number, etiqueta: string, monto: number, venceEl: string) {
+  return { orden, etiqueta, porcentaje: 0.3, monto, venceEl, esInicial: orden === 1 };
+}
+
+/** Un plan con fechas a medida, para poder parar el reloj donde haga falta. */
+async function planConFechas(
+  d: Doble,
+  grupoId: string,
+  fechas: string[],
+  opciones: { tipo?: "vip" | "general"; cantidad?: number; total?: number } = {}
+) {
+  const total = opciones.total ?? 140;
+  const cuotas = [
+    cuotaFalsa(1, "Inicial", Math.round(total * 0.4 * 100) / 100, "2026-10-01"),
+    ...fechas.map((f, i) =>
+      cuotaFalsa(i + 2, i === fechas.length - 1 ? "Pago final" : `Cuota 0${i + 1}`, Math.round((total * 0.6 / fechas.length) * 100) / 100, f)
+    ),
+  ];
+  await crearPlan(cli(d), {
+    grupoId, total, tipo: opciones.tipo ?? "vip", cantidad: opciones.cantidad ?? 1,
+    cuotas, canal: "web", metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  const plan = (await leerPlanPorGrupo(cli(d), grupoId))!;
+  // La inicial siempre está cobrada en estos casos: lo que se está probando es
+  // el seguimiento de las que vienen.
+  await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "f" });
+  return (await leerPlanPorGrupo(cli(d), grupoId))!;
+}
+
+test("la lista de cobranza agrupa por lo que el equipo tiene que HACER", async () => {
+  const HOY = "2026-11-16";
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+
+  await planConFechas(d, "g-hoy", [HOY]);                       // vence hoy
+  await planConFechas(d, "g-pronto", ["2026-11-20"]);           // en 4 días
+  await planConFechas(d, "g-lejos", ["2026-12-20"]);            // muy lejos
+  await planConFechas(d, "g-gracia", ["2026-11-15"]);           // venció ayer
+  await planConFechas(d, "g-anular", ["2026-11-10"]);           // 6 días tarde
+  const rep = await planConFechas(d, "g-reportada", ["2026-11-20"]);
+  await reportarCuota(cli(d), {
+    cuotaId: rep.cuotas[1].id, grupoId: "g-reportada", metodoPago: "pago_movil",
+    referenciaPago: "998877", montoBs: 14000, tasa: 176, reportadoPor: "ventas-1", canal: "whatsapp",
+  });
+
+  const L = await listaDeCobranza(cli(d), { hoy: HOY, diasProximas: 10 });
+
+  assert.deepEqual(L.vencenHoy.map((c) => c.grupoId), ["g-hoy"]);
+  assert.deepEqual(L.proximas.map((c) => c.grupoId), ["g-pronto"], "la de diciembre está fuera de la ventana");
+  assert.deepEqual(L.enGracia.map((c) => c.grupoId), ["g-gracia"]);
+  assert.deepEqual(L.paraAnular.map((c) => c.grupoId), ["g-anular"]);
+  assert.deepEqual(L.porVerificar.map((c) => c.grupoId), ["g-reportada"],
+    "lo reportado no se llama otra vez: va al banco, y eso es trabajo de Finanzas");
+
+  // Una cuota reportada NO puede aparecer también en las de llamar.
+  const todas = [...L.vencenHoy, ...L.proximas, ...L.enGracia, ...L.paraAnular].map((c) => c.cuotaId);
+  assert.equal(todas.includes(L.porVerificar[0].cuotaId), false);
+});
+
+test("la lista trae con qué contactar y de quién salió el reporte", async () => {
+  const HOY = "2026-11-16";
+  const d = crearDoble({
+    abona618_config: structuredClone(CONFIG_ENCENDIDA),
+    tickets: [
+      { id: "t1", grupo_id: "g-c", comprador_nombre: "María Pérez", comprador_telefono: "04141234567", comprador_email: "m@p.com" },
+      { id: "t2", grupo_id: "g-c", comprador_nombre: "María Pérez", comprador_telefono: "04141234567", comprador_email: "m@p.com" },
+    ],
+  });
+  const plan = await planConFechas(d, "g-c", [HOY], { tipo: "vip", cantidad: 2, total: 280 });
+  await reportarCuota(cli(d), {
+    cuotaId: plan.cuotas[1].id, grupoId: "g-c", metodoPago: "zelle", referenciaPago: "m@p.com",
+    montoBs: null, tasa: null, reportadoPor: "ventas-7", canal: "llamada", nota: "Dijo que paga el resto el lunes",
+  });
+
+  const L = await listaDeCobranza(cli(d), { hoy: HOY });
+  const c = L.porVerificar[0];
+  assert.equal(c.compradorNombre, "María Pérez");
+  assert.equal(c.compradorTelefono, "04141234567", "sin el teléfono no hay WhatsApp a un toque");
+  assert.equal(c.compradorEmail, "m@p.com");
+  assert.equal(c.reportadoPor, "ventas-7");
+  assert.equal(c.canalReporte, "llamada");
+  assert.equal(c.nota, "Dijo que paga el resto el lunes");
+  assert.equal(c.cantidad, 2);
+  assert.equal(c.tipo, "vip");
+});
+
+test("registrar un pago en nombre del comprador exige decir por dónde llegó", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  const plan = await planConFechas(d, "g-canal", ["2026-11-20"]);
+
+  const sinCanal = await reportarCuota(cli(d), {
+    cuotaId: plan.cuotas[1].id, grupoId: "g-canal", metodoPago: "pago_movil",
+    referenciaPago: "1", montoBs: null, tasa: null, reportadoPor: "ventas-1",
+  });
+  assert.equal(sinCanal.ok, false, "la base lo rechaza y la operación lo necesita");
+
+  // El comprador reportando desde su página no necesita canal: queda "web".
+  const delComprador = await reportarCuota(cli(d), {
+    cuotaId: plan.cuotas[1].id, grupoId: "g-canal", metodoPago: "pago_movil",
+    referenciaPago: "1", montoBs: null, tasa: null,
+  });
+  assert.equal(delComprador.ok, true);
+  const despues = (await leerPlanPorGrupo(cli(d), "g-canal"))!;
+  assert.equal(despues.cuotas[1].canalReporte, "web");
+  assert.equal(despues.cuotas[1].reportadoPor, null, "null es el comprador, no un miembro del equipo");
+});
+
+test("los totales del encabezado cuadran y excluyen lo que ya no se cobra", async () => {
+  const HOY = "2026-11-16";
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  await planConFechas(d, "g-a", [HOY], { tipo: "vip", cantidad: 2, total: 280 });
+  await planConFechas(d, "g-b", [HOY], { tipo: "general", cantidad: 5, total: 150 });
+
+  // Un plan completo y uno anulado: ninguno de los dos se cobra.
+  const lleno = await planConFechas(d, "g-lleno", [HOY]);
+  await verificarCuota(cli(d), { cuotaId: lleno.cuotas[1].id, verificadoPor: "f" });
+  await planConFechas(d, "g-muerto", [HOY]);
+  await anularPlan(cli(d), { grupoId: "g-muerto", por: "f", motivo: "anulado" });
+
+  const L = await listaDeCobranza(cli(d), { hoy: HOY });
+  assert.equal(L.planesActivos, 2, "solo los dos que de verdad deben algo");
+  assert.equal(L.saldoTotal, Math.round((280 * 0.6 + 150 * 0.6) * 100) / 100);
+  assert.equal(L.vipEnPlan, 2, "las VIP del plan general no cuentan, y el anulado tampoco");
+  assert.equal(L.vencenHoy.length, 2);
+});
+
+test("si la base falla, la pantalla de cobranza sale vacía y no se cae", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  await planConFechas(d, "g-x", ["2026-11-20"]);
+  d.fallar.planes_pago = "timeout";
+  const L = await listaDeCobranza(cli(d), { hoy: "2026-11-16" });
+  assert.equal(L.planesActivos, 0);
+  assert.equal(L.saldoTotal, 0);
+  assert.deepEqual(L.vencenHoy, []);
 });

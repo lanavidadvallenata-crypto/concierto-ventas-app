@@ -9,7 +9,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AVISO_TOPE_VIP,
+  DIAS_GRACIA,
   TOPE_VIP_EN_PLAN,
+  diasEntre,
   hoyEnVenezuela,
   planPara,
   type Cuota,
@@ -216,6 +218,8 @@ export async function crearPlan(
 
 // --------------------------------------------------------------- leer
 
+export type CanalReporte = "whatsapp" | "llamada" | "presencial" | "web" | "otro";
+
 export type CuotaGuardada = {
   id: string;
   orden: number;
@@ -223,9 +227,15 @@ export type CuotaGuardada = {
   montoUsd: number;
   venceEl: string;
   reportadoEn: string | null;
+  /** Quién anotó el pago. null = lo reportó el comprador desde su página. */
+  reportadoPor: string | null;
+  canalReporte: CanalReporte | null;
+  nota: string | null;
   verificadoEn: string | null;
+  verificadoPor: string | null;
   metodoPago: string | null;
   referenciaPago: string | null;
+  montoBs: number | null;
 };
 
 export type PlanGuardado = {
@@ -245,7 +255,7 @@ export type PlanGuardado = {
 };
 
 const SELECT_CUOTAS =
-  "id, orden, etiqueta, monto_usd, vence_el, reportado_en, verificado_en, metodo_pago, referencia_pago";
+  "id, orden, etiqueta, monto_usd, vence_el, reportado_en, reportado_por, canal_reporte, nota, verificado_en, verificado_por, metodo_pago, referencia_pago, monto_bs";
 
 function armarPlan(fila: Record<string, unknown>, filasCuotas: Record<string, unknown>[]): PlanGuardado {
   const cuotas: CuotaGuardada[] = filasCuotas
@@ -256,9 +266,14 @@ function armarPlan(fila: Record<string, unknown>, filasCuotas: Record<string, un
       montoUsd: Number(c.monto_usd),
       venceEl: String(c.vence_el),
       reportadoEn: (c.reportado_en as string | null) ?? null,
+      reportadoPor: (c.reportado_por as string | null) ?? null,
+      canalReporte: (c.canal_reporte as CanalReporte | null) ?? null,
+      nota: (c.nota as string | null) ?? null,
       verificadoEn: (c.verificado_en as string | null) ?? null,
+      verificadoPor: (c.verificado_por as string | null) ?? null,
       metodoPago: (c.metodo_pago as string | null) ?? null,
       referenciaPago: (c.referencia_pago as string | null) ?? null,
+      montoBs: c.monto_bs == null ? null : Number(c.monto_bs),
     }))
     .sort((a, b) => a.orden - b.orden);
 
@@ -354,8 +369,19 @@ export async function reportarCuota(
     referenciaPago: string | null;
     montoBs: number | null;
     tasa: number | null;
+    /** null = lo reportó el comprador desde su página. Con un id, lo registró
+     *  alguien del equipo y entonces `canal` es obligatorio. */
+    reportadoPor?: string | null;
+    canal?: CanalReporte;
+    nota?: string | null;
   }
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (d.reportadoPor && !d.canal) {
+    // Lo exige la base (constraint reporte_con_canal) y lo exige la operación:
+    // el siguiente que atienda a ese comprador tiene que saber por dónde
+    // llegó el pago anterior.
+    return { ok: false, error: "Falta decir por dónde llegó el pago (WhatsApp, llamada, presencial)." };
+  }
   const plan = await leerPlanPorGrupo(service, d.grupoId);
   if (!plan) return { ok: false, error: "No encontramos tu plan de pago." };
   if (!plan.cuotas.some((c) => c.id === d.cuotaId)) {
@@ -369,10 +395,13 @@ export async function reportarCuota(
     .from("cuotas")
     .update({
       reportado_en: new Date().toISOString(),
+      reportado_por: d.reportadoPor ?? null,
+      canal_reporte: d.canal ?? (d.reportadoPor ? null : "web"),
       metodo_pago: d.metodoPago,
       referencia_pago: d.referenciaPago,
       monto_bs: d.montoBs,
       tasa_aplicada: d.tasa,
+      ...(d.nota !== undefined ? { nota: d.nota } : {}),
     })
     .eq("id", d.cuotaId)
     .is("verificado_en", null)
@@ -555,4 +584,193 @@ export async function anularPlan(
   }
 
   return { anulado: Boolean(data), plan: { ...plan, estado: d.motivo } };
+}
+
+// ---------------------------------------------------------------- cobranza
+
+/**
+ * La lista de trabajo del equipo. Esto es el corazón de la decisión de Anita
+ * del 12 de octubre: el cobro de cuotas no se deja en manos del comprador —
+ * "lo puedo perder de vista o no lo hacen porque no se acuerdan" — así que el
+ * equipo necesita ver, en una sola pantalla y ordenado por urgencia, a quién
+ * hay que escribirle hoy y con qué saldo.
+ *
+ * Sale agrupado por lo que el equipo tiene que HACER con cada grupo, no por
+ * estado de base de datos:
+ *
+ *   porVerificar — ya reportadas: Finanzas tiene que ir al banco y aprobar.
+ *   vencenHoy    — hay que escribirle hoy mismo.
+ *   proximas     — vencen dentro de los próximos días: recordatorio suave.
+ *   enGracia     — ya vencieron y están en los dos días de plazo. Última
+ *                  llamada antes de que la entrada se libere.
+ *   paraAnular   — se pasó el plazo. Hay que anular y revender.
+ */
+export type CuotaPorCobrar = {
+  cuotaId: string;
+  etiqueta: string;
+  montoUsd: number;
+  montoBs: number | null;
+  venceEl: string;
+  diasParaVencer: number;
+  reportadoEn: string | null;
+  canalReporte: CanalReporte | null;
+  reportadoPor: string | null;
+  nota: string | null;
+  planId: string;
+  grupoId: string;
+  totalUsd: number;
+  pagado: number;
+  saldo: number;
+  tipo: "vip" | "general";
+  cantidad: number;
+  estadoPlan: PlanGuardado["estado"];
+  compradorNombre: string | null;
+  compradorTelefono: string | null;
+  compradorEmail: string | null;
+};
+
+export type ListaCobranza = {
+  porVerificar: CuotaPorCobrar[];
+  vencenHoy: CuotaPorCobrar[];
+  proximas: CuotaPorCobrar[];
+  enGracia: CuotaPorCobrar[];
+  paraAnular: CuotaPorCobrar[];
+  /** Totales para el encabezado: lo que falta cobrar y de cuántas compras. */
+  saldoTotal: number;
+  planesActivos: number;
+  vipEnPlan: number;
+};
+
+const LISTA_VACIA: ListaCobranza = {
+  porVerificar: [],
+  vencenHoy: [],
+  proximas: [],
+  enGracia: [],
+  paraAnular: [],
+  saldoTotal: 0,
+  planesActivos: 0,
+  vipEnPlan: 0,
+};
+
+export async function listaDeCobranza(
+  service: SupabaseClient,
+  opciones: { hoy?: string; diasProximas?: number } = {}
+): Promise<ListaCobranza> {
+  const hoy = opciones.hoy ?? hoyEnVenezuela();
+  const diasProximas = opciones.diasProximas ?? 10;
+
+  const { data: planes, error } = await service
+    .from("planes_pago")
+    .select("id, grupo_id, total_usd, tipo, cantidad, estado, acepto_condiciones_en, condiciones_version")
+    .in("estado", ["al_dia", "en_mora"]);
+
+  if (error) {
+    console.error("Abona618: no se pudo leer la lista de cobranza —", error.message);
+    return LISTA_VACIA;
+  }
+  if (!planes || planes.length === 0) return LISTA_VACIA;
+
+  const ids = planes.map((p) => String(p.id));
+  const { data: cuotasFilas, error: errorCuotas } = await service
+    .from("cuotas")
+    .select(`plan_id, ${SELECT_CUOTAS}`)
+    .in("plan_id", ids);
+  if (errorCuotas) {
+    console.error("Abona618: no se pudieron leer las cuotas de la cobranza —", errorCuotas.message);
+    return LISTA_VACIA;
+  }
+
+  // Los datos de contacto viven en tickets, que no tiene FK con planes_pago
+  // (grupo_id no es único allí). Una consulta y un mapa, en vez de un join.
+  const grupos = planes.map((p) => String(p.grupo_id));
+  const { data: tickets } = await service
+    .from("tickets")
+    .select("grupo_id, comprador_nombre, comprador_telefono, comprador_email")
+    .in("grupo_id", grupos);
+
+  const contacto = new Map<string, { nombre: string | null; telefono: string | null; email: string | null }>();
+  for (const t of tickets ?? []) {
+    const g = String(t.grupo_id);
+    if (!contacto.has(g)) {
+      contacto.set(g, {
+        nombre: (t.comprador_nombre as string | null) ?? null,
+        telefono: (t.comprador_telefono as string | null) ?? null,
+        email: (t.comprador_email as string | null) ?? null,
+      });
+    }
+  }
+
+  const porPlan = new Map<string, Record<string, unknown>[]>();
+  for (const c of cuotasFilas ?? []) {
+    const k = String(c.plan_id ?? "");
+    const lista = porPlan.get(k) ?? [];
+    lista.push(c as Record<string, unknown>);
+    porPlan.set(k, lista);
+  }
+
+  const lista: ListaCobranza = { ...LISTA_VACIA, porVerificar: [], vencenHoy: [], proximas: [], enGracia: [], paraAnular: [] };
+
+  for (const filaPlan of planes) {
+    const plan = armarPlan(filaPlan as Record<string, unknown>, porPlan.get(String(filaPlan.id)) ?? []);
+    if (plan.saldo <= 0) continue;
+
+    lista.saldoTotal = Math.round((lista.saldoTotal + plan.saldo) * 100) / 100;
+    lista.planesActivos++;
+    if (plan.tipo === "vip") lista.vipEnPlan += plan.cantidad;
+
+    const quien = contacto.get(plan.grupoId);
+
+    for (const c of plan.cuotas) {
+      if (c.verificadoEn) continue;
+
+      const dias = diasEntre(hoy, c.venceEl);
+      const item: CuotaPorCobrar = {
+        cuotaId: c.id,
+        etiqueta: c.etiqueta,
+        montoUsd: c.montoUsd,
+        montoBs: c.montoBs,
+        venceEl: c.venceEl,
+        diasParaVencer: dias,
+        reportadoEn: c.reportadoEn,
+        canalReporte: c.canalReporte,
+        reportadoPor: c.reportadoPor,
+        nota: c.nota,
+        planId: plan.id,
+        grupoId: plan.grupoId,
+        totalUsd: plan.totalUsd,
+        pagado: plan.pagado,
+        saldo: plan.saldo,
+        tipo: plan.tipo,
+        cantidad: plan.cantidad,
+        estadoPlan: plan.estado,
+        compradorNombre: quien?.nombre ?? null,
+        compradorTelefono: quien?.telefono ?? null,
+        compradorEmail: quien?.email ?? null,
+      };
+
+      // Lo reportado va aparte de todo lo demás: ahí no hay que llamar a
+      // nadie, hay que ir al banco. Es el trabajo de Finanzas, no de Ventas.
+      if (c.reportadoEn) {
+        lista.porVerificar.push(item);
+      } else if (dias > 0) {
+        if (dias <= diasProximas) lista.proximas.push(item);
+      } else if (dias === 0) {
+        lista.vencenHoy.push(item);
+      } else if (-dias <= DIAS_GRACIA) {
+        lista.enGracia.push(item);
+      } else {
+        lista.paraAnular.push(item);
+      }
+    }
+  }
+
+  // Lo más urgente primero dentro de cada grupo.
+  const porFecha = (a: CuotaPorCobrar, b: CuotaPorCobrar) => a.diasParaVencer - b.diasParaVencer;
+  lista.porVerificar.sort((a, b) => (a.reportadoEn ?? "").localeCompare(b.reportadoEn ?? ""));
+  lista.vencenHoy.sort(porFecha);
+  lista.proximas.sort(porFecha);
+  lista.enGracia.sort(porFecha);
+  lista.paraAnular.sort(porFecha);
+
+  return lista;
 }
