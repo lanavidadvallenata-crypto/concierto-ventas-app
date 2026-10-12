@@ -28,7 +28,7 @@ export default async function CobranzaPage() {
 
   // Quién anotó cada pago: la lista guarda el id, la pantalla muestra el
   // nombre. Si no, nadie sabe a quién preguntarle por una referencia rara.
-  const ids = [...new Set([...lista.porVerificar, ...lista.vencenHoy, ...lista.proximas, ...lista.enGracia, ...lista.paraAnular]
+  const ids = [...new Set([...lista.porVerificar, ...lista.vencenHoy, ...lista.proximas, ...lista.enGracia, ...lista.paraAnular, ...lista.masAdelante]
     .map((c) => c.reportadoPor)
     .filter(Boolean))] as string[];
   const { data: perfiles } = ids.length

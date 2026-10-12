@@ -69,7 +69,7 @@ function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo): string {
   );
 }
 
-type Grupo = "porVerificar" | "vencenHoy" | "enGracia" | "paraAnular" | "proximas";
+type Grupo = "porVerificar" | "vencenHoy" | "enGracia" | "paraAnular" | "proximas" | "masAdelante";
 
 const SECCIONES: { clave: Grupo; titulo: string; nota: string; tono: string }[] = [
   {
@@ -100,6 +100,12 @@ const SECCIONES: { clave: Grupo; titulo: string; nota: string; tono: string }[] 
     clave: "proximas",
     titulo: "Próximas a vencer",
     nota: "Recordatorio suave, sin apuro.",
+    tono: "border-neutral-200 bg-white",
+  },
+  {
+    clave: "masAdelante",
+    titulo: "Más adelante",
+    nota: "Todavía no hay que llamarlos. Aquí se anotan los que adelantan su pago.",
     tono: "border-neutral-200 bg-white",
   },
 ];
@@ -157,6 +163,7 @@ export default function CobranzaList({
     ...lista.porVerificar,
     ...lista.paraAnular,
     ...lista.proximas,
+    ...lista.masAdelante,
   ].length;
 
   return (

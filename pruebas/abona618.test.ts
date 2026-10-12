@@ -506,6 +506,8 @@ test("la lista de cobranza agrupa por lo que el equipo tiene que HACER", async (
 
   assert.deepEqual(L.vencenHoy.map((c) => c.grupoId), ["g-hoy"]);
   assert.deepEqual(L.proximas.map((c) => c.grupoId), ["g-pronto"], "la de diciembre está fuera de la ventana");
+  assert.deepEqual(L.masAdelante.map((c) => c.grupoId), ["g-lejos"],
+    "pero tiene que poder encontrarse: las condiciones permiten adelantar pagos");
   assert.deepEqual(L.enGracia.map((c) => c.grupoId), ["g-gracia"]);
   assert.deepEqual(L.paraAnular.map((c) => c.grupoId), ["g-anular"]);
   assert.deepEqual(L.porVerificar.map((c) => c.grupoId), ["g-reportada"],

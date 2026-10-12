@@ -639,6 +639,11 @@ export type ListaCobranza = {
   proximas: CuotaPorCobrar[];
   enGracia: CuotaPorCobrar[];
   paraAnular: CuotaPorCobrar[];
+  /** Las que vencen más allá de la ventana de "próximas". No hay que
+   *  llamarlas todavía, pero tienen que poder encontrarse: las condiciones
+   *  permiten adelantar pagos, y si alguien adelanta y el equipo no puede
+   *  anotarlo, la promesa no vale nada. */
+  masAdelante: CuotaPorCobrar[];
   /** Totales para el encabezado: lo que falta cobrar y de cuántas compras. */
   saldoTotal: number;
   planesActivos: number;
@@ -651,6 +656,7 @@ const LISTA_VACIA: ListaCobranza = {
   proximas: [],
   enGracia: [],
   paraAnular: [],
+  masAdelante: [],
   saldoTotal: 0,
   planesActivos: 0,
   vipEnPlan: 0,
@@ -712,7 +718,15 @@ export async function listaDeCobranza(
     porPlan.set(k, lista);
   }
 
-  const lista: ListaCobranza = { ...LISTA_VACIA, porVerificar: [], vencenHoy: [], proximas: [], enGracia: [], paraAnular: [] };
+  const lista: ListaCobranza = {
+    ...LISTA_VACIA,
+    porVerificar: [],
+    vencenHoy: [],
+    proximas: [],
+    enGracia: [],
+    paraAnular: [],
+    masAdelante: [],
+  };
 
   for (const filaPlan of planes) {
     const plan = armarPlan(filaPlan as Record<string, unknown>, porPlan.get(String(filaPlan.id)) ?? []);
@@ -760,6 +774,7 @@ export async function listaDeCobranza(
         lista.porVerificar.push(item);
       } else if (dias > 0) {
         if (dias <= diasProximas) lista.proximas.push(item);
+        else lista.masAdelante.push(item);
       } else if (dias === 0) {
         lista.vencenHoy.push(item);
       } else if (-dias <= DIAS_GRACIA) {
@@ -777,6 +792,7 @@ export async function listaDeCobranza(
   lista.proximas.sort(porFecha);
   lista.enGracia.sort(porFecha);
   lista.paraAnular.sort(porFecha);
+  lista.masAdelante.sort(porFecha);
 
   return lista;
 }
