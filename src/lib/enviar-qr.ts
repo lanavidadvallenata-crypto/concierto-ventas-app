@@ -139,8 +139,15 @@ export async function enviarCorreoPendiente(params: {
   referencia?: string | null;
   // grupo_id de la compra: asunto único + cabecera anti-agrupación (ver codigoCompra).
   grupoId?: string;
+  // Solo en compras con plan Abona618. Cuando viene, el correo habla de la
+  // INICIAL y no del total: el comprador transfirió 56 de 140 y Finanzas tiene
+  // que buscar 56 en el banco, no 140 (decisión de Anita, 12 oct — "recibimos
+  // tu pago inicial es lo que debe decir"). Sin este parámetro el correo sale
+  // exactamente igual que siempre, que es como se queda para el contado.
+  plan?: { inicialUsd: number; inicialBs?: number | null; pagosRestantes: number };
 }) {
   const resend = clienteResend("el correo de bienvenida");
+  const plan = params.plan;
   const codigo = params.grupoId ? codigoCompra(params.grupoId) : null;
   const nombre = escapeHtml(params.nombreComprador);
   const cantidad = params.cantidad ?? 1;
@@ -158,8 +165,19 @@ export async function enviarCorreoPendiente(params: {
     params.tipo && params.totalUsd != null
       ? `<div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
           <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${params.tipo === "vip" ? "VIP" : "General"}</strong>${
-          desglose ? "" : ` · ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}`
-        }${desglose}${params.referencia ? `<div style="color:#8A8782;font-size:12.5px;margin-top:6px;">Referencia de pago: ${escapeHtml(params.referencia)}</div>` : ""}${
+          desglose || plan ? "" : ` · ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}`
+        }${desglose}${
+          plan
+            ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-top:1px solid #E4DDD0;padding-top:6px;">
+                ${filaMonto("Total de tu compra", fmtUsd(params.totalUsd ?? 0))}
+                ${filaMonto(
+                  "Pago inicial que reportaste",
+                  `${fmtUsd(plan.inicialUsd)}${plan.inicialBs != null ? ` · ${fmtBs(plan.inicialBs)}` : ""}`,
+                  true
+                )}
+              </table>`
+            : ""
+        }${params.referencia ? `<div style="color:#8A8782;font-size:12.5px;margin-top:6px;">Referencia de pago: ${escapeHtml(params.referencia)}</div>` : ""}${
           codigo ? `<div style="color:#8A8782;font-size:12.5px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>` : ""
         }
         </div>`
@@ -203,15 +221,27 @@ export async function enviarCorreoPendiente(params: {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
             <td align="center" style="padding-bottom:14px;">
-              <div style="display:inline-block;background-color:#F1ECE2;color:#3D0507;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">Compra recibida</div>
+              <div style="display:inline-block;background-color:#F1ECE2;color:#3D0507;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">${plan ? "Pago inicial recibido" : "Compra recibida"}</div>
             </td>
           </tr>
         </table>
-        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, recibimos tu compra y ya estamos verificando tu pago.</p>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, ${
+          plan
+            ? "recibimos tu <strong>pago inicial</strong> y ya estamos verificando que llegue al banco."
+            : "recibimos tu compra y ya estamos verificando tu pago."
+        }</p>
         ${detalle}
-        <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">En cuanto se confirme, te llegará un correo a esta misma dirección con ${
-          cantidad > 1 ? "tus <strong>entradas y códigos QR</strong> de acceso (uno por persona)" : "tu <strong>entrada y código QR</strong> de acceso"
-        }. No necesitas hacer nada más por ahora.</p>
+        <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;">${
+          plan
+            ? `En cuanto lo confirmemos te escribimos con <strong>las fechas y los montos de tus ${
+                plan.pagosRestantes === 1 ? "pago restante" : `${plan.pagosRestantes} pagos restantes`
+              }</strong>. ${
+                cantidad > 1 ? "Tus códigos QR de acceso te llegan" : "Tu código QR de acceso te llega"
+              } cuando completes el total, no antes.`
+            : `En cuanto se confirme, te llegará un correo a esta misma dirección con ${
+                cantidad > 1 ? "tus <strong>entradas y códigos QR</strong> de acceso (uno por persona)" : "tu <strong>entrada y código QR</strong> de acceso"
+              }. No necesitas hacer nada más por ahora.`
+        }</p>
       </td>
     </tr>
     <tr>
@@ -231,7 +261,13 @@ export async function enviarCorreoPendiente(params: {
     from: remitente(),
     replyTo: respuestasA(),
     to: params.destinatario,
-    subject: codigo ? `Recibimos tu compra ${codigo} — La Navidad Vallenata` : "Recibimos tu compra — La Navidad Vallenata",
+    subject: plan
+      ? codigo
+        ? `Recibimos tu pago inicial ${codigo} — La Navidad Vallenata`
+        : "Recibimos tu pago inicial — La Navidad Vallenata"
+      : codigo
+        ? `Recibimos tu compra ${codigo} — La Navidad Vallenata`
+        : "Recibimos tu compra — La Navidad Vallenata",
     html,
     ...(params.grupoId ? { headers: { "X-Entity-Ref-ID": params.grupoId } } : {}),
   });
