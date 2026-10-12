@@ -654,6 +654,10 @@ export type ListaCobranza = {
    *  permiten adelantar pagos, y si alguien adelanta y el equipo no puede
    *  anotarlo, la promesa no vale nada. */
   masAdelante: CuotaPorCobrar[];
+  /** Las cuotas YA COBRADAS de cada compra, por grupo_id. La pantalla las
+   *  muestra dentro de la tarjeta de cada persona: sin ellas, el equipo ve lo
+   *  que falta pero no lo que ya pagó, y no puede saber si le escribe o no. */
+  pagadasPorGrupo: Record<string, { etiqueta: string; montoUsd: number }[]>;
   /** Totales para el encabezado: lo que falta cobrar y de cuántas compras. */
   saldoTotal: number;
   planesActivos: number;
@@ -667,6 +671,7 @@ const LISTA_VACIA: ListaCobranza = {
   enGracia: [],
   paraAnular: [],
   masAdelante: [],
+  pagadasPorGrupo: {},
   saldoTotal: 0,
   planesActivos: 0,
   vipEnPlan: 0,
@@ -736,6 +741,7 @@ export async function listaDeCobranza(
     enGracia: [],
     paraAnular: [],
     masAdelante: [],
+    pagadasPorGrupo: {},
   };
 
   for (const filaPlan of planes) {
@@ -747,6 +753,11 @@ export async function listaDeCobranza(
     if (plan.tipo === "vip") lista.vipEnPlan += plan.cantidad;
 
     const quien = contacto.get(plan.grupoId);
+
+    const pagadas = plan.cuotas
+      .filter((c) => c.verificadoEn)
+      .map((c) => ({ etiqueta: c.etiqueta, montoUsd: c.montoUsd }));
+    if (pagadas.length > 0) lista.pagadasPorGrupo[plan.grupoId] = pagadas;
 
     for (const c of plan.cuotas) {
       if (c.verificadoEn) continue;

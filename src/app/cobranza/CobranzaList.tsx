@@ -1,16 +1,29 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
-import { registrarPagoDeCuota, aprobarCuota, anularPorFaltaDePago } from "./actions";
+import { registrarPagoDeCuotas, aprobarCuotas, anularPorFaltaDePago } from "./actions";
 import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox, formatoUsd } from "@/lib/formato";
 import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
 import { codigoCompra } from "@/lib/compra";
+import { DOMINIO_RAIZ } from "@/lib/dominios";
 
-// El equipo trabaja desde el teléfono (es la razón por la que la barra de
-// navegación se rehizo en dos filas), así que esta pantalla es una sola
-// columna de tarjetas con área táctil grande, no una tabla.
+// Esta pantalla está armada POR PERSONA, no por cuota (Anita, 12 oct).
+//
+// La primera versión listaba cuotas: una compradora con tres pagos aparecía
+// como tres tarjetas en tres cajas distintas de la misma pantalla, y ninguna
+// decía lo que ya había pagado. Textual: "uno no sabe si hay que escribirle,
+// si debe, si no debe". Tenía razón — el equipo no cobra cuotas, atiende
+// personas, y la pregunta que trae a esta pantalla es siempre la misma:
+// ¿a quién le escribo ahora y qué le digo?
+//
+// Así que cada tarjeta es UNA persona, con una sola línea grande que dice qué
+// hacer con ella, lo que lleva pagado, lo que le falta, y un pago que puede
+// cubrir varias cuotas de una sola vez, porque así entra la plata.
+//
+// El equipo trabaja desde el teléfono, así que es una columna de tarjetas con
+// área táctil grande, no una tabla.
 
 type Aviso = { tipo: "ok" | "error"; texto: string };
 
@@ -30,6 +43,73 @@ const CANALES = [
   { valor: "otro", etiqueta: "Otro" },
 ] as const;
 
+/** De más urgente a menos. El orden MANDA: define en qué caja cae cada
+ *  persona y qué dice su tarjeta, que es toda la utilidad de la pantalla. */
+const URGENCIAS = ["paraAnular", "enGracia", "vencenHoy", "porVerificar", "proximas", "masAdelante"] as const;
+type Urgencia = (typeof URGENCIAS)[number];
+
+const SECCIONES: Record<Urgencia, { titulo: string; nota: string; tono: string; barra: string }> = {
+  paraAnular: {
+    titulo: "Hay que anular",
+    nota: "Se les pasó la fecha y no pagaron. Confirma por WhatsApp antes de liberar la entrada.",
+    tono: "border-neutral-400 bg-neutral-100",
+    barra: "bg-neutral-500",
+  },
+  enGracia: {
+    titulo: "Última llamada",
+    nota: "Ya vencieron. Si no pagan hoy, su entrada se libera.",
+    tono: "border-red-300 bg-red-50",
+    barra: "bg-red-500",
+  },
+  vencenHoy: {
+    titulo: "Vencen hoy",
+    nota: "Escríbeles hoy mismo.",
+    tono: "border-amber-300 bg-amber-50",
+    barra: "bg-amber-500",
+  },
+  porVerificar: {
+    titulo: "Pagaron · falta confirmar en el banco",
+    nota: "Trabajo de Finanzas. A estas personas NO hay que cobrarles nada.",
+    tono: "border-sky-300 bg-sky-50",
+    barra: "bg-sky-500",
+  },
+  proximas: {
+    titulo: "Al día · les toca pronto",
+    nota: "Un recordatorio suave, sin apuro.",
+    tono: "border-neutral-200 bg-white",
+    barra: "bg-emerald-500",
+  },
+  masAdelante: {
+    titulo: "Al día",
+    nota: "No hay que escribirles. Aquí se anotan los que adelantan su pago.",
+    tono: "border-neutral-200 bg-white",
+    barra: "bg-emerald-500",
+  },
+};
+
+type CuotaConUrgencia = CuotaPorCobrar & { urgencia: Urgencia };
+
+type Persona = {
+  grupoId: string;
+  nombre: string | null;
+  telefono: string | null;
+  email: string | null;
+  tipo: "vip" | "general";
+  cantidad: number;
+  totalUsd: number;
+  pagado: number;
+  saldo: number;
+  urgencia: Urgencia;
+  /** Las cuotas sin cobrar, de la más urgente a la menos. */
+  pendientes: CuotaConUrgencia[];
+  /** Las que ya están cobradas, para que se vea lo que la persona YA pagó. */
+  pagadas: { etiqueta: string; montoUsd: number }[];
+  /** Las que ya reportó y están esperando al banco: el trabajo de Finanzas. */
+  anotadas: CuotaConUrgencia[];
+  /** La cuota que manda en su tarjeta. */
+  manda: CuotaConUrgencia;
+};
+
 /** 0414-1234567 → 584141234567, que es lo que wa.me necesita. */
 function paraWhatsApp(telefono: string | null): string | null {
   if (!telefono) return null;
@@ -39,9 +119,10 @@ function paraWhatsApp(telefono: string | null): string | null {
   return `58${d.replace(/^0+/, "")}`;
 }
 
-function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo, tasaEurVes: number | null): string {
-  const nombre = (c.compradorNombre ?? "").split(" ")[0] || "";
+function mensajeWhatsApp(p: Persona, tasaEurVes: number | null): string {
+  const nombre = (p.nombre ?? "").split(" ")[0] || "";
   const hola = nombre ? `Hola ${nombre}` : "Hola";
+  const c = p.manda;
   // El monto en bolívares va en el mensaje, pero SIEMPRE con "hoy" pegado:
   // mañana es otro número, y quien recibe el mensaje tiene que saberlo antes
   // de transferir de menos.
@@ -52,20 +133,20 @@ function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo, tasaEurVes: number | n
   // Ninguno de estos mensajes menciona los días de gracia (Anita, 12 oct):
   // "si no, esperan hasta el último día y piden más prórroga". El comprador
   // sabe su fecha; el margen que tiene el equipo por dentro no se regala.
-  if (grupo === "enGracia") {
+  if (p.urgencia === "enGracia") {
     return (
       `${hola}, te escribo de La Navidad Vallenata. Tu pago de ${monto} venció el ${cuando} ` +
       `y todavía no nos ha llegado, así que tu entrada está a punto de liberarse. ` +
       `¿Ya lo hiciste? Si tienes la referencia mándamela ahora mismo y la registro de una.`
     );
   }
-  if (grupo === "vencenHoy") {
+  if (p.urgencia === "vencenHoy") {
     return (
       `${hola}, te escribo de La Navidad Vallenata. Hoy vence tu pago de ${monto}. ` +
       `Cuando lo hagas, mándame la referencia por aquí y yo lo registro. ¿Te paso los datos?`
     );
   }
-  if (grupo === "paraAnular") {
+  if (p.urgencia === "paraAnular") {
     return (
       `${hola}, te escribo de La Navidad Vallenata. Tu pago de ${monto} venció el ${cuando} ` +
       `y no nos ha llegado, así que tu entrada entró en la lista para volver a la venta. ` +
@@ -74,7 +155,7 @@ function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo, tasaEurVes: number | n
   }
   // Ya reportó y está esperando al banco: pedirle plata otra vez es el error
   // que tenía esta pantalla. Aquí se tranquiliza, no se cobra.
-  if (grupo === "porVerificar") {
+  if (p.urgencia === "porVerificar") {
     return (
       `${hola}, te escribo de La Navidad Vallenata. Recibimos tu pago de ${monto} y lo estamos ` +
       `confirmando con el banco; te aviso en cuanto quede listo. Tu entrada sigue apartada a tu nombre.`
@@ -82,50 +163,28 @@ function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo, tasaEurVes: number | n
   }
   return (
     `${hola}, te escribo de La Navidad Vallenata. Te recuerdo que el ${cuando} vence tu pago de ${monto} ` +
-    `(te falta ${formatoUsd(c.saldo)} para completar tu entrada). Cuando pagues, mándame la referencia por aquí.`
+    `(te falta ${formatoUsd(p.saldo)} para completar tu entrada). Cuando pagues, mándame la referencia por aquí.`
   );
 }
 
-type Grupo = "porVerificar" | "vencenHoy" | "enGracia" | "paraAnular" | "proximas" | "masAdelante";
-
-const SECCIONES: { clave: Grupo; titulo: string; nota: string; tono: string }[] = [
-  {
-    clave: "enGracia",
-    titulo: "En plazo de gracia",
-    nota: "Ya vencieron. Última llamada antes de liberar la entrada.",
-    tono: "border-red-300 bg-red-50",
-  },
-  {
-    clave: "vencenHoy",
-    titulo: "Vencen hoy",
-    nota: "Escríbeles hoy mismo.",
-    tono: "border-amber-300 bg-amber-50",
-  },
-  {
-    clave: "porVerificar",
-    titulo: "Anotados, por confirmar en el banco",
-    nota: "Trabajo de Finanzas: confirmar que el dinero entró.",
-    tono: "border-sky-300 bg-sky-50",
-  },
-  {
-    clave: "paraAnular",
-    titulo: "Se pasó el plazo",
-    nota: "Hay que anular y devolver la entrada a la venta.",
-    tono: "border-neutral-400 bg-neutral-100",
-  },
-  {
-    clave: "proximas",
-    titulo: "Próximas a vencer",
-    nota: "Recordatorio suave, sin apuro.",
-    tono: "border-neutral-200 bg-white",
-  },
-  {
-    clave: "masAdelante",
-    titulo: "Más adelante",
-    nota: "Todavía no hay que llamarlos. Aquí se anotan los que adelantan su pago.",
-    tono: "border-neutral-200 bg-white",
-  },
-];
+/** La línea grande de la tarjeta: lo único que el equipo tiene que leer. */
+function queHacer(p: Persona): string {
+  const c = p.manda;
+  switch (p.urgencia) {
+    case "paraAnular":
+      return `Se le pasó la fecha de ${c.etiqueta} (${fechaCorta(c.venceEl)}). Hay que anular y revender.`;
+    case "enGracia":
+      return `Debe ${formatoUsd(c.montoUsd)} desde el ${fechaCorta(c.venceEl)}. Escríbele ya.`;
+    case "vencenHoy":
+      return `Hoy le vence ${formatoUsd(c.montoUsd)}. Escríbele hoy mismo.`;
+    case "porVerificar":
+      return `Pagó ${formatoUsd(p.anotadas.reduce((s, x) => s + x.montoUsd, 0))}. Finanzas tiene que confirmarlo en el banco.`;
+    case "proximas":
+      return `Al día. Le toca ${formatoUsd(c.montoUsd)} el ${fechaCorta(c.venceEl)}.`;
+    default:
+      return `Al día — no hay que escribirle. Próximo pago el ${fechaCorta(c.venceEl)}.`;
+  }
+}
 
 export default function CobranzaList({
   lista,
@@ -154,6 +213,41 @@ export default function CobranzaList({
 
   const puedeAprobar = miRol === "finanzas" || miRol === "admin";
 
+  // Una fila por cuota se vuelve una fila por persona. La urgencia de la
+  // persona es la de su cuota más urgente: si debe algo desde ayer, no
+  // importa que tenga otra cuota tranquila para diciembre.
+  const personas = useMemo<Persona[]>(() => {
+    const porGrupo = new Map<string, Persona>();
+    for (const urgencia of URGENCIAS) {
+      for (const c of lista[urgencia]) {
+        const item: CuotaConUrgencia = { ...c, urgencia };
+        const ya = porGrupo.get(c.grupoId);
+        if (ya) {
+          ya.pendientes.push(item);
+          if (item.reportadoEn) ya.anotadas.push(item);
+          continue;
+        }
+        porGrupo.set(c.grupoId, {
+          grupoId: c.grupoId,
+          nombre: c.compradorNombre,
+          telefono: c.compradorTelefono,
+          email: c.compradorEmail,
+          tipo: c.tipo,
+          cantidad: c.cantidad,
+          totalUsd: c.totalUsd,
+          pagado: c.pagado,
+          saldo: c.saldo,
+          urgencia,
+          pendientes: [item],
+          pagadas: lista.pagadasPorGrupo[c.grupoId] ?? [],
+          anotadas: item.reportadoEn ? [item] : [],
+          manda: item,
+        });
+      }
+    }
+    return [...porGrupo.values()];
+  }, [lista]);
+
   function poner(id: string, aviso: Aviso) {
     setAvisos((prev) => ({ ...prev, [id]: aviso }));
   }
@@ -177,15 +271,6 @@ export default function CobranzaList({
       poner(id, { tipo: "ok", texto: res.aviso ?? "Listo." });
     });
   }
-
-  const totalPorCobrar = [
-    ...lista.enGracia,
-    ...lista.vencenHoy,
-    ...lista.porVerificar,
-    ...lista.paraAnular,
-    ...lista.proximas,
-    ...lista.masAdelante,
-  ].length;
 
   return (
     <div className="space-y-5">
@@ -226,81 +311,110 @@ export default function CobranzaList({
         </p>
       </header>
 
-      {totalPorCobrar === 0 && (
+      {personas.length === 0 && (
         <p className="text-sm text-neutral-500 py-6 text-center">
-          No hay cuotas por cobrar ahora mismo. Nada pendiente.
+          No hay nada por cobrar ahora mismo. Nadie debe nada.
         </p>
       )}
 
-      {SECCIONES.map((sec) => {
-        const items = lista[sec.clave];
-        if (items.length === 0) return null;
+      {URGENCIAS.map((urgencia) => {
+        const sec = SECCIONES[urgencia];
+        const gente = personas.filter((p) => p.urgencia === urgencia);
+        if (gente.length === 0) return null;
+
         return (
-          <section key={sec.clave} className="space-y-2">
+          <section key={urgencia} className="space-y-2">
             <div>
               <h2 className="text-sm font-semibold">
-                {sec.titulo} <span className="text-neutral-400 font-normal">· {items.length}</span>
+                {sec.titulo} <span className="text-neutral-400 font-normal">· {gente.length}</span>
               </h2>
               <p className="text-xs text-neutral-500">{sec.nota}</p>
             </div>
 
-            {items.map((c) => {
-              const wa = paraWhatsApp(c.compradorTelefono);
-              const aviso = avisos[c.cuotaId];
-              const esteProcesando = procesando === c.cuotaId;
-              const enBs = METODOS_EN_BS.has(c.metodoPago ?? "");
+            {gente.map((p) => {
+              const wa = paraWhatsApp(p.telefono);
+              const aviso = avisos[p.grupoId];
+              const esteProcesando = procesando === p.grupoId;
+              const avance = p.totalUsd > 0 ? Math.round((p.pagado / p.totalUsd) * 100) : 0;
 
               return (
-                <article key={c.cuotaId} className={`rounded-xl border px-3 py-3 space-y-2 ${sec.tono}`}>
+                <article key={p.grupoId} className={`rounded-xl border px-3 py-3 space-y-2.5 ${sec.tono}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-medium text-sm truncate">
-                        {c.compradorNombre ?? "Sin nombre"}
-                        <span className="text-neutral-400 font-normal font-mono text-xs"> · {codigoCompra(c.grupoId)}</span>
+                        {p.nombre ?? "Sin nombre"}
+                        <span className="text-neutral-400 font-normal font-mono text-xs"> · {codigoCompra(p.grupoId)}</span>
                       </p>
                       <p className="text-xs text-neutral-600">
-                        {c.cantidad} {c.tipo === "vip" ? (c.cantidad === 1 ? "VIP" : "VIP") : c.cantidad === 1 ? "General" : "Generales"}
-                        {" · "}
-                        {c.etiqueta}
-                        {" · vence "}
-                        {fechaCorta(c.venceEl)}
-                        {c.diasParaVencer < 0 && ` (${-c.diasParaVencer} ${-c.diasParaVencer === 1 ? "día" : "días"} tarde)`}
+                        {p.cantidad} {p.tipo === "vip" ? "VIP" : p.cantidad === 1 ? "General" : "Generales"} ·{" "}
+                        {formatoUsd(p.totalUsd)}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="font-semibold text-sm tabular-nums">{formatoUsd(c.montoUsd)}</div>
+                      <div className="font-semibold text-sm tabular-nums">falta {formatoUsd(p.saldo)}</div>
                       <div className="text-[11px] text-neutral-600 tabular-nums">
-                        {tasaEurVes ? formatoBsAprox(convertirABs(c.montoUsd, tasaEurVes)) : SIN_TASA}
+                        {tasaEurVes ? formatoBsAprox(convertirABs(p.saldo, tasaEurVes)) : SIN_TASA}
                       </div>
-                      <div className="text-[11px] text-neutral-500">de {formatoUsd(c.totalUsd)}</div>
                     </div>
                   </div>
 
-                  <p className="text-xs text-neutral-600">
-                    Pagado {formatoUsd(c.pagado)} · <strong>falta {formatoUsd(c.saldo)}</strong>
-                    {tasaEurVes ? <span className="text-neutral-500"> ({formatoBsAprox(convertirABs(c.saldo, tasaEurVes))})</span> : null}
-                  </p>
+                  {/* Lo único que el equipo tiene que leer para saber qué hacer. */}
+                  <p className="text-sm font-semibold text-neutral-900">{queHacer(p)}</p>
 
-                  {c.reportadoEn && (
-                    <div className="text-xs rounded-md bg-white/70 border border-neutral-200 px-2 py-1.5 space-y-0.5">
-                      <p>
-                        <strong>{ETIQUETA_METODO[c.metodoPago ?? ""] ?? c.metodoPago}</strong>
-                        {c.referenciaPago ? ` · ref. ${c.referenciaPago}` : ""}
-                        {enBs && c.montoBs != null ? ` · ${formatoBs(c.montoBs)}` : ""}
-                      </p>
-                      <p className="text-neutral-500">
-                        {c.reportadoPor
-                          ? `Anotado por ${nombrePorId[c.reportadoPor] ?? "alguien del equipo"}${c.canalReporte ? ` (${c.canalReporte})` : ""}`
-                          : "Lo reportó el comprador desde su página"}
-                      </p>
-                      {c.nota && <p className="text-neutral-600 italic">“{c.nota}”</p>}
+                  <div>
+                    <div className="h-1.5 w-full rounded-full bg-white/80 overflow-hidden">
+                      <div className={`h-full rounded-full ${sec.barra}`} style={{ width: `${avance}%` }} />
                     </div>
-                  )}
+                    <p className="text-xs text-neutral-600 mt-1 tabular-nums">
+                      Pagó {formatoUsd(p.pagado)} de {formatoUsd(p.totalUsd)}
+                    </p>
+                  </div>
+
+                  <ul className="text-xs rounded-md bg-white/70 border border-neutral-200 divide-y divide-neutral-100">
+                    {p.pagadas.map((c) => (
+                      <li key={c.etiqueta} className="flex items-center justify-between gap-2 px-2 py-1.5">
+                        <span className="text-neutral-500">
+                          <span className="text-emerald-700 font-semibold">✓</span> {c.etiqueta}
+                        </span>
+                        <span className="tabular-nums text-neutral-500">{formatoUsd(c.montoUsd)} · pagada</span>
+                      </li>
+                    ))}
+                    {p.pendientes.map((c) => (
+                      <li key={c.cuotaId} className="px-2 py-1.5 space-y-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-neutral-800">{c.etiqueta}</span>
+                          <span className="tabular-nums">
+                            {formatoUsd(c.montoUsd)}
+                            <span className="text-neutral-500">
+                              {" · "}
+                              {c.reportadoEn
+                                ? "por confirmar"
+                                : `vence ${fechaCorta(c.venceEl)}${c.diasParaVencer < 0 ? ` (${-c.diasParaVencer} ${-c.diasParaVencer === 1 ? "día" : "días"} tarde)` : ""}`}
+                            </span>
+                          </span>
+                        </div>
+                        {c.reportadoEn && (
+                          <div className="text-neutral-500">
+                            {ETIQUETA_METODO[c.metodoPago ?? ""] ?? c.metodoPago}
+                            {c.referenciaPago ? ` · ref. ${c.referenciaPago}` : ""}
+                            {METODOS_EN_BS.has(c.metodoPago ?? "") && c.montoBs != null ? ` · ${formatoBs(c.montoBs)}` : ""}
+                            {" · "}
+                            {c.reportadoPor
+                              ? `anotado por ${nombrePorId[c.reportadoPor] ?? "alguien del equipo"}`
+                              : "lo reportó el comprador"}
+                          </div>
+                        )}
+                        {c.nota && <div className="text-neutral-600 italic">“{c.nota}”</div>}
+                      </li>
+                    ))}
+                  </ul>
 
                   {aviso && (
                     <p
                       className={`text-xs rounded-md px-2 py-1.5 ${
-                        aviso.tipo === "ok" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-800 border border-red-200"
+                        aviso.tipo === "ok"
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          : "bg-red-50 text-red-800 border border-red-200"
                       }`}
                     >
                       {aviso.texto}
@@ -308,53 +422,66 @@ export default function CobranzaList({
                   )}
 
                   <div className="flex flex-wrap gap-2 pt-0.5">
-                    {!wa && (
-                      <span className="h-11 px-1 inline-flex items-center text-xs text-neutral-500">
-                        {c.compradorEmail ? `Sin WhatsApp · ${c.compradorEmail}` : "Sin teléfono ni correo"}
-                      </span>
-                    )}
-                    {wa && (
+                    {wa ? (
                       <a
-                        href={`https://wa.me/${wa}?text=${encodeURIComponent(mensajeWhatsApp(c, sec.clave, tasaEurVes))}`}
+                        href={`https://wa.me/${wa}?text=${encodeURIComponent(mensajeWhatsApp(p, tasaEurVes))}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="h-11 px-3 inline-flex items-center rounded-lg bg-[#25D366] text-white text-sm font-semibold"
                       >
                         WhatsApp
                       </a>
+                    ) : (
+                      <span className="h-11 px-1 inline-flex items-center text-xs text-neutral-500">
+                        {p.email ? `Sin WhatsApp · ${p.email}` : "Sin teléfono ni correo"}
+                      </span>
                     )}
 
-                    {sec.clave === "porVerificar" ? (
-                      puedeAprobar ? (
-                        <button
-                          type="button"
-                          disabled={esteProcesando}
-                          onClick={() => correr(c.cuotaId, () => aprobarCuota(c.cuotaId))}
-                          className="h-11 px-3 rounded-lg bg-marca-secundario text-white text-sm font-semibold disabled:opacity-50"
-                        >
-                          {esteProcesando ? "Confirmando…" : "Confirmé el dinero en el banco"}
-                        </button>
-                      ) : (
-                        <span className="h-11 px-1 inline-flex items-center text-xs text-neutral-500">
-                          Esperando a Finanzas
-                        </span>
-                      )
-                    ) : (
+                    {/* La misma página que ve el comprador: avance, cuotas y
+                        datos de pago. Se le puede pasar el enlace tal cual. */}
+                    <a
+                      href={`https://${DOMINIO_RAIZ}/compra/${p.grupoId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="h-11 px-3 inline-flex items-center rounded-lg border border-neutral-300 bg-white text-sm font-semibold"
+                    >
+                      Ver su plan
+                    </a>
+
+                    {p.anotadas.length > 0 && puedeAprobar && (
                       <button
                         type="button"
-                        onClick={() => setAbierto(abierto === c.cuotaId ? null : c.cuotaId)}
+                        disabled={esteProcesando}
+                        onClick={() => correr(p.grupoId, () => aprobarCuotas(p.anotadas.map((c) => c.cuotaId)))}
+                        className="h-11 px-3 rounded-lg bg-marca-secundario text-white text-sm font-semibold disabled:opacity-50"
+                      >
+                        {esteProcesando
+                          ? "Confirmando…"
+                          : `Confirmé ${p.anotadas.length > 1 ? "los pagos" : "el dinero"} en el banco`}
+                      </button>
+                    )}
+                    {p.anotadas.length > 0 && !puedeAprobar && (
+                      <span className="h-11 px-1 inline-flex items-center text-xs text-neutral-500">
+                        Esperando a Finanzas
+                      </span>
+                    )}
+
+                    {p.pendientes.some((c) => !c.reportadoEn) && (
+                      <button
+                        type="button"
+                        onClick={() => setAbierto(abierto === p.grupoId ? null : p.grupoId)}
                         className="h-11 px-3 rounded-lg border border-neutral-300 bg-white text-sm font-semibold"
                       >
-                        {abierto === c.cuotaId ? "Cerrar" : "Anotar su pago"}
+                        {abierto === p.grupoId ? "Cerrar" : "Anotar un pago"}
                       </button>
                     )}
 
-                    {sec.clave === "paraAnular" && puedeAprobar && (
-                      confirmando === c.cuotaId ? (
+                    {p.urgencia === "paraAnular" && puedeAprobar && (
+                      confirmando === p.grupoId ? (
                         <button
                           type="button"
                           disabled={esteProcesando}
-                          onClick={() => correr(c.cuotaId, () => anularPorFaltaDePago(c.grupoId))}
+                          onClick={() => correr(p.grupoId, () => anularPorFaltaDePago(p.grupoId))}
                           className="h-11 px-3 rounded-lg bg-red-600 text-white text-sm font-semibold disabled:opacity-50"
                         >
                           {esteProcesando ? "Anulando…" : "Sí, anular y revender"}
@@ -362,7 +489,7 @@ export default function CobranzaList({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => setConfirmando(c.cuotaId)}
+                          onClick={() => setConfirmando(p.grupoId)}
                           className="h-11 px-3 rounded-lg border border-red-300 text-red-700 bg-white text-sm font-semibold"
                         >
                           Anular por falta de pago
@@ -371,11 +498,11 @@ export default function CobranzaList({
                     )}
                   </div>
 
-                  {abierto === c.cuotaId && (
+                  {abierto === p.grupoId && (
                     <FormularioPago
-                      cuota={c}
+                      persona={p}
                       procesando={esteProcesando}
-                      onEnviar={(datos) => correr(c.cuotaId, () => registrarPagoDeCuota(datos))}
+                      onEnviar={(datos) => correr(p.grupoId, () => registrarPagoDeCuotas(datos))}
                     />
                   )}
                 </article>
@@ -393,14 +520,17 @@ export default function CobranzaList({
 }
 
 function FormularioPago({
-  cuota,
+  persona,
   procesando,
   onEnviar,
 }: {
-  cuota: CuotaPorCobrar;
+  persona: Persona;
   procesando: boolean;
   onEnviar: (datos: Record<string, unknown>) => void;
 }) {
+  // Solo se pueden anotar las que nadie anotó todavía.
+  const anotables = persona.pendientes.filter((c) => !c.reportadoEn);
+  const [elegidas, setElegidas] = useState<string[]>(anotables[0] ? [anotables[0].cuotaId] : []);
   const [metodo, setMetodo] = useState<string>("pago_movil");
   const [referencia, setReferencia] = useState("");
   const [montoBs, setMontoBs] = useState("");
@@ -408,6 +538,13 @@ function FormularioPago({
   const [nota, setNota] = useState("");
 
   const enBs = METODOS_EN_BS.has(metodo);
+  const total = Math.round(
+    anotables.filter((c) => elegidas.includes(c.cuotaId)).reduce((s, c) => s + c.montoUsd, 0) * 100
+  ) / 100;
+
+  function alternar(id: string) {
+    setElegidas((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
 
   return (
     <form
@@ -415,8 +552,8 @@ function FormularioPago({
       onSubmit={(e) => {
         e.preventDefault();
         onEnviar({
-          cuotaId: cuota.cuotaId,
-          grupoId: cuota.grupoId,
+          cuotaIds: elegidas,
+          grupoId: persona.grupoId,
           metodoPago: metodo,
           referenciaPago: referencia,
           canal,
@@ -425,9 +562,32 @@ function FormularioPago({
         });
       }}
     >
-      <p className="text-xs text-neutral-600">
-        Anota el pago de <strong>{formatoUsd(cuota.montoUsd)}</strong> tal como te lo mandó. Finanzas lo confirma
-        después en el banco: todavía no queda cobrado.
+      <div>
+        <p className="text-xs font-medium text-neutral-700">¿Qué cubre este pago?</p>
+        <p className="text-[11px] text-neutral-500 mb-1.5">
+          Marca todas las cuotas que cubrió. Si mandó un solo pago por dos, se anotan juntas con la misma referencia.
+        </p>
+        <div className="flex flex-col gap-1">
+          {anotables.map((c) => (
+            <label key={c.cuotaId} className="flex items-center gap-2.5 min-h-11 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={elegidas.includes(c.cuotaId)}
+                onChange={() => alternar(c.cuotaId)}
+                className="h-5 w-5 shrink-0 accent-[#3F0A62]"
+              />
+              <span className="text-sm">
+                {c.etiqueta} · <span className="font-semibold tabular-nums">{formatoUsd(c.montoUsd)}</span>
+                <span className="text-neutral-500 text-xs"> · vence {fechaCorta(c.venceEl)}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-xs text-neutral-700 border-t border-neutral-200 pt-2">
+        Vas a anotar <strong className="tabular-nums">{formatoUsd(total)}</strong>. Finanzas lo confirma después en el
+        banco: todavía no queda cobrado.
       </p>
 
       <label className="block">
@@ -468,6 +628,12 @@ function FormularioPago({
             className="mt-1 w-full h-11 rounded-lg border border-neutral-300 px-2 text-sm"
             required
           />
+          {elegidas.length > 1 && (
+            <span className="block text-[11px] text-neutral-500 mt-1">
+              Escribe el total del comprobante. Se reparte entre las cuotas que marcaste, para que los bolívares
+              cobrados cuadren con el banco.
+            </span>
+          )}
         </label>
       )}
 
@@ -498,10 +664,10 @@ function FormularioPago({
 
       <button
         type="submit"
-        disabled={procesando}
+        disabled={procesando || elegidas.length === 0}
         className="w-full h-11 rounded-lg bg-marca-secundario text-white text-sm font-semibold disabled:opacity-50"
       >
-        {procesando ? "Anotando…" : "Anotar el pago"}
+        {procesando ? "Anotando…" : elegidas.length === 0 ? "Marca al menos una cuota" : `Anotar ${formatoUsd(total)}`}
       </button>
     </form>
   );

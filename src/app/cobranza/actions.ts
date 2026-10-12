@@ -35,8 +35,30 @@ function revalidar() {
   revalidatePath("/dashboard");
 }
 
+/**
+ * Reparte un monto en bolívares entre varias cuotas, en proporción a lo que
+ * vale cada una y cuadrando al céntimo con el comprobante.
+ *
+ * Hace falta porque un comprobante trae UN número y puede cubrir varias
+ * cuotas: si se guardara el total en cada una, los bolívares cobrados del
+ * sistema saldrían al doble o al triple de lo que de verdad entró al banco.
+ */
+function repartirBs(total: number, pesos: number[]): number[] {
+  const centavos = Math.round(total * 100);
+  const suma = pesos.reduce((s, p) => s + p, 0);
+  if (suma <= 0) return pesos.map(() => 0);
+  const partes = pesos.map((p) => Math.round((centavos * p) / suma));
+  partes[partes.length - 1] += centavos - partes.reduce((s, x) => s + x, 0);
+  return partes.map((c) => Math.round(c) / 100);
+}
+
 const registrarSchema = z.object({
-  cuotaId: z.string().uuid(),
+  // Varias cuotas a la vez porque así llega la plata de verdad: la primera
+  // compradora real pagó $196 en UN solo Zelle, que cubría su inicial y su
+  // cuota 01. Con una cuota por formulario había que anotar el mismo pago dos
+  // veces, inventando cómo repartir el monto, y nadie se lo iba a imaginar
+  // solo (Anita, 12 oct).
+  cuotaIds: z.array(z.string().uuid()).min(1, "Elige al menos una cuota.").max(4),
   grupoId: z.string().uuid(),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
   referenciaPago: z.string().trim().min(1, "Escribe la referencia del pago."),
@@ -46,12 +68,12 @@ const registrarSchema = z.object({
 });
 
 /**
- * Ventas anota el pago que le llegó. NO lo da por cobrado: queda reportado
- * esperando a que Finanzas lo vea en el banco. Es el paso que faltaba para
- * que el cobro sea un proceso acompañado y no dependa de que el comprador
- * se acuerde de reportar por su cuenta.
+ * Ventas anota el pago que le llegó, cubriendo UNA o VARIAS cuotas con la
+ * misma referencia. NO lo da por cobrado: queda reportado esperando a que
+ * Finanzas lo vea en el banco. Es el paso que faltaba para que el cobro sea
+ * un proceso acompañado y no dependa de que el comprador se acuerde.
  */
-export async function registrarPagoDeCuota(input: unknown): Promise<Resultado> {
+export async function registrarPagoDeCuotas(input: unknown): Promise<Resultado> {
   const { user, error } = await requiereEquipo(["ventas", "finanzas", "admin"]);
   if (!user) return { ok: false, error: error! };
 
@@ -68,60 +90,145 @@ export async function registrarPagoDeCuota(input: unknown): Promise<Resultado> {
   }
 
   const service = createServiceClient();
-  const r = await reportarCuota(service, {
-    cuotaId: v.cuotaId,
-    grupoId: v.grupoId,
-    metodoPago: v.metodoPago,
-    referenciaPago: referencia,
-    montoBs: v.montoBs ?? null,
-    tasa: null,
-    reportadoPor: user.id,
-    canal: v.canal as CanalReporte,
-    nota: v.nota ?? null,
-  });
-  if (!r.ok) return { ok: false, error: r.error };
+
+  // Los montos se leen de la base, nunca del navegador: el reparto de los
+  // bolívares depende de ellos y es lo que después cuadra con el banco.
+  const plan = await leerPlanPorGrupo(service, v.grupoId);
+  if (!plan) return { ok: false, error: "No encontramos el plan de esa compra." };
+
+  const ids = [...new Set(v.cuotaIds)];
+  const elegidas = ids
+    .map((id) => plan.cuotas.find((c) => c.id === id))
+    .filter((c): c is NonNullable<typeof c> => Boolean(c) && !c!.verificadoEn);
+
+  if (elegidas.length !== ids.length) {
+    return {
+      ok: false,
+      error: "Alguna de esas cuotas ya está cobrada o no es de esta compra. Recarga la pantalla y vuelve a intentarlo.",
+    };
+  }
+
+  const totalUsd = Math.round(elegidas.reduce((s, c) => s + c.montoUsd, 0) * 100) / 100;
+  const bs = v.montoBs != null ? repartirBs(v.montoBs, elegidas.map((c) => c.montoUsd)) : null;
+
+  const nota = elegidas.length > 1
+    ? [`Un solo pago de ${usd(totalUsd)} cubre: ${elegidas.map((c) => c.etiqueta).join(", ")}.`, v.nota]
+        .filter(Boolean)
+        .join(" ")
+    : v.nota ?? null;
+
+  const anotadas: string[] = [];
+  for (let i = 0; i < elegidas.length; i++) {
+    const c = elegidas[i];
+    const r = await reportarCuota(service, {
+      cuotaId: c.id,
+      grupoId: v.grupoId,
+      metodoPago: v.metodoPago,
+      referenciaPago: referencia,
+      montoBs: bs ? bs[i] : null,
+      tasa: null,
+      reportadoPor: user.id,
+      canal: v.canal as CanalReporte,
+      nota,
+    });
+    if (!r.ok) {
+      revalidar();
+      return {
+        ok: false,
+        error: anotadas.length === 0
+          ? r.error
+          : `Se anotaron ${anotadas.join(" y ")}, pero ${c.etiqueta} falló: ${r.error}`,
+      };
+    }
+    anotadas.push(c.etiqueta);
+  }
 
   revalidar();
   return {
     ok: true,
-    aviso: "Pago anotado. Pasa a la cola de Finanzas para que lo confirmen en el banco — todavía no está cobrado.",
+    aviso:
+      `${anotadas.length === 1 ? "Pago anotado" : `Pago de ${usd(totalUsd)} anotado, cubre ${anotadas.join(" y ")}`}. ` +
+      "Pasa a la cola de Finanzas para que lo confirmen en el banco — todavía no está cobrado.",
   };
 }
 
 /**
- * Finanzas confirma que el dinero entró. Si con esa cuota el plan queda
- * completo, la compra sigue el camino normal: tickets a verificado, QR y
- * correo. Si no, sale el correo de cuota recibida y no se entrega nada.
+ * Finanzas confirma que el dinero entró. Acepta varias cuotas porque así se
+ * anotan: un solo pago puede cubrir más de una, y aprobarlas de a una le
+ * mandaría al comprador un correo por cada cuota del mismo pago.
+ *
+ * Si con esto el plan queda completo, la compra sigue el camino normal:
+ * tickets a verificado, QR y correo. Si no, sale UN correo de cuota recibida
+ * con el estado final y no se entrega nada.
  */
-export async function aprobarCuota(cuotaId: string): Promise<Resultado> {
+export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
   const { user, rol, error } = await requiereEquipo(["finanzas", "admin"]);
   if (!user) return { ok: false, error: error! };
 
+  const ids = [...new Set((cuotaIds ?? []).filter((x) => typeof x === "string" && x.length > 0))];
+  if (ids.length === 0) return { ok: false, error: "No elegiste ningún pago." };
+
   const service = createServiceClient();
 
-  const { data: cuotaFila } = await service
+  const { data: filas } = await service
     .from("cuotas")
-    .select("id, plan_id, reportado_por, reportado_en")
-    .eq("id", cuotaId)
+    .select("id, plan_id, etiqueta, reportado_por, reportado_en")
+    .in("id", ids);
+  const cuotasFila = filas ?? [];
+  if (cuotasFila.length !== ids.length) {
+    return { ok: false, error: "No encontramos alguno de esos pagos. Recarga la pantalla." };
+  }
+  if (new Set(cuotasFila.map((c) => String(c.plan_id))).size > 1) {
+    return { ok: false, error: "Esos pagos son de compras distintas: apruébalos por separado." };
+  }
+  for (const c of cuotasFila) {
+    if (!c.reportado_en) {
+      return { ok: false, error: `Nadie ha anotado ${c.etiqueta} todavía. Regístrala primero con la referencia.` };
+    }
+    // Control cruzado: quien anotó el pago no lo aprueba. El admin sí puede.
+    if (c.reportado_por === user.id && rol !== "admin") {
+      return {
+        ok: false,
+        error: "Este pago lo anotaste tú. Por control cruzado lo tiene que aprobar otra persona de Finanzas o un admin.",
+      };
+    }
+  }
+
+  const { data: planFila } = await service
+    .from("planes_pago")
+    .select("grupo_id")
+    .eq("id", cuotasFila[0].plan_id)
     .maybeSingle();
-  if (!cuotaFila) return { ok: false, error: "No encontramos esa cuota." };
-  if (!cuotaFila.reportado_en) {
-    return { ok: false, error: "Nadie ha anotado este pago todavía. Regístralo primero con la referencia." };
-  }
-  // Control cruzado: quien anotó el pago no lo aprueba. El admin sí puede.
-  if (cuotaFila.reportado_por === user.id && rol !== "admin") {
-    return {
-      ok: false,
-      error: "Este pago lo anotaste tú. Por control cruzado lo tiene que aprobar otra persona de Finanzas o un admin.",
-    };
-  }
-
-  const { data: planFila } = await service.from("planes_pago").select("grupo_id").eq("id", cuotaFila.plan_id).maybeSingle();
   const grupoId = planFila ? String(planFila.grupo_id) : null;
-  if (!grupoId) return { ok: false, error: "Esa cuota no tiene una compra asociada. Revísala a mano." };
+  if (!grupoId) return { ok: false, error: "Esos pagos no tienen una compra asociada. Revísalos a mano." };
 
-  const r = await verificarCuota(service, { cuotaId, verificadoPor: user.id });
-  if (!r.ok) return { ok: false, error: r.error };
+  // Una por una, en orden. Si alguna falla se informa y se para: las que ya
+  // pasaron quedan cobradas, que es la verdad del banco, y el reintento sobre
+  // una cuota ya verificada es idempotente.
+  const etiquetas: string[] = [];
+  let montoTotal = 0;
+  let completo = false;
+  let todasYaEstaban = true;
+  let ultimo: Awaited<ReturnType<typeof verificarCuota>> | null = null;
+
+  for (const id of ids) {
+    const r = await verificarCuota(service, { cuotaId: id, verificadoPor: user.id });
+    if (!r.ok) {
+      revalidar();
+      return {
+        ok: false,
+        error: etiquetas.length === 0 ? r.error : `Se aprobó ${etiquetas.join(" y ")}, pero la siguiente falló: ${r.error}`,
+      };
+    }
+    ultimo = r;
+    etiquetas.push(r.cuota.etiqueta);
+    montoTotal = Math.round((montoTotal + r.cuota.montoUsd) * 100) / 100;
+    if (r.completo) completo = true;
+    if (!r.yaEstaba) todasYaEstaban = false;
+  }
+
+  if (!ultimo || !ultimo.ok) return { ok: false, error: "No se pudo aprobar. Recarga la pantalla." };
+  const plan = ultimo.plan;
 
   const { data: tickets } = await service
     .from("tickets")
@@ -129,14 +236,15 @@ export async function aprobarCuota(cuotaId: string): Promise<Resultado> {
     .eq("grupo_id", grupoId);
   const lista = tickets ?? [];
   const primero = lista[0];
+  const queSeAprobo = etiquetas.join(" y ");
 
-  if (!r.completo) {
+  if (!completo) {
     revalidar();
     let aviso =
-      `${r.cuota.etiqueta} aprobada: ${usd(r.cuota.montoUsd)}. Lleva ${usd(r.plan.pagado)} de ` +
-      `${usd(r.plan.totalUsd)} y le falta ${usd(r.plan.saldo)}. No se entregó ningún QR.`;
+      `${queSeAprobo} ${etiquetas.length === 1 ? "aprobada" : "aprobadas"}: ${usd(montoTotal)}. ` +
+      `Lleva ${usd(plan.pagado)} de ${usd(plan.totalUsd)} y le falta ${usd(plan.saldo)}. No se entregó ningún QR.`;
 
-    if (r.yaEstaba) return { ok: true, aviso: `Esa cuota ya estaba aprobada. ${aviso}` };
+    if (todasYaEstaban) return { ok: true, aviso: `Eso ya estaba aprobado. ${aviso}` };
 
     const correo = primero?.comprador_email as string | null | undefined;
     if (correo) {
@@ -145,15 +253,15 @@ export async function aprobarCuota(cuotaId: string): Promise<Resultado> {
           destinatario: correo,
           nombreComprador: String(primero.comprador_nombre),
           grupoId,
-          etiquetaCuota: r.cuota.etiqueta,
-          montoVerificado: r.cuota.montoUsd,
-          totalUsd: r.plan.totalUsd,
-          pagado: r.plan.pagado,
-          saldo: r.plan.saldo,
-          pendientes: r.plan.cuotas
+          etiquetaCuota: queSeAprobo,
+          montoVerificado: montoTotal,
+          totalUsd: plan.totalUsd,
+          pagado: plan.pagado,
+          saldo: plan.saldo,
+          pendientes: plan.cuotas
             .filter((c) => !c.verificadoEn)
             .map((c) => ({ etiqueta: c.etiqueta, monto: c.montoUsd, venceEl: fechaCorta(c.venceEl) })),
-          proximaFecha: r.plan.proxima ? fechaCorta(r.plan.proxima.venceEl) : null,
+          proximaFecha: plan.proxima ? fechaCorta(plan.proxima.venceEl) : null,
         });
       } catch (e) {
         console.error("Error enviando correo de cuota verificada:", (e as Error).message);
@@ -226,7 +334,7 @@ export async function aprobarCuota(cuotaId: string): Promise<Resultado> {
 }
 
 /**
- * Anular por falta de pago: se pasó el plazo de gracia, la entrada vuelve al
+ * Anular por falta de pago: se pasó el margen interno, la entrada vuelve al
  * inventario y lo abonado no se devuelve. Mientras no exista el cron, esto se
  * hace a mano desde la pantalla de cobranza.
  */
