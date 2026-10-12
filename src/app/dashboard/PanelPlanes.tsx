@@ -1,5 +1,7 @@
 import Link from "next/link";
 import type { Config, ResumenPlanes } from "@/lib/abona618";
+import { convertirABs } from "@/lib/tasa";
+import { formatoBsAprox } from "@/lib/formato";
 
 // La tarjeta de Abona618 en el dashboard. Responde cuatro preguntas y nada
 // más: cuánta plata hay comprometida y cuánta ya entró, si hay cobros
@@ -7,15 +9,21 @@ import type { Config, ResumenPlanes } from "@/lib/abona618";
 // planes que se cayeron.
 
 const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+const bs = (usd: number, tasa: number | null) => (tasa ? formatoBsAprox(convertirABs(usd, tasa)) : null);
 
 export default function PanelPlanes({
   resumen,
   config,
   puedeCobrar,
+  tasaEurVes,
 }: {
   resumen: ResumenPlanes;
   config: Config;
   puedeCobrar: boolean;
+  /** Tasa BCV del euro de hoy. Todo lo de esta tarjeta es dinero que todavía
+   *  no entró o que entró en fechas distintas, así que el bolívar aquí es
+   *  SIEMPRE estimado y sale con ≈. */
+  tasaEurVes: number | null;
 }) {
   // Ni planes ni módulo encendido: no hay nada que decir y la tarjeta sería ruido.
   if (!resumen.hayPlanes && !resumen.error && !config.activo) return null;
@@ -61,12 +69,18 @@ export default function PanelPlanes({
                 <p className="text-3xl font-semibold text-marca-secundario">
                   ${fmt(resumen.enCurso.cobradoUsd)}
                 </p>
+                {bs(resumen.enCurso.cobradoUsd, tasaEurVes) && (
+                  <p className="text-xs text-neutral-500 tabular-nums">{bs(resumen.enCurso.cobradoUsd, tasaEurVes)}</p>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-xs text-neutral-500">de ${fmt(resumen.enCurso.valorUsd)} comprometido</p>
                 <p className="text-sm font-semibold tabular-nums">
                   por cobrar ${fmt(resumen.enCurso.porCobrarUsd)}
                 </p>
+                {bs(resumen.enCurso.porCobrarUsd, tasaEurVes) && (
+                  <p className="text-xs text-neutral-500 tabular-nums">{bs(resumen.enCurso.porCobrarUsd, tasaEurVes)}</p>
+                )}
               </div>
             </div>
             <div className="mt-2 h-2 rounded-full bg-neutral-100 overflow-hidden">
@@ -84,8 +98,9 @@ export default function PanelPlanes({
 
           {resumen.vencidoSinCobrarUsd > 0 && (
             <p className="text-sm text-red-600">
-              ${fmt(resumen.vencidoSinCobrarUsd)} atrasados: cuotas que ya vencieron y nadie ha
-              confirmado.
+              ${fmt(resumen.vencidoSinCobrarUsd)}
+              {bs(resumen.vencidoSinCobrarUsd, tasaEurVes) ? ` (${bs(resumen.vencidoSinCobrarUsd, tasaEurVes)})` : ""} atrasados:
+              cuotas que ya vencieron y nadie ha confirmado.
               {puedeCobrar && (
                 <>
                   {" "}
@@ -99,7 +114,8 @@ export default function PanelPlanes({
 
           {resumen.proximoUsd > 0 && (
             <p className="text-sm text-amber-600">
-              ${fmt(resumen.proximoUsd)} vencen esta semana.
+              ${fmt(resumen.proximoUsd)}
+              {bs(resumen.proximoUsd, tasaEurVes) ? ` (${bs(resumen.proximoUsd, tasaEurVes)})` : ""} vencen esta semana.
               {puedeCobrar && (
                 <>
                   {" "}
@@ -149,6 +165,9 @@ export default function PanelPlanes({
               <p className="text-sm font-semibold tabular-nums">
                 {resumen.completados.compras} · ${fmt(resumen.completados.valorUsd)}
               </p>
+              {resumen.completados.valorUsd > 0 && bs(resumen.completados.valorUsd, tasaEurVes) && (
+                <p className="text-[11px] text-neutral-500 tabular-nums">{bs(resumen.completados.valorUsd, tasaEurVes)}</p>
+              )}
               <p className="text-[11px] text-neutral-400">ya suman en el recaudado de arriba</p>
             </div>
             <div className="pt-3">
@@ -156,6 +175,9 @@ export default function PanelPlanes({
               <p className="text-sm font-semibold tabular-nums">
                 {resumen.caidos.vencidos + resumen.caidos.anulados} · ${fmt(resumen.caidos.abonadoUsd)}
               </p>
+              {resumen.caidos.abonadoUsd > 0 && bs(resumen.caidos.abonadoUsd, tasaEurVes) && (
+                <p className="text-[11px] text-neutral-500 tabular-nums">{bs(resumen.caidos.abonadoUsd, tasaEurVes)}</p>
+              )}
               <p className="text-[11px] text-neutral-400">
                 {resumen.caidos.vencidos} por falta de pago · {resumen.caidos.anulados} anulados a mano
               </p>

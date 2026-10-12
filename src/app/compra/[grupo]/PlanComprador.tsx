@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { reportarMiPago } from "./actions";
 import { CONDICIONES, fechaCorta, fechaLarga } from "@/lib/cuotas";
+import { convertirABs } from "@/lib/tasa";
+import { NOTA_TASA, SIN_TASA, formatoBs, formatoBsAprox } from "@/lib/formato";
 
 // Lo que ve el comprador en plan cuando abre su compra. Hasta ahora esta
 // página solo sabía de entradas con QR, y a quien está pagando en cuotas le
@@ -20,6 +22,10 @@ export type CuotaVista = {
   graciaHasta: string;
   pagada: boolean;
   reportada: boolean;
+  /** Los bolívares que de verdad entraron por esta cuota, si se pagó en Bs.
+   *  Es un dato histórico y no se recalcula: es lo que la persona transfirió
+   *  ese día, a la tasa de ese día. */
+  montoBsPagado: number | null;
 };
 
 const METODOS = [
@@ -39,6 +45,7 @@ export default function PlanComprador({
   cuotas,
   fechaTope,
   instrucciones,
+  tasaEurVes,
 }: {
   grupoId: string;
   total: number;
@@ -47,6 +54,9 @@ export default function PlanComprador({
   cuotas: CuotaVista[];
   fechaTope: string;
   instrucciones: Record<string, string>;
+  /** Tasa BCV del euro de hoy. null = no se pudo leer; entonces no se muestra
+   *  ningún monto en bolívares, nunca uno inventado. */
+  tasaEurVes: number | null;
 }) {
   const [, startTransition] = useTransition();
   const [abierto, setAbierto] = useState(false);
@@ -71,6 +81,11 @@ export default function PlanComprador({
         <p className="text-sm text-neutral-600">
           Llevas {usd(pagado)} de {usd(total)}
         </p>
+        {saldo > 0 && (
+          <p className="text-xs text-neutral-500 mt-0.5">
+            {tasaEurVes ? `${formatoBsAprox(convertirABs(saldo, tasaEurVes))} · ${NOTA_TASA}` : `${SIN_TASA} — pregúntanos por WhatsApp cuántos bolívares transferir.`}
+          </p>
+        )}
       </div>
 
       <div className="h-2 rounded-full bg-[#F1ECE2] overflow-hidden" aria-hidden="true">
@@ -93,6 +108,15 @@ export default function PlanComprador({
             <span className="shrink-0 text-right">
               <span className={`font-semibold tabular-nums ${c.pagada ? "text-green-800" : "text-neutral-900"}`}>
                 {usd(c.monto)}
+              </span>
+              <span className="block text-[11px] text-neutral-500 tabular-nums">
+                {c.pagada && c.montoBsPagado != null
+                  ? formatoBs(c.montoBsPagado)
+                  : c.pagada
+                    ? "pagada en divisas"
+                    : tasaEurVes
+                      ? formatoBsAprox(convertirABs(c.monto, tasaEurVes))
+                      : ""}
               </span>
               <span className="block text-xs">
                 {c.pagada ? <span className="text-green-700">✓ listo</span> : c.reportada ? <span className="text-amber-700">en revisión</span> : <span className="text-neutral-400">por pagar</span>}

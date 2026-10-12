@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import QRCode from "qrcode";
 import { createServiceClient } from "@/lib/supabase/server";
+import { obtenerTasaActual } from "@/lib/tasa";
 import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
@@ -69,6 +70,9 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
   // cuánto lleva pagado y qué le falta — no "sus entradas", que todavía no
   // tiene. El correo de cada cuota manda justo aquí.
   const plan = await leerPlanPorGrupo(service, grupo);
+  // La tasa solo hace falta si hay plan: es para decirle cuántos bolívares
+  // transferir en el próximo pago. Sin plan no se pide y no se gasta la llamada.
+  const tasaEurVes = plan ? await obtenerTasaActual(service) : null;
   const verificadas = tickets.filter((t) => t.estado_pago === "verificado" && t.qr_token);
   const pendientes = tickets.filter((t) => t.estado_pago === "pendiente");
   const rechazadas = tickets.filter((t) => t.estado_pago === "rechazado");
@@ -120,9 +124,11 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
               graciaHasta: graciaHasta(c.venceEl),
               pagada: Boolean(c.verificadoEn),
               reportada: Boolean(c.reportadoEn) && !c.verificadoEn,
+              montoBsPagado: c.verificadoEn ? c.montoBs : null,
             }))}
             fechaTope={plan.cuotas[plan.cuotas.length - 1]?.venceEl ?? ""}
             instrucciones={INSTRUCCIONES_PAGO}
+            tasaEurVes={tasaEurVes}
           />
         ) : pendientes.length > 0 ? (
           // Sin plan: el texto de siempre. Con plan no se puede decir "en

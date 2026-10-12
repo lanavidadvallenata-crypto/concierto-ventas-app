@@ -4,6 +4,7 @@ import Nav from "@/components/Nav";
 import AutoRefresh from "@/app/dashboard/AutoRefresh";
 import { leerConfig, listaDeCobranza } from "@/lib/abona618";
 import { hoyEnVenezuela } from "@/lib/cuotas";
+import { obtenerTasaActual } from "@/lib/tasa";
 import CobranzaList from "./CobranzaList";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,11 @@ export default async function CobranzaPage() {
 
   const service = createServiceClient();
   const hoy = hoyEnVenezuela();
-  const [lista, config] = await Promise.all([listaDeCobranza(service, { hoy }), leerConfig(service)]);
+  const [lista, config, tasaEurVes] = await Promise.all([
+    listaDeCobranza(service, { hoy }),
+    leerConfig(service),
+    obtenerTasaActual(service),
+  ]);
 
   // Quién anotó cada pago: la lista guarda el id, la pantalla muestra el
   // nombre. Si no, nadie sabe a quién preguntarle por una referencia rara.
@@ -48,6 +53,7 @@ export default async function CobranzaPage() {
           nombrePorId={nombrePorId}
           moduloActivo={config.activo}
           topeVip={config.topeVip}
+          tasaEurVes={tasaEurVes}
         />
       </main>
     </>

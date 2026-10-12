@@ -48,3 +48,28 @@ export function formatoBs(monto: number): string {
 export function formatoUsd(monto: number): string {
   return `$${monto.toFixed(2)}`;
 }
+
+// Un bolívar ESTIMADO no es un bolívar cobrado, y mezclarlos cuesta plata.
+//
+// Lo que ya se pagó tiene un monto en Bs real guardado: lo que la persona
+// transfirió ese día, a la tasa de ese día. Ese número no cambia nunca.
+//
+// Lo que falta por pagar NO tiene monto en Bs. Solo se puede estimar a la tasa
+// de hoy, y en noviembre la tasa va a ser otra. Por eso todo monto estimado
+// sale con "≈" y con la advertencia de que se recalcula el día del pago: si a
+// alguien se le dice "debes Bs 3.240" y paga eso tres semanas después, paga de
+// menos, y el reclamo le llega a 6.18.
+//
+// La deuda siempre es en dólares. El bolívar es una ayuda para transferir.
+export function formatoBsAprox(monto: number): string {
+  return `≈ ${formatoBs(monto)}`;
+}
+
+/** Lo que se le dice a la gente al lado de un monto estimado en bolívares. */
+export const NOTA_TASA = "tasa BCV euro de hoy · el monto en Bs se recalcula el día que pagues";
+
+/** Para las pantallas internas, donde el equipo ya sabe de qué va. */
+export const NOTA_TASA_CORTA = "estimado a la tasa BCV euro de hoy";
+
+/** Cuando no hay tasa: nunca un número inventado, siempre esta frase. */
+export const SIN_TASA = "tasa del día no disponible";

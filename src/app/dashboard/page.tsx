@@ -8,6 +8,8 @@ import Link from "next/link";
 import { seleccionarTodo } from "@/lib/db";
 import { ETAPAS } from "@/lib/precios";
 import { leerConfig, resumenPlanes } from "@/lib/abona618";
+import { obtenerTasaActual, convertirABs } from "@/lib/tasa";
+import { NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox } from "@/lib/formato";
 import PanelPlanes from "./PanelPlanes";
 
 // Sin `revalidate`: esta página lee la sesión (cookies) y por eso Next la
@@ -43,17 +45,18 @@ export default async function DashboardPage() {
 
   const service = createServiceClient();
 
-  type TicketResumen = { tipo: string; precio: number | string; metodo_pago: string; estado_pago: string; created_at: string; canal: string | null; etapa: string | null; grupo_id: string | null };
+  type TicketResumen = { tipo: string; precio: number | string; metodo_pago: string; estado_pago: string; created_at: string; canal: string | null; etapa: string | null; grupo_id: string | null; precio_bs: number | string | null };
 
   // La configuración va primero porque el resumen de planes necesita el tope
   // vigente: si alguien lo subió de 100, la tarjeta tiene que medir contra el
   // número de verdad y no contra la constante del código.
   const config = await leerConfig(service);
-  const [{ data: tickets, error: ticketsError }, { data: evento }, { count: sillasVipTotal }, planes] = await Promise.all([
-    seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa, grupo_id"),
+  const [{ data: tickets, error: ticketsError }, { data: evento }, { count: sillasVipTotal }, planes, tasaEurVes] = await Promise.all([
+    seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa, grupo_id, precio_bs"),
     service.from("eventos").select("aforo_general_total").limit(1).single(),
     service.from("sillas_vip").select("id", { count: "exact", head: true }),
     resumenPlanes(service, config),
+    obtenerTasaActual(service),
   ]);
   if (ticketsError) console.error("Error cargando tickets para el dashboard:", ticketsError);
 
@@ -84,11 +87,16 @@ export default async function DashboardPage() {
   const aforoVip = sillasVipTotal ?? 300;
   const metaIngresos = aforoVip * calcularTotal("vip").total + aforoGeneral * calcularTotal("general").total;
 
-  const porMetodo = new Map<string, { cantidad: number; monto: number }>();
+  // Por método se suman los bolívares REALES de cada ticket (`precio_bs`): lo
+  // que de verdad entró ese día, a la tasa de ese día. Convertir el total de
+  // hoy daría un número más redondo y falso — la plata entró a lo largo de
+  // semanas con tasas distintas.
+  const porMetodo = new Map<string, { cantidad: number; monto: number; bs: number }>();
   for (const t of verificados) {
-    const actual = porMetodo.get(t.metodo_pago) ?? { cantidad: 0, monto: 0 };
+    const actual = porMetodo.get(t.metodo_pago) ?? { cantidad: 0, monto: 0, bs: 0 };
     actual.cantidad += 1;
     actual.monto += Number(t.precio);
+    if (t.precio_bs != null) actual.bs += Number(t.precio_bs);
     porMetodo.set(t.metodo_pago, actual);
   }
   const maxMonto = Math.max(1, ...[...porMetodo.values()].map((v) => v.monto));
@@ -124,6 +132,9 @@ export default async function DashboardPage() {
   const pctVendido = aforoTotalEntradas > 0 ? Math.round((vendidosTotal / aforoTotalEntradas) * 1000) / 10 : 0;
 
   const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  // Un Bs estimado a la tasa de hoy. Si no hay tasa no se inventa nada: la
+  // línea simplemente no sale.
+  const bsAprox = (usd: number) => (tasaEurVes ? formatoBsAprox(convertirABs(usd, tasaEurVes)) : null);
 
   return (
     <>
@@ -142,6 +153,7 @@ export default async function DashboardPage() {
             <div>
               <p className="text-xs text-neutral-500">Recaudado (verificado)</p>
               <p className="text-4xl font-semibold text-marca-secundario">${fmt(ingresoTotal)}</p>
+              {bsAprox(ingresoTotal) && <p className="text-sm text-neutral-600 -mt-0.5 tabular-nums">{bsAprox(ingresoTotal)}</p>}
               <p className="text-xs text-neutral-400 mt-1">Meta a aforo completo: ${fmt(metaIngresos)}</p>
               {planes.enCurso.cobradoUsd > 0 && (
                 <p className="text-xs text-neutral-500 mt-1">
@@ -159,7 +171,7 @@ export default async function DashboardPage() {
           </div>
           {ingresoPendiente > 0 && (
             <p className="text-xs text-amber-600 mt-2">
-              +${fmt(ingresoPendiente)} en {pendientesSueltos.length} pago{pendientesSueltos.length === 1 ? "" : "s"} esperando verificación
+              +${fmt(ingresoPendiente)} {bsAprox(ingresoPendiente) ? `(${bsAprox(ingresoPendiente)}) ` : ""}en {pendientesSueltos.length} pago{pendientesSueltos.length === 1 ? "" : "s"} esperando verificación
               {(perfil.rol === "finanzas" || perfil.rol === "admin") && (
                 <>
                   {" · "}
@@ -173,6 +185,7 @@ export default async function DashboardPage() {
         <PanelPlanes
           resumen={planes}
           config={config}
+          tasaEurVes={tasaEurVes}
           puedeCobrar={perfil.rol === "ventas" || perfil.rol === "finanzas" || perfil.rol === "admin"}
         />
 
@@ -182,14 +195,14 @@ export default async function DashboardPage() {
             <p className="text-2xl font-semibold">
               {vipVerificados.length} <span className="text-sm font-normal text-neutral-400">/ {aforoVip}</span>
             </p>
-            <p className="text-xs text-neutral-400 mt-1">${fmt(ingresoVip)}</p>
+            <p className="text-xs text-neutral-400 mt-1 tabular-nums">${fmt(ingresoVip)}{bsAprox(ingresoVip) ? ` · ${bsAprox(ingresoVip)}` : ""}</p>
           </div>
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
             <p className="text-xs text-neutral-500">General vendidos</p>
             <p className="text-2xl font-semibold">
               {generalVerificados.length} <span className="text-sm font-normal text-neutral-400">/ {aforoGeneral}</span>
             </p>
-            <p className="text-xs text-neutral-400 mt-1">${fmt(ingresoGeneral)}</p>
+            <p className="text-xs text-neutral-400 mt-1 tabular-nums">${fmt(ingresoGeneral)}{bsAprox(ingresoGeneral) ? ` · ${bsAprox(ingresoGeneral)}` : ""}</p>
           </div>
         </div>
 
@@ -220,6 +233,12 @@ export default async function DashboardPage() {
           </div>
         </div>
 
+        <p className="text-[11px] text-neutral-500 -mt-3">
+          {tasaEurVes
+            ? `Los montos con ≈ están ${NOTA_TASA_CORTA} (Bs ${tasaEurVes.toLocaleString("es-VE", { maximumFractionDigits: 2 })} por $1) y cambian cada día. Los bolívares por método de pago son los que entraron de verdad.`
+            : `${SIN_TASA} — todo sale en dólares hasta que vuelva.`}
+        </p>
+
         <div className="bg-white border border-neutral-200 rounded-xl p-5">
           <p className="text-sm font-semibold mb-3">Ritmo de ventas (últimos días)</p>
           <VentasChart dias={dias} />
@@ -231,14 +250,15 @@ export default async function DashboardPage() {
           </div>
           <div className="divide-y divide-neutral-100">
             {METODOS_ORDEN.map((m) => {
-              const d = porMetodo.get(m) ?? { cantidad: 0, monto: 0 };
+              const d = porMetodo.get(m) ?? { cantidad: 0, monto: 0, bs: 0 };
               const pct = Math.round((d.monto / maxMonto) * 100);
               return (
                 <div key={m} className="px-4 py-3">
                   <div className="flex items-center justify-between text-sm mb-1.5">
                     <span>{METODO_ETIQUETA[m]}</span>
-                    <span className="text-neutral-500">
+                    <span className="text-neutral-500 tabular-nums">
                       {d.cantidad} · ${fmt(d.monto)}
+                      {d.bs > 0 && <span className="text-neutral-400"> · {formatoBs(d.bs)}</span>}
                     </span>
                   </div>
                   <div className="h-1.5 rounded-full bg-neutral-100 overflow-hidden">

@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
 import { registrarPagoDeCuota, aprobarCuota, anularPorFaltaDePago } from "./actions";
-import { ETIQUETA_METODO, METODOS_EN_BS, formatoBs, formatoUsd } from "@/lib/formato";
+import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox, formatoUsd } from "@/lib/formato";
+import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
 import { codigoCompra } from "@/lib/compra";
 
@@ -38,10 +39,14 @@ function paraWhatsApp(telefono: string | null): string | null {
   return `58${d.replace(/^0+/, "")}`;
 }
 
-function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo): string {
+function mensajeWhatsApp(c: CuotaPorCobrar, grupo: Grupo, tasaEurVes: number | null): string {
   const nombre = (c.compradorNombre ?? "").split(" ")[0] || "";
   const hola = nombre ? `Hola ${nombre}` : "Hola";
-  const monto = formatoUsd(c.montoUsd);
+  // El monto en bolívares va en el mensaje, pero SIEMPRE con "hoy" pegado:
+  // mañana es otro número, y quien recibe el mensaje tiene que saberlo antes
+  // de transferir de menos.
+  const enBs = tasaEurVes ? ` (hoy son ${formatoBs(convertirABs(c.montoUsd, tasaEurVes))} a la tasa BCV euro)` : "";
+  const monto = `${formatoUsd(c.montoUsd)}${enBs}`;
   const cuando = fechaCorta(c.venceEl);
 
   if (grupo === "enGracia") {
@@ -118,6 +123,7 @@ export default function CobranzaList({
   nombrePorId,
   moduloActivo,
   topeVip,
+  tasaEurVes,
 }: {
   lista: ListaCobranza;
   hoy: string;
@@ -125,6 +131,9 @@ export default function CobranzaList({
   nombrePorId: Record<string, string>;
   moduloActivo: boolean;
   topeVip: number;
+  /** Tasa BCV del euro de hoy, para estimar los bolívares de lo que falta por
+   *  cobrar. null = no se pudo leer; entonces no se estima nada. */
+  tasaEurVes: number | null;
 }) {
   const [, startTransition] = useTransition();
   const [procesando, setProcesando] = useState<string | null>(null);
@@ -180,6 +189,11 @@ export default function CobranzaList({
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg border border-neutral-200 px-2 py-2">
             <div className="text-base font-semibold tabular-nums">{formatoUsd(lista.saldoTotal)}</div>
+            {tasaEurVes && (
+              <div className="text-[11px] text-neutral-600 tabular-nums leading-tight">
+                {formatoBsAprox(convertirABs(lista.saldoTotal, tasaEurVes))}
+              </div>
+            )}
             <div className="text-[11px] text-neutral-500 leading-tight">por cobrar</div>
           </div>
           <div className="rounded-lg border border-neutral-200 px-2 py-2">
@@ -194,6 +208,11 @@ export default function CobranzaList({
             <div className="text-[11px] text-neutral-500 leading-tight">VIP en plan</div>
           </div>
         </div>
+        <p className="text-[11px] text-neutral-500">
+          {tasaEurVes
+            ? `Los montos en bolívares son ${NOTA_TASA_CORTA} y cambian cada día. La deuda es en dólares: al cobrar, usa el monto en Bs del día del pago, no el de hoy.`
+            : `${SIN_TASA} — los montos salen solo en dólares hasta que vuelva.`}
+        </p>
       </header>
 
       {totalPorCobrar === 0 && (
@@ -239,12 +258,16 @@ export default function CobranzaList({
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-semibold text-sm tabular-nums">{formatoUsd(c.montoUsd)}</div>
+                      <div className="text-[11px] text-neutral-600 tabular-nums">
+                        {tasaEurVes ? formatoBsAprox(convertirABs(c.montoUsd, tasaEurVes)) : SIN_TASA}
+                      </div>
                       <div className="text-[11px] text-neutral-500">de {formatoUsd(c.totalUsd)}</div>
                     </div>
                   </div>
 
                   <p className="text-xs text-neutral-600">
                     Pagado {formatoUsd(c.pagado)} · <strong>falta {formatoUsd(c.saldo)}</strong>
+                    {tasaEurVes ? <span className="text-neutral-500"> ({formatoBsAprox(convertirABs(c.saldo, tasaEurVes))})</span> : null}
                   </p>
 
                   {c.reportadoEn && (
@@ -281,7 +304,7 @@ export default function CobranzaList({
                     )}
                     {wa && (
                       <a
-                        href={`https://wa.me/${wa}?text=${encodeURIComponent(mensajeWhatsApp(c, sec.clave))}`}
+                        href={`https://wa.me/${wa}?text=${encodeURIComponent(mensajeWhatsApp(c, sec.clave, tasaEurVes))}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="h-11 px-3 inline-flex items-center rounded-lg bg-[#25D366] text-white text-sm font-semibold"
