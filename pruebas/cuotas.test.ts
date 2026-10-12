@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CONDICIONES,
   fechaCorta,
   FECHAS_PAGO,
   INICIAL,
@@ -331,4 +332,40 @@ test("el plazo de gracia nunca se calcula distinto en dos sitios", () => {
     assert.equal(diasEntre(f, graciaHasta(f)), DIAS_GRACIA);
     assert.equal(diasEntre(graciaHasta(f), liberaEl(f)), 1);
   }
+});
+
+test("cada cuota tiene su propio plazo: no se espera a la fecha final", () => {
+  // Regla de Anita (12 oct): si falla la cuota del 16 de noviembre, la compra
+  // se anula en ese momento y la entrada vuelve a la venta. Esperar al 27
+  // dejaría la silla muerta nueve días con alguien que ya dejó de pagar.
+  const p = planPara(140, "2026-10-12");
+  assert.ok(p.hayPlan);
+  assert.equal(p.cuotas.length, 3);
+
+  const [, cuota01, final] = p.cuotas;
+
+  assert.equal(cuota01.venceEl, "2026-11-16");
+  assert.equal(cuota01.graciaHasta, "2026-11-18", "dos días de plazo desde su propia fecha");
+  assert.equal(cuota01.liberaEl, "2026-11-19", "y se anula al día siguiente, no en diciembre");
+  assert.equal(fechaLarga(cuota01.graciaHasta), "miércoles 18 de noviembre", "el plazo cae en días de banco");
+
+  assert.equal(final.venceEl, "2026-11-25");
+  assert.equal(final.graciaHasta, "2026-11-27");
+  assert.equal(final.liberaEl, "2026-11-28");
+
+  // Nueve días de diferencia: eso es lo que se gana liberando por cuota.
+  assert.equal(diasEntre(cuota01.liberaEl, final.liberaEl), 9);
+
+  // Y cada cuota libera después de su propio vencimiento, nunca antes.
+  for (const c of p.cuotas) {
+    assert.equal(diasEntre(c.venceEl, c.graciaHasta), DIAS_GRACIA);
+    assert.equal(diasEntre(c.graciaHasta, c.liberaEl), 1);
+  }
+});
+
+test("las condiciones dicen que se anula al pasarse CUALQUIER plazo", () => {
+  const texto = CONDICIONES.join(" ");
+  assert.match(texto, /no se espera a la fecha final/i, "la regla tiene que estar escrita, no solo programada");
+  assert.match(texto, /no se devuelve/i);
+  assert.match(texto, /CADA fecha/, "el plazo es por cuota, no uno solo al final");
 });

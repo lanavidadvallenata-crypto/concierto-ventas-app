@@ -153,6 +153,10 @@ export type Cuota = {
   porcentaje: number;
   monto: number;
   venceEl: string; // la inicial vence el día de la compra
+  /** Último día para pagar ESTA cuota sin perder la entrada. */
+  graciaHasta: string;
+  /** Día en que, si esta cuota sigue sin pagarse, se anula la compra entera. */
+  liberaEl: string;
   esInicial: boolean;
 };
 
@@ -163,6 +167,9 @@ export type Plan = {
   inicial: number;
   saldo: number; // lo que queda después de la inicial
   fechaTope: string; // vencimiento del último pago
+  /** Gracia y liberación DEL ÚLTIMO pago. Ojo: cada cuota tiene las suyas
+   *  (ver Cuota.graciaHasta), y la que importa en cada momento es la de la
+   *  próxima cuota por pagar, no esta. */
   graciaHasta: string;
   liberaEl: string;
 };
@@ -232,14 +239,24 @@ export function planPara(
   const porcentajes = [INICIAL, ...vigentes.map(() => resto / vigentes.length)];
   const montos = repartir(total, porcentajes);
 
-  const cuotas: Cuota[] = porcentajes.map((pc, i) => ({
-    orden: i + 1,
-    etiqueta: i === 0 ? "Inicial" : i === porcentajes.length - 1 ? "Pago final" : `Cuota 0${i}`,
-    porcentaje: pc,
-    monto: montos[i],
-    venceEl: i === 0 ? hoy : vigentes[i - 1],
-    esInicial: i === 0,
-  }));
+  const cuotas: Cuota[] = porcentajes.map((pc, i) => {
+    const venceEl = i === 0 ? hoy : vigentes[i - 1];
+    return {
+      orden: i + 1,
+      etiqueta: i === 0 ? "Inicial" : i === porcentajes.length - 1 ? "Pago final" : `Cuota 0${i}`,
+      porcentaje: pc,
+      monto: montos[i],
+      venceEl,
+      // CADA cuota tiene su propio plazo y su propia anulación (Anita, 12
+      // oct). No se espera a la fecha final: si falla la cuota del 16 de
+      // noviembre, la compra se anula el 19 y la entrada vuelve a la venta.
+      // Esperar al 27 dejaría la silla muerta nueve días con un comprador que
+      // ya dejó de pagar.
+      graciaHasta: graciaHasta(venceEl),
+      liberaEl: liberaEl(venceEl),
+      esInicial: i === 0,
+    };
+  });
 
   const fechaTope = vigentes[vigentes.length - 1];
 
@@ -308,8 +325,8 @@ export const CONDICIONES: string[] = [
   "Tu entrada queda apartada a tu nombre desde que verificamos tu pago inicial. El precio se te congela: no sube aunque suba la tarifa.",
   "El QR de acceso te llega cuando completes el 100 % del pago. Antes de eso no tienes entrada válida para entrar al concierto.",
   `Las fechas de pago son fijas e iguales para todo el mundo: ${FECHAS_PAGO.map((f) => fechaCorta(f)).join(" y ")} de 2026. No se cuentan desde el día de tu compra.`,
-  `Después de cada fecha límite tienes ${DIAS_GRACIA} días de plazo para pagar. Te avisamos por correo antes de cada fecha y durante el plazo.`,
-  "Si al terminar el plazo falta algo por pagar, anulamos la compra y la entrada se libera para volver a venderse. Lo que ya abonaste no se devuelve.",
+  `Después de CADA fecha tienes ${DIAS_GRACIA} días de plazo para pagar esa cuota. Te avisamos por correo antes de la fecha y durante el plazo.`,
+  "Si se te pasa el plazo de cualquiera de los pagos, anulamos toda la compra en ese momento: no se espera a la fecha final. Tu entrada vuelve a la venta y lo que ya abonaste no se devuelve.",
   "Puedes adelantar pagos o pagar el total cuando quieras, sin recargo.",
   "El plan de cuotas no aplica en taquilla el día del evento. Ese día la entrada se paga completa.",
   "Los cupos en cuotas de la zona VIP son limitados. Cuando se agotan, VIP se vende solo de contado.",

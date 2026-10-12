@@ -5,6 +5,7 @@ import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
 import { registrarPagoDeCuota, aprobarCuota, anularPorFaltaDePago } from "./actions";
 import { ETIQUETA_METODO, METODOS_EN_BS, formatoBs, formatoUsd } from "@/lib/formato";
 import { fechaCorta } from "@/lib/cuotas";
+import { codigoCompra } from "@/lib/compra";
 
 // El equipo trabaja desde el teléfono (es la razón por la que la barra de
 // navegación se rehizo en dos filas), así que esta pantalla es una sola
@@ -223,7 +224,10 @@ export default function CobranzaList({
                 <article key={c.cuotaId} className={`rounded-xl border px-3 py-3 space-y-2 ${sec.tono}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{c.compradorNombre ?? "Sin nombre"}</p>
+                      <p className="font-medium text-sm truncate">
+                        {c.compradorNombre ?? "Sin nombre"}
+                        <span className="text-neutral-400 font-normal font-mono text-xs"> · {codigoCompra(c.grupoId)}</span>
+                      </p>
                       <p className="text-xs text-neutral-600">
                         {c.cantidad} {c.tipo === "vip" ? (c.cantidad === 1 ? "VIP" : "VIP") : c.cantidad === 1 ? "General" : "Generales"}
                         {" · "}

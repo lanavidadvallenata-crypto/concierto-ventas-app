@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { anularPlan, leerPlanPorGrupo, reportarCuota, verificarCuota, type CanalReporte } from "@/lib/abona618";
 import { enviarCorreoCuotaVerificada } from "@/lib/enviar-qr";
-import { fechaCorta, usd } from "@/lib/cuotas";
+import { fechaCorta, graciaHasta, usd } from "@/lib/cuotas";
 import { metodoEsEnBs, normalizarReferencia, validarReferencia } from "@/lib/pagos";
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR } from "@/lib/enviar-qr";
@@ -153,7 +153,7 @@ export async function aprobarCuota(cuotaId: string): Promise<Resultado> {
           pendientes: r.plan.cuotas
             .filter((c) => !c.verificadoEn)
             .map((c) => ({ etiqueta: c.etiqueta, monto: c.montoUsd, venceEl: fechaCorta(c.venceEl) })),
-          fechaTope: fechaCorta(r.plan.cuotas[r.plan.cuotas.length - 1].venceEl),
+          proximoPlazo: r.plan.proxima ? fechaCorta(graciaHasta(r.plan.proxima.venceEl)) : null,
         });
       } catch (e) {
         console.error("Error enviando correo de cuota verificada:", (e as Error).message);

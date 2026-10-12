@@ -106,7 +106,31 @@ export default async function FinanzasPage() {
     });
   }
 
-  const lista = [...compras.values()];
+  // ───────────────────────────────────────────────────────────────────────
+  // Las compras en plan de cuotas NO van en esta cola.
+  //
+  // Sus tickets se quedan en "pendiente" durante semanas, así que se quedaban
+  // aquí para siempre, y mostradas mal: el monto era el total de la compra
+  // ($60) cuando el comprador había transferido su inicial ($24), y el botón
+  // ofrecía "Verificar y enviar 2 QR", que es exactamente lo que el candado
+  // de Abona618 NO va a hacer. Finanzas buscaba en el banco un monto que no
+  // existe y creía estar entregando entradas.
+  //
+  // El cobro de cuotas tiene su propia pantalla, con el monto de cada cuota,
+  // quién lo anotó y por dónde llegó. Aquí solo queda el aviso de cuántas hay.
+  // ───────────────────────────────────────────────────────────────────────
+  const gruposPendientes = [...compras.keys()];
+  const { data: planesVivos } = gruposPendientes.length
+    ? await service
+        .from("planes_pago")
+        .select("grupo_id, estado")
+        .in("grupo_id", gruposPendientes)
+        .in("estado", ["al_dia", "en_mora"])
+    : { data: [] as { grupo_id: string; estado: string }[] };
+
+  const enPlan = new Set((planesVivos ?? []).map((p) => String(p.grupo_id)));
+  const comprasEnPlan = [...compras.values()].filter((c) => enPlan.has(c.grupoId));
+  const lista = [...compras.values()].filter((c) => !enPlan.has(c.grupoId));
   const totalPendienteUsd = lista.reduce((s, c) => s + c.total, 0);
   const entradasPendientes = lista.reduce((s, c) => s + c.cantidad, 0);
 
@@ -193,6 +217,24 @@ export default async function FinanzasPage() {
           </div>
           <AutoRefresh intervaloMs={30000} />
         </div>
+
+        {comprasEnPlan.length > 0 && (
+          <a
+            href="/cobranza"
+            className="rounded-xl border border-marca-secundario/30 bg-marca-secundario/5 px-4 py-3 flex items-center justify-between gap-3"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-marca-secundario">
+                {comprasEnPlan.length} compra{comprasEnPlan.length === 1 ? "" : "s"} en plan de cuotas
+              </span>
+              <span className="block text-xs text-neutral-600 leading-snug">
+                No salen en esta lista: su monto no es el total de la compra y no se entrega QR hasta completar. Se
+                cobran y se aprueban en Cobranza.
+              </span>
+            </span>
+            <span className="shrink-0 text-sm font-semibold text-marca-secundario">Ir →</span>
+          </a>
+        )}
 
         <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
 

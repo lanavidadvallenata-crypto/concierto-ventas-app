@@ -491,7 +491,9 @@ export async function enviarCorreoCuotaVerificada(params: {
   pagado: number;
   saldo: number;
   pendientes: { etiqueta: string; monto: number; venceEl: string }[];
-  fechaTope: string;
+  /** Último día para pagar la PRÓXIMA cuota antes de que se anule la compra.
+   *  Cada cuota tiene el suyo: no se espera a la fecha final (Anita, 12 oct). */
+  proximoPlazo: string | null;
 }) {
   const resend = clienteResend("el correo de cuota verificada");
   const codigo = codigoCompra(params.grupoId);
@@ -502,7 +504,7 @@ export async function enviarCorreoCuotaVerificada(params: {
     .map(
       (p) => `<tr>
         <td style="padding:7px 0;font-size:13.5px;color:#303030;border-top:1px solid #EDE9E1;">${escapeHtml(p.etiqueta)}
-          <span style="color:#8A8782;">· hasta el ${escapeHtml(p.venceEl)}</span></td>
+          <span style="color:#8A8782;">· vence el ${escapeHtml(p.venceEl)}</span></td>
         <td align="right" style="padding:7px 0;font-size:13.5px;font-weight:700;color:#303030;border-top:1px solid #EDE9E1;white-space:nowrap;">${fmtUsd(p.monto)}</td>
       </tr>`
     )
@@ -551,11 +553,11 @@ export async function enviarCorreoCuotaVerificada(params: {
         </table>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FFF6E5;border-left:3px solid #D97706;border-radius:6px;margin:14px 0 10px;">
           <tr><td style="padding:12px 14px;">
-            <p style="margin:0;font-size:12.5px;line-height:1.5;color:#7C2D12;">${
-              faltan === 1
-                ? `Si para el <strong>${escapeHtml(params.fechaTope)}</strong> falta ese pago,`
-                : `Si para el <strong>${escapeHtml(params.fechaTope)}</strong> falta algún pago,`
-            } tu entrada se libera y se vuelve a vender, y lo abonado no se devuelve. Te avisamos antes de cada fecha y te damos dos días de plazo. <a href="${SITE_URL}/compra/${params.grupoId}" style="color:#7C2D12;font-weight:700;">Mira las condiciones en tu página de compra</a>.</p>
+            <p style="margin:0;font-size:12.5px;line-height:1.5;color:#7C2D12;"><strong>Cada pago tiene su fecha y dos días de plazo.</strong> ${
+              params.proximoPlazo
+                ? `Para el siguiente tienes hasta el <strong>${escapeHtml(params.proximoPlazo)}</strong>.`
+                : ""
+            } Si se te pasa el plazo de cualquiera de ellos, se anula toda la compra en ese momento, tu entrada vuelve a la venta y lo abonado no se devuelve. Te avisamos antes de cada fecha. <a href="${SITE_URL}/compra/${params.grupoId}" style="color:#7C2D12;font-weight:700;">Mira las condiciones en tu página de compra</a>.</p>
           </td></tr>
         </table>
       </td>

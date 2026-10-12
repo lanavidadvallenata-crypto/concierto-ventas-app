@@ -16,6 +16,8 @@ export type CuotaVista = {
   etiqueta: string;
   monto: number;
   venceEl: string;
+  /** Último día para pagar ESTA cuota antes de que se anule la compra. */
+  graciaHasta: string;
   pagada: boolean;
   reportada: boolean;
 };
@@ -36,7 +38,6 @@ export default function PlanComprador({
   saldo,
   cuotas,
   fechaTope,
-  graciaHasta,
   instrucciones,
 }: {
   grupoId: string;
@@ -45,7 +46,6 @@ export default function PlanComprador({
   saldo: number;
   cuotas: CuotaVista[];
   fechaTope: string;
-  graciaHasta: string;
   instrucciones: Record<string, string>;
 }) {
   const [, startTransition] = useTransition();
@@ -87,7 +87,7 @@ export default function PlanComprador({
                   ? "Pagada y verificada"
                   : c.reportada
                     ? "Avisaste que pagaste · estamos verificando en el banco"
-                    : `Hasta el ${fechaCorta(c.venceEl)}`}
+                    : `Vence el ${fechaCorta(c.venceEl)} · plazo hasta el ${fechaCorta(c.graciaHasta)}`}
               </span>
             </span>
             <span className="shrink-0 text-right">
@@ -107,16 +107,22 @@ export default function PlanComprador({
           <div className="rounded-xl bg-[#F1ECE2] p-3 text-sm text-neutral-800">
             <p className="font-semibold mb-1">Tu QR llega cuando completes el total</p>
             <p className="text-[13px] leading-relaxed text-neutral-700">
-              Tu entrada está apartada a tu nombre y el precio congelado. Si al{" "}
-              <strong>{fechaLarga(graciaHasta)}</strong> falta algún pago, se libera y lo abonado no se devuelve. Te
-              escribimos antes de cada fecha.
+              Tu entrada está apartada a tu nombre y el precio congelado.{" "}
+              <strong>Cada pago tiene su fecha y dos días de plazo.</strong> Si se te pasa el plazo de cualquiera de
+              ellos{proxima ? <> — el próximo es el <strong>{fechaLarga(proxima.graciaHasta)}</strong></> : null}, se
+              anula toda la compra, tu entrada vuelve a la venta y lo abonado no se devuelve. Te escribimos antes de
+              cada fecha.
             </p>
           </div>
 
           {proxima && (
             <div className="rounded-xl border-2 border-[#3F0A62]/30 p-3 flex flex-col gap-2.5">
               <p className="text-sm">
-                <strong>Tu próximo pago:</strong> {usd(proxima.monto)} · hasta el {fechaCorta(proxima.venceEl)}
+                <strong>Tu próximo pago:</strong> {usd(proxima.monto)} · vence el {fechaCorta(proxima.venceEl)}
+                <span className="block text-xs text-neutral-600 mt-0.5">
+                  Tienes hasta el <strong>{fechaCorta(proxima.graciaHasta)}</strong> para pagarlo. Después de esa
+                  fecha se anula la compra.
+                </span>
               </p>
 
               <details className="text-sm">

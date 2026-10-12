@@ -117,11 +117,11 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
               etiqueta: c.etiqueta,
               monto: c.montoUsd,
               venceEl: c.venceEl,
+              graciaHasta: graciaHasta(c.venceEl),
               pagada: Boolean(c.verificadoEn),
               reportada: Boolean(c.reportadoEn) && !c.verificadoEn,
             }))}
             fechaTope={plan.cuotas[plan.cuotas.length - 1]?.venceEl ?? ""}
-            graciaHasta={graciaHasta(plan.cuotas[plan.cuotas.length - 1]?.venceEl ?? "")}
             instrucciones={INSTRUCCIONES_PAGO}
           />
         ) : pendientes.length > 0 ? (

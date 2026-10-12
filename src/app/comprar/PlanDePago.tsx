@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CONDICIONES, fechaCorta, fechaLarga, type Plan } from "@/lib/cuotas";
+import { CONDICIONES, fechaCorta, type Plan } from "@/lib/cuotas";
 
 /**
  * Abona618 en el checkout: elegir entre pagar todo o pagar en cuotas, ver el
@@ -69,12 +69,17 @@ export default function PlanDePago({
 
           <ul className="flex flex-col gap-1.5 tabular-nums">
             {plan.cuotas.map((c) => (
-              <li key={c.orden} className="flex items-center justify-between text-sm">
-                <span className="text-neutral-700">
+              <li key={c.orden} className="flex items-start justify-between gap-3 text-sm">
+                <span className="text-neutral-700 min-w-0">
                   {c.etiqueta}
                   <span className="text-neutral-500"> · {c.esInicial ? "hoy" : `hasta el ${fechaCorta(c.venceEl)}`}</span>
+                  {!c.esInicial && (
+                    <span className="block text-xs text-neutral-500">
+                      con 2 días de plazo, hasta el {fechaCorta(c.graciaHasta)}
+                    </span>
+                  )}
                 </span>
-                <span className="font-semibold">${c.monto.toFixed(2)}</span>
+                <span className="font-semibold shrink-0">${c.monto.toFixed(2)}</span>
               </li>
             ))}
           </ul>
@@ -93,8 +98,9 @@ export default function PlanDePago({
               className="mt-0.5 h-5 w-5 shrink-0 accent-[#3F0A62]"
             />
             <span className="text-xs text-neutral-800 leading-relaxed">
-              Acepto las condiciones del plan. Si al <strong>{fechaLarga(plan.graciaHasta)}</strong> falta algún pago,
-              mi entrada se libera y lo abonado no se devuelve.{" "}
+              Acepto las condiciones del plan. <strong>Cada pago tiene su fecha y dos días de plazo</strong>; si se me
+              pasa el plazo de cualquiera de ellos, se anula toda la compra en ese momento, mi entrada vuelve a la
+              venta y lo abonado no se devuelve.{" "}
               <button
                 type="button"
                 onClick={(e) => {
