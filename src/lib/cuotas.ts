@@ -142,9 +142,11 @@ export type Plan = {
 
 export type SinPlan = {
   hayPlan: false;
-  /** sin_margen: ya no queda plazo. taquilla: el día del evento se cobra
-   *  completo (Anita, 12 oct). tope_vip: se agotaron los cupos VIP en plan. */
-  motivo: "sin_margen" | "taquilla" | "tope_vip";
+  /** apagado: el interruptor de la base está en false, el módulo no existe
+   *  para el comprador. sin_margen: ya no queda plazo. taquilla: el día del
+   *  evento se cobra completo (Anita, 12 oct). tope_vip: se agotaron los
+   *  cupos VIP en plan. */
+  motivo: "apagado" | "sin_margen" | "taquilla" | "tope_vip";
 };
 
 /** Las fechas fijas que todavía dan margen suficiente desde `hoy`. */
@@ -166,14 +168,22 @@ export function hayCuotasDisponibles(hoy: string = hoyEnVenezuela()): boolean {
 export function planPara(
   total: number,
   hoy: string = hoyEnVenezuela(),
-  opciones: { canal?: string; tipo?: "vip" | "general"; vipEnPlan?: number; cantidad?: number } = {}
+  opciones: {
+    canal?: string;
+    tipo?: "vip" | "general";
+    vipEnPlan?: number;
+    cantidad?: number;
+    /** El tope real sale de la base (abona618_config.tope_vip) para que se
+     *  pueda subir sin desplegar; la constante es solo el valor inicial. */
+    topeVip?: number;
+  } = {}
 ): Plan | SinPlan {
-  const { canal, tipo, vipEnPlan, cantidad = 1 } = opciones;
+  const { canal, tipo, vipEnPlan, cantidad = 1, topeVip = TOPE_VIP_EN_PLAN } = opciones;
 
   // Taquilla el día del evento: el plan no aplica, se cobra completo.
   if (canal === "taquilla") return { hayPlan: false, motivo: "taquilla" };
 
-  if (tipo === "vip" && vipEnPlan != null && vipEnPlan + cantidad > TOPE_VIP_EN_PLAN) {
+  if (tipo === "vip" && vipEnPlan != null && vipEnPlan + cantidad > topeVip) {
     return { hayPlan: false, motivo: "tope_vip" };
   }
 
