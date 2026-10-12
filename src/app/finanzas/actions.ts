@@ -5,7 +5,9 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generarTokenQR } from "@/lib/qr";
-import { enviarCorreoQR, enviarCorreoRechazo, type EntradaQR } from "@/lib/enviar-qr";
+import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, type EntradaQR } from "@/lib/enviar-qr";
+import { anularPlan, leerPlanPorGrupo, planConSaldo, verificarCuota } from "@/lib/abona618";
+import { fechaCorta, usd } from "@/lib/cuotas";
 import { guardarTasaManual } from "@/lib/tasa";
 import { obtenerAsiento } from "@/lib/asiento";
 import { ETIQUETA_METODO } from "@/lib/formato";
@@ -124,6 +126,84 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
   }
 
   const service = createServiceClient();
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // EL CANDADO DE ABONA618. Va ANTES de cualquier escritura sobre tickets,
+  // porque pasar un ticket a "verificado" es lo que dispara el correo con el
+  // QR. Si esta compra es un plan de cuotas con saldo, aprobar significa dar
+  // por pagada UNA CUOTA, no entregar la entrada: sin esto, quien pagó el
+  // 40 % recibe su QR y entra al concierto.
+  //
+  // En la cola de Pendientes una compra en plan se ve igual que una de
+  // contado, así que esto no se puede dejar al criterio de quien aprueba.
+  // ─────────────────────────────────────────────────────────────────────────
+  const grupoId = (grupo.tickets[0].grupo_id as string | null) ?? grupo.tickets[0].id;
+  const plan = await planConSaldo(service, grupoId);
+
+  if (plan) {
+    const cuota = plan.proxima;
+    if (!cuota) {
+      return {
+        ok: false,
+        error: "Esta compra es un plan de cuotas pero no tiene cuotas por cobrar. No la apruebes: hay que revisarla a mano.",
+      };
+    }
+    if (!cuota.reportadoEn) {
+      return {
+        ok: false,
+        error:
+          `El comprador todavía no reportó el pago de ${cuota.etiqueta} (${usd(cuota.montoUsd)}, vence el ` +
+          `${fechaCorta(cuota.venceEl)}). Si el dinero te llegó por otro canal, pídele que lo reporte desde su ` +
+          "página de compra para que quede la referencia.",
+      };
+    }
+
+    const r = await verificarCuota(service, { cuotaId: cuota.id, verificadoPor: user.id });
+    if (!r.ok) return { ok: false, error: r.error };
+
+    revalidarTodo();
+
+    if (!r.completo) {
+      // Plan todavía abierto: NO se toca ningún ticket y NO sale ningún QR.
+      const correo = grupo.tickets[0].comprador_email;
+      let aviso =
+        `Cuota aprobada: ${r.cuota.etiqueta} de ${usd(r.cuota.montoUsd)}. ` +
+        `Lleva ${usd(r.plan.pagado)} de ${usd(r.plan.totalUsd)} y le falta ${usd(r.plan.saldo)}. ` +
+        "No se entregó ningún QR: ese se entrega cuando complete el total.";
+
+      if (r.yaEstaba) {
+        aviso = `Esa cuota ya estaba aprobada. ${aviso}`;
+      } else if (correo) {
+        try {
+          await enviarCorreoCuotaVerificada({
+            destinatario: correo,
+            nombreComprador: grupo.tickets[0].comprador_nombre,
+            grupoId,
+            etiquetaCuota: r.cuota.etiqueta,
+            montoVerificado: r.cuota.montoUsd,
+            totalUsd: r.plan.totalUsd,
+            pagado: r.plan.pagado,
+            saldo: r.plan.saldo,
+            pendientes: r.plan.cuotas
+              .filter((c) => !c.verificadoEn)
+              .map((c) => ({ etiqueta: c.etiqueta, monto: c.montoUsd, venceEl: fechaCorta(c.venceEl) })),
+            fechaTope: fechaCorta(r.plan.cuotas[r.plan.cuotas.length - 1].venceEl),
+          });
+        } catch (e) {
+          console.error("Error enviando el correo de cuota verificada:", (e as Error).message);
+          aviso += ` El correo a ${correo} no salió — avísale por WhatsApp.`;
+        }
+      } else {
+        aviso += " Esta compra no tiene correo: avísale por WhatsApp.";
+      }
+
+      return { ok: true, aviso };
+    }
+
+    // Si llegó aquí, esa era la última cuota: el plan quedó completo y la
+    // compra sigue el camino normal — tickets a verificado, QR y correo.
+  }
+
   const ahora = new Date().toISOString();
   const verificados: TicketGrupo[] = [];
 
@@ -185,6 +265,17 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
   if (pendientes.length === 0) return { ok: false, error: "Esa compra ya fue procesada." };
 
   const service = createServiceClient();
+
+  // Si la compra tenía plan de cuotas, el plan se anula con ella: si no, su
+  // cupo del tope de VIP quedaría ocupado para siempre y el cron de cobranza
+  // le seguiría reclamando dinero a una compra que ya no existe.
+  const grupoRechazo = (grupo.tickets[0].grupo_id as string | null) ?? grupo.tickets[0].id;
+  const planRechazo = await anularPlan(service, {
+    grupoId: grupoRechazo,
+    por: user.id,
+    motivo: "anulado",
+    nota: "Compra rechazada por Finanzas.",
+  });
   const ahora = new Date().toISOString();
   const rechazados: TicketGrupo[] = [];
 
@@ -207,8 +298,14 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
 
   if (rechazados.length === 0) return { ok: false, error: "Esa compra ya fue procesada por otra persona." };
 
+  const notaPlan = planRechazo.anulado
+    ? ` Esta compra tenía plan de cuotas: se anuló y se liberó su cupo. Quedan ${usd(planRechazo.plan?.pagado ?? 0)} abonados que, según las condiciones, no se devuelven.`
+    : "";
+
   const primero = rechazados[0];
-  if (!primero.comprador_email) return { ok: true, aviso: "Pago rechazado. Esta compra no tiene correo, no se avisó al comprador." };
+  if (!primero.comprador_email) {
+    return { ok: true, aviso: `Pago rechazado. Esta compra no tiene correo, no se avisó al comprador.${notaPlan}` };
+  }
 
   const totalUsd = rechazados.reduce((s, t) => s + t.precio, 0);
   const totalBs = rechazados.every((t) => t.precio_bs != null) ? rechazados.reduce((s, t) => s + (t.precio_bs ?? 0), 0) : null;
@@ -226,14 +323,19 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
     });
   } catch (e) {
     console.error("Error enviando correo de rechazo:", (e as Error).message);
-    return { ok: true, aviso: `Pago rechazado, pero el correo de aviso a ${primero.comprador_email} no salió. Avísale por WhatsApp.` };
+    return { ok: true, aviso: `Pago rechazado, pero el correo de aviso a ${primero.comprador_email} no salió. Avísale por WhatsApp.${notaPlan}` };
   }
 
-  return { ok: true };
+  return notaPlan ? { ok: true, aviso: `Pago rechazado.${notaPlan}` } : { ok: true };
 }
 
 // Vuelve una compra rechazada a "pendiente" (el comprador mandó el
-// comprobante). Si era VIP, intenta volver a reservar las mismas sillas; si
+// comprobante). OJO con los planes de cuotas: al rechazar, el plan quedó
+// anulado y su silla volvió al inventario. Reabrir el ticket NO resucita el
+// plan a propósito — la silla pudo haberse revendido — así que el candado va
+// a impedir aprobarlo y hay que registrar el pago como una compra nueva. El
+// aviso del final lo dice con todas las letras.
+// Si era VIP, intenta volver a reservar las mismas sillas; si
 // alguna ya la tomó otra persona, no se reabre y se explica cuál.
 export async function reabrirPago(ticketId: string): Promise<Resultado> {
   const { user, error } = await requiereFinanzas();
@@ -287,10 +389,29 @@ export async function reabrirPago(ticketId: string): Promise<Resultado> {
   }
 
   revalidarTodo();
-  return { ok: true, aviso: `Compra reabierta: ${rechazados.length} entrada${rechazados.length === 1 ? "" : "s"} de vuelta en pendientes.` };
+
+  // Si la compra tenía plan de cuotas, el rechazo lo anuló y reabrir el
+  // ticket no lo resucita. Hay que decirlo aquí, porque si no el operador
+  // reabre, le da a Verificar, y se encuentra con un error que no entiende.
+  const grupoReabrir = (grupo.tickets[0].grupo_id as string | null) ?? grupo.tickets[0].id;
+  const planMuerto = await leerPlanPorGrupo(service, grupoReabrir);
+  const avisoPlan =
+    planMuerto && (planMuerto.estado === "anulado" || planMuerto.estado === "vencido")
+      ? ` OJO: esta compra tenía un plan de cuotas que quedó anulado, y su silla volvió al inventario. ` +
+        `No la apruebes desde aquí — registra el pago como una compra nueva.`
+      : "";
+
+  return {
+    ok: true,
+    aviso: `Compra reabierta: ${rechazados.length} entrada${rechazados.length === 1 ? "" : "s"} de vuelta en pendientes.${avisoPlan}`,
+  };
 }
 
 // Reenvía el correo con los QR de una compra ya verificada (mismos tokens).
+//
+// No necesita el candado de Abona618: solo reenvía tickets que ya están en
+// "verificado", y un plan con saldo tiene sus tickets en "pendiente". El
+// filtro de abajo es lo que lo protege, y por eso no se puede relajar.
 export async function reenviarQR(ticketId: string): Promise<Resultado> {
   const { user, error } = await requiereFinanzas();
   if (!user) return { ok: false, error: error! };
@@ -501,6 +622,15 @@ export async function anularCompraVerificada(ticketId: string): Promise<Resultad
   }
 
   const service = createServiceClient();
+
+  // Misma razón que en rechazarPago: el plan tiene que morir con la compra.
+  const grupoAnular = (grupo.tickets[0].grupo_id as string | null) ?? grupo.tickets[0].id;
+  await anularPlan(service, {
+    grupoId: grupoAnular,
+    por: user.id,
+    motivo: "anulado",
+    nota: "Compra verificada anulada por Finanzas.",
+  });
   const ahora = new Date().toISOString();
   const anulados: TicketGrupo[] = [];
 

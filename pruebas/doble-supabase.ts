@@ -6,7 +6,7 @@
 // de condición de carrera (los UPDATE condicionados a "sigue sin verificar").
 
 type Fila = Record<string, unknown>;
-type Filtro = { col: string; op: "eq" | "neq" | "is" | "in"; valor: unknown };
+type Filtro = { col: string; op: "eq" | "neq" | "is" | "in" | "notin"; valor: unknown };
 
 export type Doble = {
   tablas: Record<string, Fila[]>;
@@ -34,6 +34,7 @@ function aplica(fila: Fila, filtros: Filtro[]): boolean {
     const v = fila[f.col];
     if (f.op === "eq") return String(v) === String(f.valor);
     if (f.op === "neq") return String(v) !== String(f.valor);
+    if (f.op === "notin") return !(f.valor as string[]).map(String).includes(String(v));
     if (f.op === "is") return f.valor === null ? v == null : v === f.valor;
     return Array.isArray(f.valor) && f.valor.map(String).includes(String(v));
   });
@@ -132,6 +133,16 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
       neq: (col: string, valor: unknown) => (filtros.push({ col, op: "neq", valor }), api),
       is: (col: string, valor: unknown) => (filtros.push({ col, op: "is", valor }), api),
       in: (col: string, valor: unknown) => (filtros.push({ col, op: "in", valor }), api),
+      // .not("col", "in", "(a,b)") — la forma que usa supabase-js para un NOT IN.
+      not: (col: string, op: string, valor: unknown) => {
+        if (op === "in") {
+          const lista = String(valor).replace(/^\(|\)$/g, "").split(",").map((x) => x.trim());
+          filtros.push({ col, op: "notin", valor: lista });
+        } else if (op === "is") {
+          filtros.push({ col, op: "neq", valor });
+        }
+        return api;
+      },
       maybeSingle: () => {
         const e = error();
         if (e) return Promise.resolve({ data: null, error: e });

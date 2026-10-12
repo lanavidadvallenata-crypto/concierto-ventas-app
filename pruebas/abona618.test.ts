@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { crearDoble, CONFIG_ENCENDIDA, CONFIG_APAGADA_FILA, type Doble } from "./doble-supabase.ts";
 import {
+  anularPlan,
   leerConfig,
   contarVipEnPlan,
   planOfrecible,
@@ -401,4 +402,55 @@ test("los montos guardados suman el total de la compra, sin centavos perdidos", 
     assert.equal(final.pagado, Math.round(total * 100) / 100, `total ${total}`);
     assert.equal(final.saldo, 0, `total ${total} dejó saldo`);
   }
+});
+
+test("anular un plan libera su cupo del tope de VIP", async () => {
+  // Antes esto no existía: rechazar una compra devolvía la silla al
+  // inventario pero dejaba el plan en al_dia, y contarVipEnPlan cuenta por
+  // estado del plan. Cada rechazo quemaba un cupo del tope para siempre.
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-anular", total, tipo, cantidad: 4, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  assert.equal(await contarVipEnPlan(cli(d)), 4, "ocupa 4 cupos mientras está vivo");
+
+  const r = await anularPlan(cli(d), { grupoId: "g-anular", por: "finanzas-1", motivo: "anulado", nota: "rechazada" });
+  assert.equal(r.anulado, true);
+  assert.equal(await contarVipEnPlan(cli(d)), 0, "anulado deja de ocupar cupo");
+
+  const fila = d.tablas.planes_pago[0];
+  assert.equal(fila.estado, "anulado");
+  assert.ok(fila.anulado_en, "la constraint anulado_con_fecha exige esta fecha");
+  assert.equal(fila.anulado_por, "finanzas-1");
+
+  // Idempotente: anular dos veces no vuelve a escribir ni rompe.
+  const otra = await anularPlan(cli(d), { grupoId: "g-anular", por: "finanzas-2", motivo: "anulado" });
+  assert.equal(otra.anulado, false, "ya estaba anulado");
+  assert.equal(d.tablas.planes_pago[0].anulado_por, "finanzas-1", "no se pisa quién lo anuló");
+});
+
+test("anular por falta de pago lo marca vencido, no anulado", async () => {
+  const { d, total, cuotas, tipo } = doblePlanListo();
+  await crearPlan(cli(d), {
+    grupoId: "g-venc", total, tipo, cantidad: 1, cuotas, canal: "web",
+    metodoPago: "pago_movil", referenciaPago: "1", montoBsInicial: null, tasaAplicada: null,
+  });
+  const r = await anularPlan(cli(d), { grupoId: "g-venc", por: null, motivo: "vencido" });
+  assert.equal(r.anulado, true);
+  assert.equal(d.tablas.planes_pago[0].estado, "vencido");
+  assert.equal(await contarVipEnPlan(cli(d)), 0);
+  // Y después de anularlo, verificar un pago sobre él se rechaza.
+  const plan = (await leerPlanPorGrupo(cli(d), "g-venc"))!;
+  const v = await verificarCuota(cli(d), { cuotaId: plan.cuotas[0].id, verificadoPor: "f" });
+  assert.equal(v.ok, false);
+});
+
+test("anular una compra sin plan no hace nada ni falla", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  const r = await anularPlan(cli(d), { grupoId: "g-sin-plan", por: "f", motivo: "anulado" });
+  assert.equal(r.anulado, false);
+  assert.equal(r.plan, null);
+  const sinGrupo = await anularPlan(cli(d), { grupoId: null, por: "f", motivo: "anulado" });
+  assert.equal(sinGrupo.anulado, false);
 });

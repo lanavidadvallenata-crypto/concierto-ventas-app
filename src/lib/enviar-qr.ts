@@ -477,3 +477,119 @@ export async function enviarCorreoRechazo(params: {
   });
   if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
+
+// ---------------------------------------------------------------------------
+// Abona618 — plantilla A: una cuota quedó verificada y el plan sigue abierto.
+//
+// Este correo existe porque sin él el comprador paga su cuota y no recibe
+// nada: el único acuse que el sistema tenía era el correo con los QR, que no
+// puede salir hasta el 100 %. Dice en qué quedó su plan, qué falta, cuándo, y
+// repite que el QR llega al completar — que es la frase que va a evitar
+// discusiones en la puerta el 4 de diciembre.
+// ---------------------------------------------------------------------------
+export async function enviarCorreoCuotaVerificada(params: {
+  destinatario: string;
+  nombreComprador: string;
+  grupoId: string;
+  etiquetaCuota: string;
+  montoVerificado: number;
+  totalUsd: number;
+  pagado: number;
+  saldo: number;
+  pendientes: { etiqueta: string; monto: number; venceEl: string }[];
+  fechaTope: string;
+}) {
+  const resend = clienteResend("el correo de cuota verificada");
+  const codigo = codigoCompra(params.grupoId);
+  const nombre = escapeHtml(params.nombreComprador);
+  const faltan = params.pendientes.length;
+
+  const filas = params.pendientes
+    .map(
+      (p) => `<tr>
+        <td style="padding:7px 0;font-size:13.5px;color:#303030;border-top:1px solid #EDE9E1;">${escapeHtml(p.etiqueta)}
+          <span style="color:#8A8782;">· hasta el ${escapeHtml(p.venceEl)}</span></td>
+        <td align="right" style="padding:7px 0;font-size:13.5px;font-weight:700;color:#303030;border-top:1px solid #EDE9E1;white-space:nowrap;">${fmtUsd(p.monto)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:32px 28px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="padding-bottom:14px;">
+              <div style="display:inline-block;background-color:#EAF7EE;color:#1B5E20;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">Pago confirmado</div>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, confirmamos tu pago de <strong>${fmtUsd(params.montoVerificado)}</strong> (${escapeHtml(params.etiquetaCuota)}). Tu entrada sigue apartada a tu nombre.</p>
+
+        <div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:2px 0;font-size:13.5px;color:#5A5650;">Llevas pagado</td>
+              <td align="right" style="padding:2px 0;font-size:13.5px;color:#5A5650;white-space:nowrap;">${fmtUsd(params.pagado)} de ${fmtUsd(params.totalUsd)}</td>
+            </tr>
+            <tr>
+              <td style="padding:2px 0;font-size:13.5px;font-weight:700;color:#303030;">Te falta</td>
+              <td align="right" style="padding:2px 0;font-size:13.5px;font-weight:700;color:#303030;white-space:nowrap;">${fmtUsd(params.saldo)}</td>
+            </tr>
+          </table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
+            ${filas}
+          </table>
+          <div style="color:#8A8782;font-size:12.5px;margin-top:8px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>
+        </div>
+
+        <p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#303030;"><strong>Tu código QR de acceso te llega cuando completes el total</strong>, no antes. Sin QR no se entra al evento, ni siquiera habiendo pagado una parte.</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:10px 28px 4px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+          <tr>
+            <td align="center" style="background-color:#3F0A62;border-radius:8px;">
+              <a href="${SITE_URL}/compra/${params.grupoId}" style="display:inline-block;padding:12px 22px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;">Ver mi plan y los datos de pago</a>
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FFF6E5;border-left:3px solid #D97706;border-radius:6px;margin:14px 0 10px;">
+          <tr><td style="padding:12px 14px;">
+            <p style="margin:0;font-size:12.5px;line-height:1.5;color:#7C2D12;">${
+              faltan === 1
+                ? `Si para el <strong>${escapeHtml(params.fechaTope)}</strong> falta ese pago,`
+                : `Si para el <strong>${escapeHtml(params.fechaTope)}</strong> falta algún pago,`
+            } tu entrada se libera y se vuelve a vender, y lo abonado no se devuelve. Te avisamos antes de cada fecha y te damos dos días de plazo. <a href="${SITE_URL}/compra/${params.grupoId}" style="color:#7C2D12;font-weight:700;">Mira las condiciones en tu página de compra</a>.</p>
+          </td></tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:8px 28px 30px;border-top:1px solid #F1ECE2;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px auto 0;">
+          <tr>
+            <td align="center" style="background-color:#25D366;border-radius:8px;">
+              <a href="${urlWhatsAppSoporte(`Hola, tengo una duda con mi plan Abona618 (compra ${codigo}) a nombre de ${params.nombreComprador}. `)}" style="display:inline-block;padding:11px 20px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13.5px;font-weight:700;color:#FFFFFF;text-decoration:none;">¿Alguna duda? Escríbenos por WhatsApp</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:6px 0 0;font-size:12px;color:#8A8782;text-align:center;">${WHATSAPP_SOPORTE_VISIBLE} · o responde este correo</p>
+      </td>
+    </tr>
+  `);
+
+  const { error } = await resend.emails.send({
+    from: remitente(),
+    replyTo: respuestasA(),
+    to: params.destinatario,
+    subject:
+      faltan === 1
+        ? `Recibimos tu ${params.etiquetaCuota.toLowerCase()} · queda 1 pago · compra ${codigo}`
+        : `Recibimos tu ${params.etiquetaCuota.toLowerCase()} · quedan ${faltan} pagos · compra ${codigo}`,
+    html,
+    headers: { "X-Entity-Ref-ID": `${params.grupoId}-${params.etiquetaCuota}` },
+  });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
+}

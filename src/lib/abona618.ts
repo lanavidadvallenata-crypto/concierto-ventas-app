@@ -510,3 +510,49 @@ export async function verificarCuota(
 
   return { ok: true, plan, completo, cuota, yaEstaba };
 }
+
+/**
+ * Anula el plan de una compra. Lo llama Finanzas cuando rechaza o anula la
+ * compra entera, y lo llamará el cron cuando se cierre el plazo de gracia.
+ *
+ * Hace falta porque rechazar una compra devolvía la silla al inventario pero
+ * dejaba el plan en `al_dia`, y `contarVipEnPlan` cuenta por estado del plan:
+ * cada rechazo quemaba un cupo del tope de VIP para siempre, así que el tope
+ * de 100 se iba degradando solo. Y además el plan seguía siendo una
+ * obligación viva: el cron de cobranza le reclamaría dinero a alguien cuya
+ * compra ya no existe.
+ *
+ * `motivo` es "vencido" cuando lo cierra el cron por falta de pago y
+ * "anulado" cuando lo decide una persona. Los dos liberan el cupo; la
+ * diferencia es para los reportes y para el correo que recibe el comprador.
+ */
+export async function anularPlan(
+  service: SupabaseClient,
+  d: { grupoId: string | null; por: string | null; motivo: "anulado" | "vencido"; nota?: string }
+): Promise<{ anulado: boolean; plan: PlanGuardado | null }> {
+  if (!d.grupoId) return { anulado: false, plan: null };
+
+  const plan = await leerPlanPorGrupo(service, d.grupoId);
+  if (!plan) return { anulado: false, plan: null };
+  if (plan.estado === "anulado" || plan.estado === "vencido") return { anulado: false, plan };
+
+  const { data, error } = await service
+    .from("planes_pago")
+    .update({
+      estado: d.motivo,
+      anulado_en: new Date().toISOString(),
+      anulado_por: d.por,
+      ...(d.nota ? { notas: d.nota } : {}),
+    })
+    .eq("id", plan.id)
+    .not("estado", "in", "(anulado,vencido)")
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    console.error(`Abona618: no se pudo anular el plan ${plan.id} — ${error.message}. El cupo de VIP sigue ocupado.`);
+    return { anulado: false, plan };
+  }
+
+  return { anulado: Boolean(data), plan: { ...plan, estado: d.motivo } };
+}
