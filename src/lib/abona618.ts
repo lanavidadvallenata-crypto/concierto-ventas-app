@@ -616,6 +616,10 @@ export type CuotaPorCobrar = {
   canalReporte: CanalReporte | null;
   reportadoPor: string | null;
   nota: string | null;
+  // Lo que anotó quien cobró: la pantalla lo muestra para que Finanzas sepa
+  // qué monto y qué referencia buscar en el banco.
+  metodoPago: string | null;
+  referenciaPago: string | null;
   planId: string;
   grupoId: string;
   totalUsd: number;
@@ -735,6 +739,8 @@ export async function listaDeCobranza(
         canalReporte: c.canalReporte,
         reportadoPor: c.reportadoPor,
         nota: c.nota,
+        metodoPago: c.metodoPago,
+        referenciaPago: c.referenciaPago,
         planId: plan.id,
         grupoId: plan.grupoId,
         totalUsd: plan.totalUsd,

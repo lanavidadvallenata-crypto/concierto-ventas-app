@@ -14,6 +14,9 @@ export default function Nav({ perfil }: { perfil: PerfilActual }) {
     { href: "/ventas", label: "Ventas", roles: ["ventas", "finanzas", "admin"] },
     { href: "/taquilla", label: "Taquilla", roles: ["ventas", "finanzas", "admin"] },
     { href: "/finanzas", label: "Finanzas", roles: ["finanzas", "admin"] },
+    // Cobranza la ve Ventas también: el cobro de cuotas lo acompaña quien
+    // atiende al comprador, y Finanzas solo confirma el banco (Anita, 12 oct).
+    { href: "/cobranza", label: "Cobranza", roles: ["ventas", "finanzas", "admin"] },
     { href: "/dashboard", label: "Dashboard", roles: ["ventas", "finanzas", "admin"] },
     { href: "/acceso", label: "Acceso", roles: ["acceso", "admin"] },
     { href: "/patrocinantes", label: "Patrocinios", roles: ["admin"] },
