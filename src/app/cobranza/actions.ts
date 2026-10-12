@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { anularPlan, leerPlanPorGrupo, reportarCuota, verificarCuota, type CanalReporte } from "@/lib/abona618";
-import { enviarCorreoCuotaVerificada } from "@/lib/enviar-qr";
+import { enviarCorreoCuotaVerificada, enviarCorreoPlanAnulado } from "@/lib/enviar-qr";
 import { fechaCorta, usd } from "@/lib/cuotas";
 import { metodoEsEnBs, normalizarReferencia, validarReferencia } from "@/lib/pagos";
 import { generarTokenQR } from "@/lib/qr";
@@ -356,7 +356,10 @@ export async function anularPorFaltaDePago(grupoId: string): Promise<Resultado> 
   if (!r.anulado) return { ok: false, error: "Ese plan ya estaba anulado o vencido." };
 
   // Las entradas vuelven al inventario: se rechazan y se liberan las sillas.
-  const { data: tickets } = await service.from("tickets").select("id, tipo, silla_id, estado_pago").eq("grupo_id", grupoId);
+  const { data: tickets } = await service
+    .from("tickets")
+    .select("id, tipo, silla_id, estado_pago, comprador_nombre, comprador_email")
+    .eq("grupo_id", grupoId);
   let liberadas = 0;
   for (const t of tickets ?? []) {
     if (t.estado_pago !== "pendiente") continue;
@@ -375,10 +378,44 @@ export async function anularPorFaltaDePago(grupoId: string): Promise<Resultado> 
   }
 
   revalidar();
+
+  let avisoCorreo = " Avísale por WhatsApp.";
+  const comprador = (tickets ?? [])[0];
+  const correo = comprador?.comprador_email as string | null | undefined;
+  if (correo) {
+    try {
+      await enviarCorreoPlanAnulado({
+        destinatario: correo,
+        nombreComprador: String(comprador.comprador_nombre ?? ""),
+        grupoId,
+        montoPendiente: plan.saldo,
+        abonado: plan.pagado,
+        // Citar cuándo aceptó las condiciones es lo único que convierte "no se
+        // devuelve" en algo que se sostiene si el comprador reclama.
+        aceptoEn: plan.aceptoCondicionesEn
+          ? new Date(plan.aceptoCondicionesEn).toLocaleString("es-VE", {
+              timeZone: "America/Caracas",
+              day: "numeric",
+              month: "long",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : null,
+      });
+      avisoCorreo = ` Le avisamos por correo a ${correo}.`;
+    } catch (e) {
+      console.error("Error enviando el correo de anulación:", (e as Error).message);
+      avisoCorreo = ` El correo a ${correo} NO salió — avísale tú por WhatsApp.`;
+    }
+  } else {
+    avisoCorreo = " Esta compra no tiene correo: avísale por WhatsApp.";
+  }
+
   return {
     ok: true,
     aviso:
       `Plan anulado. ${liberadas} entrada${liberadas === 1 ? "" : "s"} de vuelta a la venta. ` +
-      `Quedaron ${usd(plan.pagado)} abonados que, según las condiciones, no se devuelven. Avísale por WhatsApp.`,
+      `Quedaron ${usd(plan.pagado)} abonados que, según las condiciones, no se devuelven.` +
+      avisoCorreo,
   };
 }

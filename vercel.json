@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/actualizar-tasa",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/avisos-cuotas",
+      "schedule": "15 12 * * *"
     }
   ]
 }

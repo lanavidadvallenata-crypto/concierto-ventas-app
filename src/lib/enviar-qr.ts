@@ -590,3 +590,355 @@ export async function enviarCorreoCuotaVerificada(params: {
   });
   if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
 }
+
+// ---------------------------------------------------------------------------
+// Abona618 — plantilla B: recordatorio antes de que venza una cuota.
+//
+// Tres tonos de la misma plantilla: 3 días antes, el día antes, y el día que
+// vence. NO menciona el margen interno del equipo (Anita, 12 oct): el
+// comprador ve su fecha, y su fecha es la fecha.
+// ---------------------------------------------------------------------------
+export async function enviarCorreoRecordatorio(params: {
+  destinatario: string;
+  nombreComprador: string;
+  grupoId: string;
+  etiquetaCuota: string;
+  monto: number;
+  /** "30 de octubre" */
+  venceEl: string;
+  saldo: number;
+  etapa: "tres_dias" | "manana" | "hoy";
+}) {
+  const resend = clienteResend("el recordatorio de cuota");
+  const codigo = codigoCompra(params.grupoId);
+  const nombre = escapeHtml(params.nombreComprador);
+  const fecha = escapeHtml(params.venceEl);
+
+  const titulo =
+    params.etapa === "hoy"
+      ? "Hoy vence tu pago"
+      : params.etapa === "manana"
+        ? "Mañana vence tu pago"
+        : "Se acerca tu próximo pago";
+
+  const asunto =
+    params.etapa === "hoy"
+      ? `Hoy vence tu pago de ${fmtUsd(params.monto)} · compra ${codigo}`
+      : params.etapa === "manana"
+        ? `Mañana vence tu pago de ${fmtUsd(params.monto)} · compra ${codigo}`
+        : `Tu pago de ${fmtUsd(params.monto)} vence el ${params.venceEl} · compra ${codigo}`;
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:32px 28px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="padding-bottom:14px;">
+              <div style="display:inline-block;background-color:#FFF6E5;color:#7C2D12;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">${escapeHtml(titulo)}</div>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, te recordamos tu próximo pago de La Navidad Vallenata.</p>
+
+        <div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:2px 0;font-size:13.5px;font-weight:700;color:#303030;">${escapeHtml(params.etiquetaCuota)}</td>
+              <td align="right" style="padding:2px 0;font-size:16px;font-weight:700;color:#303030;white-space:nowrap;">${fmtUsd(params.monto)}</td>
+            </tr>
+            <tr>
+              <td style="padding:2px 0;font-size:13.5px;color:#5A5650;">Vence el</td>
+              <td align="right" style="padding:2px 0;font-size:13.5px;color:#5A5650;white-space:nowrap;">${fecha}</td>
+            </tr>
+            <tr>
+              <td style="padding:2px 0;font-size:13.5px;color:#5A5650;">Te falta en total</td>
+              <td align="right" style="padding:2px 0;font-size:13.5px;color:#5A5650;white-space:nowrap;">${fmtUsd(params.saldo)}</td>
+            </tr>
+          </table>
+          <div style="color:#8A8782;font-size:12.5px;margin-top:8px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>
+        </div>
+
+        <p style="margin:0 0 4px;font-size:14px;line-height:1.6;color:#303030;">En tu página de compra tienes los datos para pagar y el botón para avisarnos cuando lo hagas.</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:10px 28px 4px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+          <tr>
+            <td align="center" style="background-color:#3F0A62;border-radius:8px;">
+              <a href="${SITE_URL}/compra/${params.grupoId}" style="display:inline-block;padding:12px 22px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;">Ver mi plan y los datos de pago</a>
+            </td>
+          </tr>
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FFF6E5;border-left:3px solid #D97706;border-radius:6px;margin:14px 0 10px;">
+          <tr><td style="padding:12px 14px;">
+            <p style="margin:0;font-size:12.5px;line-height:1.5;color:#7C2D12;">Si no pagas en la fecha, se anula toda la compra, tu entrada vuelve a la venta y lo que ya abonaste no se devuelve. Tu QR llega cuando completes el total.</p>
+          </td></tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:8px 28px 30px;border-top:1px solid #F1ECE2;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px auto 0;">
+          <tr>
+            <td align="center" style="background-color:#25D366;border-radius:8px;">
+              <a href="${urlWhatsAppSoporte(`Hola, es sobre mi pago de La Navidad Vallenata (compra ${codigo}) a nombre de ${params.nombreComprador}. `)}" style="display:inline-block;padding:11px 20px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13.5px;font-weight:700;color:#FFFFFF;text-decoration:none;">¿Algún problema? Escríbenos</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:6px 0 0;font-size:12px;color:#8A8782;text-align:center;">${WHATSAPP_SOPORTE_VISIBLE} · o responde este correo</p>
+      </td>
+    </tr>
+  `);
+
+  const { error } = await resend.emails.send({
+    from: remitente(),
+    replyTo: respuestasA(),
+    to: params.destinatario,
+    subject: asunto,
+    html,
+    headers: { "X-Entity-Ref-ID": `${params.grupoId}-${params.etiquetaCuota}-${params.etapa}` },
+  });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
+// Abona618 — plantilla C: la cuota venció y el pago no llegó.
+//
+// El equipo tiene por dentro un par de días de margen antes de anular, pero
+// este correo NO los menciona (Anita, 12 oct): "si no, esperan hasta el último
+// día y piden más prórroga". Para el comprador la entrada está en riesgo hoy.
+// ---------------------------------------------------------------------------
+export async function enviarCorreoEnRiesgo(params: {
+  destinatario: string;
+  nombreComprador: string;
+  grupoId: string;
+  etiquetaCuota: string;
+  monto: number;
+  venceEl: string;
+  abonado: number;
+}) {
+  const resend = clienteResend("el aviso de entrada en riesgo");
+  const codigo = codigoCompra(params.grupoId);
+  const nombre = escapeHtml(params.nombreComprador);
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:32px 28px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="padding-bottom:14px;">
+              <div style="display:inline-block;background-color:#FEE2E2;color:#991B1B;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">Tu entrada está en riesgo</div>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, tu pago de <strong>${fmtUsd(params.monto)}</strong> (${escapeHtml(params.etiquetaCuota)}) venció el <strong>${escapeHtml(params.venceEl)}</strong> y todavía no nos ha llegado.</p>
+
+        <div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#FEF2F2;border-radius:8px;padding:12px 14px;">
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#991B1B;"><strong>Tu entrada puede volver a la venta en cualquier momento.</strong> Si eso pasa, los ${fmtUsd(params.abonado)} que ya abonaste no se devuelven.</p>
+          <div style="color:#8A8782;font-size:12.5px;margin-top:8px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>
+        </div>
+
+        <p style="margin:0 0 4px;font-size:14px;line-height:1.6;color:#303030;"><strong>Si ya pagaste</strong>, mándanos la referencia por WhatsApp ahora mismo y lo revisamos de una vez.</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:10px 28px 4px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+          <tr>
+            <td align="center" style="background-color:#3F0A62;border-radius:8px;">
+              <a href="${SITE_URL}/compra/${params.grupoId}" style="display:inline-block;padding:12px 22px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;">Pagar ahora</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:8px 28px 30px;border-top:1px solid #F1ECE2;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px auto 0;">
+          <tr>
+            <td align="center" style="background-color:#25D366;border-radius:8px;">
+              <a href="${urlWhatsAppSoporte(`Hola, es sobre mi pago pendiente de La Navidad Vallenata (compra ${codigo}) a nombre de ${params.nombreComprador}. `)}" style="display:inline-block;padding:11px 20px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13.5px;font-weight:700;color:#FFFFFF;text-decoration:none;">Escríbenos por WhatsApp</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:6px 0 0;font-size:12px;color:#8A8782;text-align:center;">${WHATSAPP_SOPORTE_VISIBLE} · o responde este correo</p>
+      </td>
+    </tr>
+  `);
+
+  const { error } = await resend.emails.send({
+    from: remitente(),
+    replyTo: respuestasA(),
+    to: params.destinatario,
+    subject: `Falta un pago para que tu entrada sea tuya · compra ${codigo}`,
+    html,
+    headers: { "X-Entity-Ref-ID": `${params.grupoId}-${params.etiquetaCuota}-riesgo` },
+  });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
+// Abona618 — plantilla D: la compra se anuló por falta de pago.
+//
+// La manda la persona de Finanzas que aprieta el botón, no el cron. Cita la
+// fecha y la hora en que el comprador aceptó las condiciones: es lo único que
+// convierte "no se devuelve" en algo que se puede sostener en una discusión.
+// ---------------------------------------------------------------------------
+export async function enviarCorreoPlanAnulado(params: {
+  destinatario: string;
+  nombreComprador: string;
+  grupoId: string;
+  montoPendiente: number;
+  abonado: number;
+  /** "12 de octubre a las 3:42 p. m." */
+  aceptoEn: string | null;
+}) {
+  const resend = clienteResend("el correo de compra anulada");
+  const codigo = codigoCompra(params.grupoId);
+  const nombre = escapeHtml(params.nombreComprador);
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:32px 28px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="padding-bottom:14px;">
+              <div style="display:inline-block;background-color:#F3F4F6;color:#374151;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">Compra anulada</div>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>. No recibimos el pago pendiente de <strong>${fmtUsd(params.montoPendiente)}</strong> dentro de la fecha, así que anulamos tu reserva y tu entrada volvió a estar disponible para otra persona.</p>
+
+        <div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
+          <p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">Según las condiciones del plan de pago que aceptaste${
+            params.aceptoEn ? ` el <strong style="color:#303030;">${escapeHtml(params.aceptoEn)}</strong>` : ""
+          }, los <strong style="color:#303030;">${fmtUsd(params.abonado)}</strong> abonados no se devuelven.</p>
+          <div style="color:#8A8782;font-size:12.5px;margin-top:8px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>
+        </div>
+
+        <p style="margin:0 0 4px;font-size:14px;line-height:1.6;color:#303030;">Si crees que hubo un error, o ya habías pagado y no nos llegó la referencia, escríbenos hoy mismo por WhatsApp y lo revisamos.</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:8px 28px 30px;border-top:1px solid #F1ECE2;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px auto 0;">
+          <tr>
+            <td align="center" style="background-color:#25D366;border-radius:8px;">
+              <a href="${urlWhatsAppSoporte(`Hola, me anularon la compra ${codigo} a nombre de ${params.nombreComprador} y quiero revisarlo: `)}" style="display:inline-block;padding:11px 20px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:13.5px;font-weight:700;color:#FFFFFF;text-decoration:none;">Escríbenos por WhatsApp</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:6px 0 0;font-size:12px;color:#8A8782;text-align:center;">${WHATSAPP_SOPORTE_VISIBLE} · o responde este correo</p>
+      </td>
+    </tr>
+  `);
+
+  const { error } = await resend.emails.send({
+    from: remitente(),
+    replyTo: respuestasA(),
+    to: params.destinatario,
+    subject: `Hemos anulado tu compra por falta de pago · ${codigo}`,
+    html,
+    headers: { "X-Entity-Ref-ID": `${params.grupoId}-anulado` },
+  });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
+// Abona618 — resumen interno de la cobranza del día. NO va a compradores.
+//
+// Lo manda el cron solo cuando hay algo que decidir o algo que se rompió. Un
+// correo diario que casi siempre dice "todo bien" se deja de abrir en tres
+// días, y entonces tampoco se abre el que traía las tres anulaciones.
+// ---------------------------------------------------------------------------
+export async function enviarResumenCobranza(params: {
+  /** "13 de octubre" */
+  hoy: string;
+  paraAnular: {
+    compra: string;
+    nombre: string;
+    etiqueta: string;
+    vencio: string;
+    diasTarde: number;
+    monto: number;
+    abonado: number;
+    grupoId: string;
+  }[];
+  avisosEnviados: number;
+  fallos: { compra: string; etapa: string | null; error: string }[];
+  saldoTotal: string;
+}) {
+  const resend = clienteResend("el resumen de cobranza");
+  const destinatario = process.env.EMAIL_OPERACIONES || respuestasA();
+
+  const filasAnular = params.paraAnular
+    .map(
+      (p) => `<tr>
+        <td style="padding:8px 0;font-size:13.5px;color:#303030;border-top:1px solid #EDE9E1;">
+          <strong>${escapeHtml(p.nombre)}</strong> · <span style="font-family:monospace;color:#8A8782;">${escapeHtml(p.compra)}</span><br>
+          <span style="color:#8A8782;font-size:12.5px;">${escapeHtml(p.etiqueta)} venció el ${escapeHtml(p.vencio)} · ${p.diasTarde} ${p.diasTarde === 1 ? "día" : "días"} tarde · abonó ${fmtUsd(p.abonado)}</span>
+        </td>
+        <td align="right" style="padding:8px 0;font-size:13.5px;font-weight:700;color:#991B1B;border-top:1px solid #EDE9E1;white-space:nowrap;">${fmtUsd(p.monto)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const filasFallos = params.fallos
+    .map(
+      (f) => `<tr><td colspan="2" style="padding:6px 0;font-size:12.5px;color:#7C2D12;border-top:1px solid #EDE9E1;">
+        <strong>${escapeHtml(f.compra)}</strong> · no salió el aviso ${escapeHtml(f.etapa ?? "")}: ${escapeHtml(f.error)}
+      </td></tr>`
+    )
+    .join("");
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:32px 28px 12px;">
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Cobranza del <strong>${escapeHtml(params.hoy)}</strong>. Se mandaron <strong>${params.avisosEnviados}</strong> ${params.avisosEnviados === 1 ? "aviso" : "avisos"} y quedan <strong>${escapeHtml(params.saldoTotal)}</strong> por cobrar.</p>
+
+        ${
+          params.paraAnular.length > 0
+            ? `<div style="margin:0 0 14px;background:#FEF2F2;border-radius:8px;padding:12px 14px;">
+                 <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#991B1B;">Hay que decidir: ${params.paraAnular.length} ${params.paraAnular.length === 1 ? "compra" : "compras"} sin pagar</p>
+                 <p style="margin:0 0 8px;font-size:12.5px;line-height:1.5;color:#7C2D12;">El sistema NO las anula solo. Entra a Cobranza, confirma por WhatsApp si pagaron, y anula las que correspondan.</p>
+                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${filasAnular}</table>
+               </div>`
+            : ""
+        }
+
+        ${
+          params.fallos.length > 0
+            ? `<div style="margin:0 0 14px;background:#FFF6E5;border-radius:8px;padding:12px 14px;">
+                 <p style="margin:0 0 4px;font-size:14px;font-weight:700;color:#7C2D12;">Avisos que no salieron</p>
+                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${filasFallos}</table>
+               </div>`
+            : ""
+        }
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:0 28px 30px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+          <tr>
+            <td align="center" style="background-color:#3F0A62;border-radius:8px;">
+              <a href="${URL_EQUIPO}/cobranza" style="display:inline-block;padding:12px 22px;font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;">Abrir Cobranza</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  `);
+
+  const { error } = await resend.emails.send({
+    from: remitente(),
+    replyTo: respuestasA(),
+    to: destinatario,
+    subject:
+      params.paraAnular.length > 0
+        ? `Cobranza ${params.hoy}: ${params.paraAnular.length} ${params.paraAnular.length === 1 ? "compra" : "compras"} por anular`
+        : `Cobranza ${params.hoy}: ${params.fallos.length} ${params.fallos.length === 1 ? "aviso" : "avisos"} no salieron`,
+    html,
+  });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
+}
