@@ -7,6 +7,7 @@
 // puro y está cubierto por el barrido de pruebas. Este archivo solo orquesta.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { seleccionarTodo } from "@/lib/db";
 import {
   AVISO_TOPE_VIP,
   DIAS_GRACIA,
@@ -63,6 +64,15 @@ export async function leerConfig(service: SupabaseClient): Promise<Config> {
 }
 
 /**
+ * Los tres estados que mantienen una silla fuera del mercado. Vive aquí, en un
+ * solo sitio, porque `contarVipEnPlan` (que decide si se ofrece el plan) y
+ * `resumenPlanes` (que se lo muestra a Anita) tienen que contar exactamente lo
+ * mismo. Si uno de los dos se desfasara, el dashboard diría que quedan cupos
+ * mientras el checkout los está negando, o al revés.
+ */
+export const ESTADOS_OCUPAN_TOPE = ["al_dia", "en_mora", "completado"] as const;
+
+/**
  * Cuántas entradas VIP están ocupando el tope ahora mismo. Cuentan los planes
  * al día, en mora y completados: los tres sacaron una silla del mercado. Los
  * vencidos y anulados no, porque su silla ya volvió al inventario.
@@ -72,7 +82,7 @@ export async function contarVipEnPlan(service: SupabaseClient): Promise<number |
     .from("planes_pago")
     .select("cantidad")
     .eq("tipo", "vip")
-    .in("estado", ["al_dia", "en_mora", "completado"]);
+    .in("estado", [...ESTADOS_OCUPAN_TOPE]);
 
   if (error) {
     console.error("Abona618: no se pudo contar las VIP en plan —", error.message);
@@ -795,4 +805,167 @@ export async function listaDeCobranza(
   lista.masAdelante.sort(porFecha);
 
   return lista;
+}
+
+// ===========================================================================
+// El resumen para el dashboard.
+//
+// Nace de dos números que el dashboard estaba dando mal desde que existe el
+// módulo: sumaba el total de la compra en "esperando verificación" cuando solo
+// había entrado el 40 %, y no contaba como recaudada la inicial que sí estaba
+// en el banco. Sobreestimaba lo pendiente y subestimaba lo cobrado al mismo
+// tiempo.
+// ===========================================================================
+
+/** Cuántos días hacia adelante cuentan como "esto se cobra ya". */
+export const VENTANA_PROXIMAS_DIAS = 7;
+
+export type ResumenPlanes = {
+  /** true cuando alguna de las dos lecturas falló. Los números que vienen al
+   *  lado NO son confiables y la pantalla tiene que decirlo: un cero que
+   *  parece tranquilizador es peor que un error visible. Mismo criterio que
+   *  `leerConfig`. */
+  error: boolean;
+  hayPlanes: boolean;
+
+  /** Planes que todavía deben plata. Aquí vive el riesgo. */
+  enCurso: {
+    compras: number;
+    entradas: number;
+    /** Lo que valen esas compras a precio completo. */
+    valorUsd: number;
+    /** Cuotas ya verificadas: plata en el banco que el recaudado normal NO ve,
+     *  porque los tickets de un plan siguen en `pendiente` hasta el final. */
+    cobradoUsd: number;
+    porCobrarUsd: number;
+  };
+
+  /** Cuotas de planes en curso cuya fecha ya pasó y nadie verificó. Si esto
+   *  no es cero, hay trabajo atrasado en Cobranza. */
+  vencidoSinCobrarUsd: number;
+  /** Cuotas que vencen dentro de la ventana. Lo que viene. */
+  proximoUsd: number;
+
+  /** Pagaron el 100 %. Sus tickets ya están verificados, así que su plata YA
+   *  está contada en el recaudado de siempre. No se suma a `cobradoUsd` ni al
+   *  total en banco: sería contarla dos veces. */
+  completados: { compras: number; entradas: number; valorUsd: number };
+
+  /** Planes muertos y lo que quedó abonado. En los vencidos ese dinero se
+   *  queda (es la regla que el comprador aceptó). Los anulados los decidió
+   *  una persona de Finanzas y hay que mirarlos caso por caso: puede ser una
+   *  compra duplicada o una devolución. */
+  caidos: { vencidos: number; anulados: number; abonadoUsd: number };
+
+  vip: { enPlan: number; tope: number; aviso: number };
+
+  /** `tickets.grupo_id` de las compras con plan en curso. El dashboard los
+   *  necesita para NO sumar el total de esas compras en "esperando
+   *  verificación": de una compra de $140 en plan solo entraron $56, y los
+   *  tickets siguen en `pendiente` hasta que se complete. */
+  gruposEnCurso: string[];
+};
+
+const centavos = (n: number) => Math.round(n * 100) / 100;
+
+function resumenVacio(config: Config, error: boolean): ResumenPlanes {
+  return {
+    error,
+    hayPlanes: false,
+    enCurso: { compras: 0, entradas: 0, valorUsd: 0, cobradoUsd: 0, porCobrarUsd: 0 },
+    vencidoSinCobrarUsd: 0,
+    proximoUsd: 0,
+    completados: { compras: 0, entradas: 0, valorUsd: 0 },
+    caidos: { vencidos: 0, anulados: 0, abonadoUsd: 0 },
+    vip: { enPlan: 0, tope: config.topeVip, aviso: config.avisoTopeVip },
+    gruposEnCurso: [],
+  };
+}
+
+type FilaPlan = { id: string; grupo_id: string; estado: string; tipo: string; cantidad: number; total_usd: number | string };
+type FilaCuota = { plan_id: string; monto_usd: number | string; vence_el: string; verificado_en: string | null };
+
+/**
+ * Todo lo que el dashboard necesita saber de los planes, en dos lecturas
+ * paginadas. Se agrega en memoria y no en SQL a propósito: son decenas de
+ * filas, la lógica queda cubierta por pruebas y no hay que mantener una vista
+ * en la base que se desfase del código.
+ */
+export async function resumenPlanes(
+  service: SupabaseClient,
+  config: Config,
+  hoy: string = hoyEnVenezuela()
+): Promise<ResumenPlanes> {
+  const [planes, cuotas] = await Promise.all([
+    seleccionarTodo<FilaPlan>(service, "planes_pago", "id, grupo_id, estado, tipo, cantidad, total_usd"),
+    seleccionarTodo<FilaCuota>(service, "cuotas", "plan_id, monto_usd, vence_el, verificado_en"),
+  ]);
+
+  if (planes.error || cuotas.error) {
+    console.error("Abona618: no se pudo armar el resumen —", planes.error ?? cuotas.error);
+    return resumenVacio(config, true);
+  }
+  if (planes.data.length === 0) return resumenVacio(config, false);
+
+  // Cuotas agrupadas por plan, ya clasificadas por lo único que importa aquí:
+  // si la plata entró, si se pasó la fecha, o si está por venir.
+  const porPlan = new Map<string, { cobrado: number; vencido: number; proximo: number }>();
+  for (const c of cuotas.data) {
+    const planId = String(c.plan_id);
+    const acc = porPlan.get(planId) ?? { cobrado: 0, vencido: 0, proximo: 0 };
+    const monto = Number(c.monto_usd);
+    if (!Number.isFinite(monto)) continue;
+    if (c.verificado_en) {
+      acc.cobrado += monto;
+    } else {
+      // Fechas civiles de Venezuela comparadas como texto YYYY-MM-DD: el
+      // servidor corre en UTC y a las 8 p. m. de Maracaibo ya es "mañana"
+      // allá. Comparar objetos Date aquí adelantaría un día los vencimientos.
+      const dias = diasEntre(hoy, String(c.vence_el));
+      if (dias < 0) acc.vencido += monto;
+      else if (dias <= VENTANA_PROXIMAS_DIAS) acc.proximo += monto;
+    }
+    porPlan.set(planId, acc);
+  }
+
+  const r = resumenVacio(config, false);
+  r.hayPlanes = true;
+
+  for (const p of planes.data) {
+    const cant = Number(p.cantidad) || 0;
+    const total = Number(p.total_usd) || 0;
+    const c = porPlan.get(String(p.id)) ?? { cobrado: 0, vencido: 0, proximo: 0 };
+
+    if ((ESTADOS_OCUPAN_TOPE as readonly string[]).includes(p.estado) && p.tipo === "vip") {
+      r.vip.enPlan += cant;
+    }
+
+    if (p.estado === "al_dia" || p.estado === "en_mora") {
+      r.enCurso.compras += 1;
+      r.enCurso.entradas += cant;
+      r.enCurso.valorUsd += total;
+      r.enCurso.cobradoUsd += c.cobrado;
+      r.vencidoSinCobrarUsd += c.vencido;
+      r.proximoUsd += c.proximo;
+      if (p.grupo_id) r.gruposEnCurso.push(String(p.grupo_id));
+    } else if (p.estado === "completado") {
+      r.completados.compras += 1;
+      r.completados.entradas += cant;
+      r.completados.valorUsd += total;
+    } else if (p.estado === "vencido" || p.estado === "anulado") {
+      if (p.estado === "vencido") r.caidos.vencidos += 1;
+      else r.caidos.anulados += 1;
+      r.caidos.abonadoUsd += c.cobrado;
+    }
+  }
+
+  r.enCurso.valorUsd = centavos(r.enCurso.valorUsd);
+  r.enCurso.cobradoUsd = centavos(r.enCurso.cobradoUsd);
+  r.enCurso.porCobrarUsd = centavos(r.enCurso.valorUsd - r.enCurso.cobradoUsd);
+  r.vencidoSinCobrarUsd = centavos(r.vencidoSinCobrarUsd);
+  r.proximoUsd = centavos(r.proximoUsd);
+  r.completados.valorUsd = centavos(r.completados.valorUsd);
+  r.caidos.abonadoUsd = centavos(r.caidos.abonadoUsd);
+
+  return r;
 }

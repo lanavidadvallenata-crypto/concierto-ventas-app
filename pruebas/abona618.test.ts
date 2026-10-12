@@ -16,6 +16,7 @@ import {
   crearPlan,
   leerPlanPorGrupo,
   planConSaldo,
+  resumenPlanes,
   reportarCuota,
   verificarCuota,
 } from "../src/lib/abona618.ts";
@@ -593,4 +594,142 @@ test("si la base falla, la pantalla de cobranza sale vacía y no se cae", async 
   assert.equal(L.planesActivos, 0);
   assert.equal(L.saldoTotal, 0);
   assert.deepEqual(L.vencenHoy, []);
+});
+
+// ---------------------------------------------------------------------------
+// resumenPlanes — los números que ve Anita en el dashboard.
+//
+// El peligro de esta función no es que se caiga: es que dé un número creíble y
+// equivocado. Dos trampas concretas se prueban aquí: contar dos veces la plata
+// de un plan completado (sus tickets ya están verificados y ya suman en el
+// recaudado de siempre) y mostrar ceros tranquilizadores cuando la lectura
+// falló.
+// ---------------------------------------------------------------------------
+
+const CONFIG_OBJ = {
+  activo: true,
+  topeVip: 100,
+  avisoTopeVip: 90,
+  avisoTopeEnviadoEn: null,
+  error: false,
+};
+
+test("sin planes, el resumen dice que no hay planes y no marca error", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.equal(r.hayPlanes, false);
+  assert.equal(r.error, false, "vacío no es lo mismo que roto");
+  assert.equal(r.enCurso.valorUsd, 0);
+  assert.equal(r.vip.tope, 100);
+});
+
+test("un plan al día: el valor completo es compromiso, pero solo la inicial está cobrada", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  await planConFechas(d, "g-1", ["2026-11-16", "2026-11-25"], { tipo: "vip", cantidad: 1, total: 140 });
+
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.equal(r.enCurso.compras, 1);
+  assert.equal(r.enCurso.entradas, 1);
+  assert.equal(r.enCurso.valorUsd, 140);
+  assert.equal(r.enCurso.cobradoUsd, 56, "el 40 % que sí entró al banco");
+  assert.equal(r.enCurso.porCobrarUsd, 84);
+  assert.equal(r.vip.enPlan, 1);
+  assert.equal(r.vencidoSinCobrarUsd, 0);
+  assert.equal(r.proximoUsd, 0, "el 16 de noviembre todavía está lejos el 12 de octubre");
+});
+
+test("un plan completado NO se suma a lo cobrado en planes: eso sería contarlo dos veces", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  const plan = await planConFechas(d, "g-ok", ["2026-11-16"], { total: 100, cantidad: 2 });
+  await verificarCuota(cli(d), { cuotaId: plan.cuotas[1].id, verificadoPor: "f" });
+
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.equal(r.completados.compras, 1);
+  assert.equal(r.completados.entradas, 2);
+  assert.equal(r.completados.valorUsd, 100);
+  assert.equal(r.enCurso.compras, 0);
+  assert.equal(
+    r.enCurso.cobradoUsd,
+    0,
+    "sus tickets ya están verificados y su plata ya suma en el recaudado normal"
+  );
+  assert.equal(r.vip.enPlan, 2, "pagó completo, pero sus 2 sillas siguen ocupadas y siguen contra el tope");
+});
+
+test("una cuota que ya venció y nadie verificó sale como plata atrasada", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  await planConFechas(d, "g-tarde", ["2026-11-16", "2026-11-25"], { total: 140 });
+
+  // Mismo plan, mirado el 18 de noviembre: la cuota del 16 ya se pasó.
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, "2026-11-18");
+  assert.equal(r.vencidoSinCobrarUsd, 42, "la cuota del 16 de noviembre");
+  assert.equal(r.proximoUsd, 42, "la del 25 entra en la ventana de 7 días");
+  assert.equal(r.enCurso.porCobrarUsd, 84, "atrasado + próximo siguen siendo el saldo");
+});
+
+test("un plan vencido deja de ser compromiso y su abono queda como retenido", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  await planConFechas(d, "g-muerto", ["2026-11-16"], { tipo: "vip", total: 140 });
+  await anularPlan(cli(d), { grupoId: "g-muerto", por: null, motivo: "vencido" });
+
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.equal(r.enCurso.compras, 0);
+  assert.equal(r.caidos.vencidos, 1);
+  assert.equal(r.caidos.anulados, 0);
+  assert.equal(r.caidos.abonadoUsd, 56, "lo abonado no se devuelve");
+  assert.equal(r.vip.enPlan, 0, "la silla volvió al inventario");
+});
+
+test("anular una compra ya completada no borra la plata que entró: queda contada aparte", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  const plan = await planConFechas(d, "g-dup", ["2026-11-16"], { total: 100 });
+  await verificarCuota(cli(d), { cuotaId: plan.cuotas[1].id, verificadoPor: "f" });
+  await anularPlan(cli(d), { grupoId: "g-dup", por: "admin", motivo: "anulado" });
+
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.equal(r.completados.compras, 0, "ya no está completado, está anulado");
+  assert.equal(r.caidos.anulados, 1);
+  assert.equal(r.caidos.abonadoUsd, 100, "entraron los $100 completos y hay que poder verlos");
+  assert.equal(r.enCurso.valorUsd, 0);
+});
+
+test("si la lectura falla, el resumen se declara roto en vez de mostrar ceros", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  await planConFechas(d, "g-1", ["2026-11-16"], { tipo: "vip", cantidad: 40 });
+  d.fallar.planes_pago = "timeout";
+
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.equal(r.error, true);
+  assert.equal(r.hayPlanes, false);
+  assert.equal(r.vip.enPlan, 0, "cero, pero marcado como no confiable: la pantalla no puede decir 'quedan 100 cupos'");
+});
+
+test("el resumen pagina: 1.200 cuotas no se cortan en 1.000", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  // 600 planes de $100, cada uno con inicial cobrada ($40) y una cuota de $60.
+  const planes = [];
+  const cuotas = [];
+  for (let i = 0; i < 600; i++) {
+    planes.push({ id: `p${i}`, grupo_id: `g${i}`, total_usd: 100, tipo: "general", cantidad: 1, estado: "al_dia" });
+    cuotas.push({ id: `c${i}a`, plan_id: `p${i}`, orden: 1, monto_usd: 40, vence_el: "2026-10-01", verificado_en: "2026-10-01T12:00:00Z" });
+    cuotas.push({ id: `c${i}b`, plan_id: `p${i}`, orden: 2, monto_usd: 60, vence_el: "2026-11-25", verificado_en: null });
+  }
+  d.tablas.planes_pago = planes;
+  d.tablas.cuotas = cuotas;
+
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.equal(r.enCurso.compras, 600);
+  assert.equal(r.enCurso.valorUsd, 60000);
+  assert.equal(r.enCurso.cobradoUsd, 24000, "si el paginador se cortara en 1.000 cuotas, aquí faltarían $4.000");
+  assert.equal(r.enCurso.porCobrarUsd, 36000);
+});
+
+test("el resumen devuelve los grupos en curso para que el dashboard no cuente su total como pendiente", async () => {
+  const d = crearDoble({ abona618_config: structuredClone(CONFIG_ENCENDIDA) });
+  await planConFechas(d, "g-vivo", ["2026-11-25"], { total: 140 });
+  const muerto = await planConFechas(d, "g-pagado", ["2026-11-16"], { total: 100 });
+  await verificarCuota(cli(d), { cuotaId: muerto.cuotas[1].id, verificadoPor: "f" });
+
+  const r = await resumenPlanes(cli(d), CONFIG_OBJ, HOY);
+  assert.deepEqual(r.gruposEnCurso, ["g-vivo"], "el completado ya tiene sus tickets verificados: ese sí suma normal");
 });

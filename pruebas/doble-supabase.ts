@@ -62,6 +62,8 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
     let carga: Fila[] = [];
     let afectadas: Fila[] = [];
     let yaCorrio = false;
+    // .range() de PostgREST: límites INCLUSIVOS en los dos extremos.
+    let rango: { desde: number; hasta: number } | null = null;
 
     const filas = () => (d.tablas[tabla] ??= []);
 
@@ -143,6 +145,13 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
         }
         return api;
       },
+      // `seleccionarTodo` pagina con .range() porque PostgREST corta en 1.000
+      // filas sin avisar. El doble tiene que recortar de verdad: si devolviera
+      // siempre todo, la prueba pasaría con un paginador roto.
+      range: (desde: number, hasta: number) => {
+        rango = { desde, hasta };
+        return api;
+      },
       maybeSingle: () => {
         const e = error();
         if (e) return Promise.resolve({ data: null, error: e });
@@ -184,7 +193,8 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
         if (choque) return Promise.resolve(res({ data: null, error: choque }));
         const ed = errorDespues();
         if (ed) return Promise.resolve(res({ data: null, error: ed }));
-        return Promise.resolve(res({ data: afectadas, error: null }));
+        const recortadas = rango ? afectadas.slice(rango.desde, rango.hasta + 1) : afectadas;
+        return Promise.resolve(res({ data: recortadas, error: null }));
       },
     };
     return api;

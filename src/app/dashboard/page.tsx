@@ -7,6 +7,8 @@ import AutoRefresh from "./AutoRefresh";
 import Link from "next/link";
 import { seleccionarTodo } from "@/lib/db";
 import { ETAPAS } from "@/lib/precios";
+import { leerConfig, resumenPlanes } from "@/lib/abona618";
+import PanelPlanes from "./PanelPlanes";
 
 // Sin `revalidate`: esta página lee la sesión (cookies) y por eso Next la
 // trata como dinámica siempre — el "revalidate = 10" de antes no hacía nada y
@@ -41,11 +43,17 @@ export default async function DashboardPage() {
 
   const service = createServiceClient();
 
-  type TicketResumen = { tipo: string; precio: number | string; metodo_pago: string; estado_pago: string; created_at: string; canal: string | null; etapa: string | null };
-  const [{ data: tickets, error: ticketsError }, { data: evento }, { count: sillasVipTotal }] = await Promise.all([
-    seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa"),
+  type TicketResumen = { tipo: string; precio: number | string; metodo_pago: string; estado_pago: string; created_at: string; canal: string | null; etapa: string | null; grupo_id: string | null };
+
+  // La configuración va primero porque el resumen de planes necesita el tope
+  // vigente: si alguien lo subió de 100, la tarjeta tiene que medir contra el
+  // número de verdad y no contra la constante del código.
+  const config = await leerConfig(service);
+  const [{ data: tickets, error: ticketsError }, { data: evento }, { count: sillasVipTotal }, planes] = await Promise.all([
+    seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa, grupo_id"),
     service.from("eventos").select("aforo_general_total").limit(1).single(),
     service.from("sillas_vip").select("id", { count: "exact", head: true }),
+    resumenPlanes(service, config),
   ]);
   if (ticketsError) console.error("Error cargando tickets para el dashboard:", ticketsError);
 
@@ -58,7 +66,17 @@ export default async function DashboardPage() {
   const generalVerificados = verificados.filter((t) => t.tipo === "general");
 
   const ingresoTotal = verificados.reduce((s, t) => s + Number(t.precio), 0);
-  const ingresoPendiente = pendientes.reduce((s, t) => s + Number(t.precio), 0);
+
+  // Las compras con plan en curso NO van en "esperando verificación". De una
+  // compra de $140 en cuotas entraron $56 y los tickets siguen en `pendiente`
+  // hasta el último pago: sumar los $140 aquí infla lo que Finanzas cree que
+  // tiene por revisar, y la plata que de verdad entró no aparecía en ninguna
+  // parte. Esa va en la tarjeta de Abona618, y el total real de los dos
+  // caminos es `enBanco`.
+  const gruposConPlan = new Set(planes.gruposEnCurso);
+  const pendientesSueltos = pendientes.filter((t) => !t.grupo_id || !gruposConPlan.has(String(t.grupo_id)));
+  const ingresoPendiente = pendientesSueltos.reduce((s, t) => s + Number(t.precio), 0);
+  const enBanco = Math.round((ingresoTotal + planes.enCurso.cobradoUsd) * 100) / 100;
   const ingresoVip = vipVerificados.reduce((s, t) => s + Number(t.precio), 0);
   const ingresoGeneral = generalVerificados.reduce((s, t) => s + Number(t.precio), 0);
 
@@ -125,6 +143,11 @@ export default async function DashboardPage() {
               <p className="text-xs text-neutral-500">Recaudado (verificado)</p>
               <p className="text-4xl font-semibold text-marca-secundario">${fmt(ingresoTotal)}</p>
               <p className="text-xs text-neutral-400 mt-1">Meta a aforo completo: ${fmt(metaIngresos)}</p>
+              {planes.enCurso.cobradoUsd > 0 && (
+                <p className="text-xs text-neutral-500 mt-1">
+                  +${fmt(planes.enCurso.cobradoUsd)} de cuotas ya cobradas · <span className="font-medium text-neutral-700">${fmt(enBanco)} en banco</span>
+                </p>
+              )}
             </div>
             <div className="text-right">
               <p className="text-xs text-neutral-500">{vendidosTotal} de {aforoTotalEntradas} entradas</p>
@@ -136,7 +159,7 @@ export default async function DashboardPage() {
           </div>
           {ingresoPendiente > 0 && (
             <p className="text-xs text-amber-600 mt-2">
-              +${fmt(ingresoPendiente)} en {pendientes.length} pago{pendientes.length === 1 ? "" : "s"} esperando verificación
+              +${fmt(ingresoPendiente)} en {pendientesSueltos.length} pago{pendientesSueltos.length === 1 ? "" : "s"} esperando verificación
               {(perfil.rol === "finanzas" || perfil.rol === "admin") && (
                 <>
                   {" · "}
@@ -146,6 +169,12 @@ export default async function DashboardPage() {
             </p>
           )}
         </div>
+
+        <PanelPlanes
+          resumen={planes}
+          config={config}
+          puedeCobrar={perfil.rol === "ventas" || perfil.rol === "finanzas" || perfil.rol === "admin"}
+        />
 
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
