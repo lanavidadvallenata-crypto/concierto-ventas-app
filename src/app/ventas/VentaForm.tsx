@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { registrarVenta } from "./actions";
 import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
-import { calcularTotal, MAX_POR_COMPRA } from "@/lib/precios";
+import { calcularTotal, conAsiento, etiquetaTipo, MAX_POR_COMPRA, type Tipo } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
 import { metodosParaCanal, type MetodoPago } from "@/lib/pagos";
 
@@ -14,16 +14,20 @@ export type PreventaInfo = { vip: number; general: number; precioVip: number; pr
 
 export default function VentaForm({
   mesas,
+  mesasPreferencial = [],
   cupoGeneralRestante,
   tasaEurVes,
   preventa,
 }: {
   mesas: MesaMapa[];
+  /** Vacío = la zona Preferencial no está abierta: no se muestra la pestaña. */
+  mesasPreferencial?: MesaMapa[];
   cupoGeneralRestante?: number;
   tasaEurVes: number | null;
   preventa: PreventaInfo;
 }) {
-  const [tipo, setTipo] = useState<"vip" | "general">("general");
+  const [tipo, setTipo] = useState<Tipo>("general");
+  const tipos: Tipo[] = mesasPreferencial.length > 0 ? ["general", "preferencial", "vip"] : ["general", "vip"];
   const [sillas, setSillas] = useState<SillaElegida[]>([]);
   const [cantidadGeneral, setCantidadGeneral] = useState(1);
   // null = usar el sugerido; número = el vendedor lo editó (negoció).
@@ -32,11 +36,12 @@ export default function VentaForm({
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const cantidad = tipo === "vip" ? sillas.length : cantidadGeneral;
+  const cantidad = conAsiento(tipo) ? sillas.length : cantidadGeneral;
 
   // Precio sugerido según etapa (preventa mientras quede cupo, luego regular).
-  const preventaRestante = preventa ? (tipo === "vip" ? preventa.vip : preventa.general) : 0;
-  const unitarioPreventa = preventa ? (tipo === "vip" ? preventa.precioVip : preventa.precioGeneral) : 0;
+  // Preferencial no tiene preventa.
+  const preventaRestante = preventa ? (tipo === "vip" ? preventa.vip : tipo === "general" ? preventa.general : 0) : 0;
+  const unitarioPreventa = preventa ? (tipo === "vip" ? preventa.precioVip : tipo === "general" ? preventa.precioGeneral : 0) : 0;
   const unitarioRegular = calcularTotal(tipo).total;
   const enPreventa = Math.min(cantidad, Math.max(0, preventaRestante));
   const enRegular = Math.max(0, cantidad - enPreventa);
@@ -48,15 +53,16 @@ export default function VentaForm({
   const enBolivares = metodoPago === "pago_movil" || metodoPago === "transferencia" || metodoPago === "efectivo_bs";
   const montoBs = enBolivares && tasaEurVes ? convertirABs(precio, tasaEurVes) : null;
 
-  function cambiarTipo(t: "vip" | "general") {
+  function cambiarTipo(t: Tipo) {
     setTipo(t);
     setPrecioManual(null);
-    if (t === "general") setSillas([]);
+    // Las sillas son de una sola zona: al cambiar de pestaña se vacían.
+    if (t !== tipo) setSillas([]);
   }
 
   function onSubmit(formData: FormData) {
     setMensaje(null);
-    if (tipo === "vip" && sillas.length === 0) {
+    if (conAsiento(tipo) && sillas.length === 0) {
       setMensaje({ tipo: "error", texto: "Toca una mesa y elige las sillas en el mapa antes de registrar la venta." });
       return;
     }
@@ -82,7 +88,7 @@ export default function VentaForm({
   return (
     <form id="venta-form" action={onSubmit} className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
       <div className="flex gap-2">
-        {(["general", "vip"] as const).map((t) => (
+        {tipos.map((t) => (
           <button
             key={t}
             type="button"
@@ -91,7 +97,7 @@ export default function VentaForm({
               tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
             }`}
           >
-            {t === "vip" ? "VIP" : "General"}
+            {etiquetaTipo(t)}
           </button>
         ))}
       </div>
@@ -99,17 +105,21 @@ export default function VentaForm({
       <input type="hidden" name="sillaIds" value={JSON.stringify(sillas.map((s) => s.id))} />
       <input type="hidden" name="precioEditado" value={precioEditado ? "1" : "0"} />
 
-      {tipo === "vip" ? (
+      {conAsiento(tipo) ? (
         <div>
-          <label className="block text-sm font-medium mb-1">Sillas (hasta {MAX_POR_COMPRA.vip})</label>
+          <label className="block text-sm font-medium mb-1">
+            Sillas {etiquetaTipo(tipo)} (hasta {MAX_POR_COMPRA[tipo]})
+          </label>
           <MapaVip
-            mesas={mesas}
+            key={tipo}
+            zona={tipo}
+            mesas={tipo === "vip" ? mesas : mesasPreferencial}
             seleccionadas={sillas}
             onCambiar={(s) => {
               setSillas(s);
               setPrecioManual(null);
             }}
-            maximo={MAX_POR_COMPRA.vip}
+            maximo={MAX_POR_COMPRA[tipo]}
             cupoGeneralRestante={cupoGeneralRestante}
           />
         </div>

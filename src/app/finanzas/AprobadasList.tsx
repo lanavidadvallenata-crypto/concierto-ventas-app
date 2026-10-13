@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { anularCompraVerificada } from "./actions";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
+import { etiquetaTipo, type Tipo } from "@/lib/precios";
 
 // Auditoría solo para admin: qué compras se aprobaron, quién las vendió,
 // quién las aprobó y cuándo. El dato ya vivía en tickets (vendido_por,
@@ -13,7 +14,7 @@ export type FilaAprobada = {
   ticketId: string;
   compradorNombre: string;
   compradorEmail: string | null;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   cantidad: number;
   total: number;
   totalBs: number | null;
@@ -120,7 +121,7 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
               </div>
 
               <p className="text-xs text-neutral-500">
-                {f.cantidad} {f.tipo === "vip" ? "VIP" : "General"} · {ETIQUETA_METODO[f.metodoPago] ?? f.metodoPago}
+                {f.cantidad} {etiquetaTipo(f.tipo, f.cantidad)} · {ETIQUETA_METODO[f.metodoPago] ?? f.metodoPago}
                 {f.referenciaPago ? ` · ref. ${f.referenciaPago}` : ""} · {ETIQUETA_CANAL[f.canal] ?? f.canal}
               </p>
 

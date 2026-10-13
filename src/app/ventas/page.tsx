@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
-import { obtenerMapaVip } from "@/lib/mapa-vip";
+import { obtenerMapas, sillasDisponibles } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
-import { disponibilidadEtapas } from "@/lib/precios";
+import { disponibilidadEtapas, etiquetaTipo } from "@/lib/precios";
 import Nav from "@/components/Nav";
 import VentaForm from "./VentaForm";
 
@@ -27,12 +27,10 @@ export default async function VentasPage() {
 
   const service = createServiceClient();
 
-  const mesas = await obtenerMapaVip(service);
+  const mapas = await obtenerMapas(service);
   const tasaEurVes = await obtenerTasaActual(service);
-  const sillasVipDisponibles = mesas.reduce(
-    (total, m) => total + m.sillas.filter((s) => s.estado === "disponible").length,
-    0
-  );
+  const sillasVipDisponibles = sillasDisponibles(mapas.vip);
+  const sillasPreferencialDisponibles = sillasDisponibles(mapas.preferencial);
 
   const { count: generalVendidos } = await service
     .from("tickets")
@@ -86,7 +84,8 @@ export default async function VentasPage() {
         <div>
           <h1 className="text-lg font-semibold">Registrar venta</h1>
           <p className="text-sm text-neutral-500">
-            {sillasVipDisponibles} sillas VIP disponibles · {cupoGeneralRestante} cupos generales restantes
+            {sillasVipDisponibles} sillas VIP disponibles
+            {mapas.preferencial.length > 0 && ` · ${sillasPreferencialDisponibles} puestos Preferencial`} · {cupoGeneralRestante} cupos generales restantes
             {preventa && (preventa.vip > 0 || preventa.general > 0) && (
               <>
                 {" · "}
@@ -98,7 +97,7 @@ export default async function VentasPage() {
           </p>
         </div>
 
-        <VentaForm mesas={mesas} cupoGeneralRestante={cupoGeneralRestante} tasaEurVes={tasaEurVes} preventa={preventa} />
+        <VentaForm mesas={mapas.vip} mesasPreferencial={mapas.preferencial} cupoGeneralRestante={cupoGeneralRestante} tasaEurVes={tasaEurVes} preventa={preventa} />
 
         {ultimasVentas.length > 0 && (
           <div>
@@ -107,7 +106,7 @@ export default async function VentasPage() {
               {ultimasVentas.map((g) => (
                 <div key={g.id} className="flex items-center justify-between bg-white border border-neutral-200 rounded-md px-3 py-2 text-sm">
                   <span className="truncate">
-                    {g.nombre} · {g.cantidad} × {g.tipo === "vip" ? "VIP" : "General"} · ${g.total.toFixed(2)}
+                    {g.nombre} · {g.cantidad} × {etiquetaTipo(g.tipo, g.cantidad)} · ${g.total.toFixed(2)}
                   </span>
                   <span
                     className={`shrink-0 ml-3 ${

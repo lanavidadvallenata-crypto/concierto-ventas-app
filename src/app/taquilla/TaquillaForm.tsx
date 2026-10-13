@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import MapaVip, { type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
-import { calcularTotal, MAX_POR_COMPRA } from "@/lib/precios";
+import { calcularTotal, conAsiento, etiquetaTipo, MAX_POR_COMPRA, type Tipo } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
 import { metodoEsEnBs, metodosParaCanal, type MetodoPago } from "@/lib/pagos";
 import { registrarVentaTaquilla } from "./actions";
@@ -17,15 +17,19 @@ const METODOS = [...metodosParaCanal("taquilla")].sort((a, b) => {
 
 export default function TaquillaForm({
   mesas,
+  mesasPreferencial = [],
   cupoGeneralRestante,
   tasaEurVes,
 }: {
   mesas: MesaMapa[];
+  /** Vacío = la zona Preferencial no está abierta: no se muestra la pestaña. */
+  mesasPreferencial?: MesaMapa[];
   cupoGeneralRestante: number;
   tasaEurVes: number | null;
 }) {
   const router = useRouter();
-  const [tipo, setTipo] = useState<"vip" | "general">("general");
+  const [tipo, setTipo] = useState<Tipo>("general");
+  const tipos: Tipo[] = mesasPreferencial.length > 0 ? ["general", "preferencial", "vip"] : ["general", "vip"];
   const [sillas, setSillas] = useState<SillaElegida[]>([]);
   const [cantidad, setCantidad] = useState(1);
   const [metodoPago, setMetodoPago] = useState<MetodoPago>("efectivo_usd");
@@ -37,9 +41,10 @@ export default function TaquillaForm({
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "error"; texto: string } | null>(null);
 
-  const n = tipo === "vip" ? sillas.length : cantidad;
+  const n = conAsiento(tipo) ? sillas.length : cantidad;
   // Precio de taquilla = el mismo de la web (Anita, 25 sep): $140 VIP /
-  // $30 General, precio final. Un solo precio en todos los canales.
+  // $70 Preferencial / $30 General, precio final. Un solo precio en todos
+  // los canales.
   const unitario = calcularTotal(tipo).total;
   const sugerido = Math.round(n * unitario * 100) / 100;
 
@@ -62,7 +67,7 @@ export default function TaquillaForm({
     e.preventDefault();
     setMensaje(null);
     if (n === 0) {
-      setMensaje({ tipo: "error", texto: tipo === "vip" ? "Elige las sillas en el mapa." : "Indica la cantidad." });
+      setMensaje({ tipo: "error", texto: conAsiento(tipo) ? "Elige las sillas en el mapa." : "Indica la cantidad." });
       return;
     }
     if (!(precio > 0) || (enBs && !(montoBs && montoBs > 0))) {
@@ -72,7 +77,7 @@ export default function TaquillaForm({
     setCargando(true);
     const res = await registrarVentaTaquilla({
       tipo,
-      sillaIds: tipo === "vip" ? sillas.map((s) => s.id) : undefined,
+      sillaIds: conAsiento(tipo) ? sillas.map((s) => s.id) : undefined,
       cantidad: tipo === "general" ? cantidad : undefined,
       metodoPago,
       precioTotal: enBs ? undefined : precio,
@@ -88,7 +93,7 @@ export default function TaquillaForm({
     }
     setMensaje({
       tipo: "ok",
-      texto: `Vendida${res.cantidad === 1 ? "" : "s"}: ${res.cantidad} ${tipo === "vip" ? "VIP" : "General"} por $${res.total.toFixed(2)}${
+      texto: `Vendida${res.cantidad === 1 ? "" : "s"}: ${res.cantidad} ${etiquetaTipo(tipo, res.cantidad)} por $${res.total.toFixed(2)}${
         res.totalBs != null ? ` (Bs ${res.totalBs.toLocaleString("es-VE", { minimumFractionDigits: 2 })})` : ""
       }. Entrega el boleto físico.`,
     });
@@ -103,33 +108,36 @@ export default function TaquillaForm({
   return (
     <form onSubmit={onSubmit} className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
       <div className="flex gap-2">
-        {(["general", "vip"] as const).map((t) => (
+        {tipos.map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => {
+              // Las sillas son de una sola zona: al cambiar de pestaña se vacían.
+              if (t !== tipo) setSillas([]);
               setTipo(t);
               reiniciarMonto();
-              if (t === "general") setSillas([]);
             }}
             className={`flex-1 h-12 rounded-md text-base font-semibold border ${
               tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
             }`}
           >
-            {t === "vip" ? `VIP · $${calcularTotal("vip").total}` : `General · $${calcularTotal("general").total}`}
+            {etiquetaTipo(t)} · ${calcularTotal(t).total}
           </button>
         ))}
       </div>
 
-      {tipo === "vip" ? (
+      {conAsiento(tipo) ? (
         <MapaVip
-          mesas={mesas}
+          key={tipo}
+          zona={tipo}
+          mesas={tipo === "vip" ? mesas : mesasPreferencial}
           seleccionadas={sillas}
           onCambiar={(s) => {
             setSillas(s);
             reiniciarMonto();
           }}
-          maximo={MAX_POR_COMPRA.vip}
+          maximo={MAX_POR_COMPRA[tipo]}
           cupoGeneralRestante={cupoGeneralRestante}
         />
       ) : (
@@ -260,7 +268,7 @@ export default function TaquillaForm({
         {cargando
           ? "Registrando…"
           : n > 0
-          ? `Cobrar ${enBs && montoBs != null ? `Bs ${fmtBs(montoBs)}` : `$${precio.toFixed(2)}`} — ${n} ${tipo === "vip" ? "VIP" : "General"}`
+          ? `Cobrar ${enBs && montoBs != null ? `Bs ${fmtBs(montoBs)}` : `$${precio.toFixed(2)}`} — ${n} ${etiquetaTipo(tipo, n)}`
           : "Registrar venta"}
       </button>
     </form>

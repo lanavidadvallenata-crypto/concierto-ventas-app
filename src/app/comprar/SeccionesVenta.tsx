@@ -107,15 +107,19 @@ export function SobreElEvento() {
 
 export function PreciosExplicados({
   preventa,
+  hayPreferencial = false,
 }: {
   preventa: { vip: number; general: number; precioVip: number; precioGeneral: number } | null;
+  /** La zona Preferencial se muestra solo cuando sus mesas existen en la base. */
+  hayPreferencial?: boolean;
 }) {
   const vip = calcularTotal("vip");
+  const preferencial = calcularTotal("preferencial");
   const general = calcularTotal("general");
   const preVip = preventa && preventa.vip > 0 ? calcularTotal("vip", "preventa").base : null;
   const preGeneral = preventa && preventa.general > 0 ? calcularTotal("general", "preventa").base : null;
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className={`grid grid-cols-1 gap-3 ${hayPreferencial ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-evento-secundario">VIP</p>
         {preVip !== null ? (
@@ -129,8 +133,15 @@ export function PreciosExplicados({
           <p className="text-xl font-bold">${vip.total}</p>
         )}
         {preVip !== null && <p className="text-[11px] text-neutral-400">+ fee de servicio (se calcula al pagar)</p>}
-        <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa, zona preferencial frente a la tarima. Hasta 10 por compra.</p>
+        <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa de 10, primeras filas frente a la tarima. Hasta 10 por compra.</p>
       </div>
+      {hayPreferencial && (
+        <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-evento-secundario">Preferencial</p>
+          <p className="text-xl font-bold">${preferencial.total}</p>
+          <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa redonda de 6, justo detrás del VIP. Hasta 6 por compra.</p>
+        </div>
+      )}
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-600">General</p>
         {preGeneral !== null ? (
@@ -152,7 +163,7 @@ export function PreciosExplicados({
 
 export function ComoComprar() {
   const pasos = [
-    { titulo: "Elige tu entrada", texto: "Selecciona VIP (con mapa de sillas) o General.", icono: "🎟️" },
+    { titulo: "Elige tu entrada", texto: "VIP o Preferencial con mapa de sillas, o General.", icono: "🎟️" },
     { titulo: "Paga en 15 minutos", texto: "Tu selección queda reservada mientras completas el pago.", icono: "⏱️" },
     { titulo: "Recibe tu entrada", texto: "Te llega un correo con tu QR de acceso al confirmarse el pago.", icono: "📩" },
   ];

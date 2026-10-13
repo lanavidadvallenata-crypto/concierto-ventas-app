@@ -1,3 +1,5 @@
+import type { Tipo } from "@/lib/precios";
+
 // Abona618 — el plan de pago en cuotas. Única fuente de verdad del reparto,
 // igual que precios.ts lo es de los precios: lo usan el checkout, el panel de
 // Finanzas, los correos y el cron. Si un monto se calcula en dos sitios, un
@@ -267,7 +269,7 @@ export function planPara(
   hoy: string = hoyEnVenezuela(),
   opciones: {
     canal?: string;
-    tipo?: "vip" | "general";
+    tipo?: Tipo;
     vipEnPlan?: number;
     cantidad?: number;
     /** El tope real sale de la base (abona618_config.tope_vip) para que se

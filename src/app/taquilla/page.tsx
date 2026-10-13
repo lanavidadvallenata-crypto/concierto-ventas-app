@@ -1,7 +1,8 @@
 import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
-import { obtenerMapaVip } from "@/lib/mapa-vip";
+import { obtenerMapas, sillasDisponibles } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
+import { etiquetaTipo } from "@/lib/precios";
 import { ETIQUETA_METODO, METODOS_EN_BS, formatoBs, formatoUsd, horaCaracas } from "@/lib/formato";
 import Nav from "@/components/Nav";
 import TaquillaForm from "./TaquillaForm";
@@ -46,7 +47,7 @@ export default async function TaquillaPage() {
       </>
     );
   }
-  const mesas = await obtenerMapaVip(service);
+  const mapas = await obtenerMapas(service);
   const tasaEurVes = await obtenerTasaActual(service);
 
   const { count: generalVendidos } = await service
@@ -56,7 +57,8 @@ export default async function TaquillaPage() {
     .neq("estado_pago", "rechazado");
   const { data: evento } = await service.from("eventos").select("aforo_general_total").limit(1).single();
   const cupoGeneralRestante = (evento?.aforo_general_total ?? 4500) - (generalVendidos ?? 0);
-  const sillasVipDisponibles = mesas.reduce((t, m) => t + m.sillas.filter((s) => s.estado === "disponible").length, 0);
+  const sillasVipDisponibles = sillasDisponibles(mapas.vip);
+  const sillasPreferencialDisponibles = sillasDisponibles(mapas.preferencial);
 
   // Tus ventas de hoy en taquilla (para cerrar caja).
   const { data: hoy } = await service
@@ -109,11 +111,12 @@ export default async function TaquillaPage() {
             Venta en la puerta el día del evento. Queda verificada al instante, sin correo ni QR: el control es el boleto de papel.
           </p>
           <p className="text-xs text-neutral-400 mt-1">
-            {sillasVipDisponibles} sillas VIP disponibles · {cupoGeneralRestante} cupos generales
+            {sillasVipDisponibles} sillas VIP disponibles
+            {mapas.preferencial.length > 0 && ` · ${sillasPreferencialDisponibles} puestos Preferencial`} · {cupoGeneralRestante} cupos generales
           </p>
         </div>
 
-        <TaquillaForm mesas={mesas} cupoGeneralRestante={cupoGeneralRestante} tasaEurVes={tasaEurVes} />
+        <TaquillaForm mesas={mapas.vip} mesasPreferencial={mapas.preferencial} cupoGeneralRestante={cupoGeneralRestante} tasaEurVes={tasaEurVes} />
 
         <section className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between">
@@ -143,7 +146,7 @@ export default async function TaquillaPage() {
             {[...grupos.values()].map((g) => (
               <div key={g.id} className="px-4 py-2.5 flex items-center justify-between text-sm gap-3">
                 <span className="truncate">
-                  {horaCaracas(g.hora).split(",").pop()?.trim()} · {g.cantidad} × {g.tipo === "vip" ? "VIP" : "General"} · {ETIQUETA_METODO[g.metodo] ?? g.metodo}
+                  {horaCaracas(g.hora).split(",").pop()?.trim()} · {g.cantidad} × {etiquetaTipo(g.tipo, g.cantidad)} · {ETIQUETA_METODO[g.metodo] ?? g.metodo}
                   {g.ref ? <span className="text-neutral-400"> · {g.ref}</span> : null}
                 </span>
                 <span className="shrink-0 font-semibold tabular-nums">

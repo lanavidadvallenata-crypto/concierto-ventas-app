@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { MesaMapa, SillaMapa } from "@/lib/mapa-vip";
+import type { Zona } from "@/lib/precios";
 
 // Mesa agotada en ROJO (pedido del equipo, 19 sep): el gris se confundía con
 // "deshabilitado / no cargó". Rojo = vendida completa, sin ambigüedad.
@@ -20,6 +21,13 @@ function estadoAgregadoMesa(sillas: SillaMapa[]): "vacia" | "parcial" | "llena" 
 
 export type SillaElegida = { id: string; numero: number; mesaNumero: number; fila: string };
 
+// La etiqueta corta de una silla elegida. VIP: "A4 · S3" (fila letra + mesa).
+// Preferencial tiene filas "1" y "2": "14 · S3" se lee como mesa 14, así que
+// va con la fila y la mesa separadas: "F1 · M4 · S3".
+export function etiquetaSilla(s: SillaElegida, zona: Zona): string {
+  return zona === "preferencial" ? `F${s.fila} · M${s.mesaNumero} · S${s.numero}` : `${s.fila}${s.mesaNumero} · S${s.numero}`;
+}
+
 // Selección múltiple: el comprador toca sillas para agregarlas y las vuelve a
 // tocar para quitarlas, en la mesa que quiera, hasta `maximo`. La lista de
 // elegidas se muestra debajo con una X por silla.
@@ -29,12 +37,16 @@ export default function MapaVip({
   onCambiar,
   maximo = 10,
   cupoGeneralRestante,
+  zona = "vip",
 }: {
   mesas: MesaMapa[];
   seleccionadas: SillaElegida[];
   onCambiar: (sillas: SillaElegida[]) => void;
   maximo?: number;
   cupoGeneralRestante?: number;
+  /** Qué zona pinta este mapa. Preferencial muestra el VIP como una franja
+   *  arriba, para que se entienda dónde queda respecto a la tarima. */
+  zona?: Zona;
 }) {
   const [mesaActivaId, setMesaActivaId] = useState<string | null>(null);
 
@@ -74,6 +86,12 @@ export default function MapaVip({
       <div className="bg-neutral-900 text-white text-center text-xs font-semibold tracking-[0.2em] py-3 rounded-lg">
         TARIMA
       </div>
+
+      {zona === "preferencial" && (
+        <div className="bg-neutral-100 text-neutral-400 text-center text-[11px] font-medium py-2.5 rounded-lg border border-dashed border-neutral-300">
+          ZONA VIP
+        </div>
+      )}
 
       <div className="flex flex-col gap-2.5">
         {filas.map((fila) => {
@@ -128,7 +146,7 @@ export default function MapaVip({
         <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3">
           <div className="flex items-center justify-between gap-2 mb-2.5">
             <p className="text-sm font-semibold">
-              Fila {mesaActiva.fila} · Mesa {mesaActiva.numero}
+              {zona === "preferencial" ? "Preferencial · " : ""}Fila {mesaActiva.fila} · Mesa {mesaActiva.numero}
             </p>
             <p className="text-xs text-neutral-500">
               {seleccionadas.length}/{maximo} elegidas
@@ -145,7 +163,7 @@ export default function MapaVip({
                 : `Agregar las otras ${cabenMasEnMesaActiva} sillas`}
             </button>
           )}
-          <div className="grid grid-cols-5 gap-1.5">
+          <div className={`grid gap-1.5 ${mesaActiva.sillas.length <= 6 ? "grid-cols-6" : "grid-cols-5"}`}>
             {[...mesaActiva.sillas]
               .sort((a, b) => a.numero - b.numero)
               .map((s) => {
@@ -191,7 +209,7 @@ export default function MapaVip({
               title="Quitar"
               className="inline-flex items-center gap-1.5 bg-neutral-900 text-white rounded-full pl-3 pr-2 py-1 text-xs font-medium"
             >
-              {s.fila}{s.mesaNumero} · S{s.numero}
+              {etiquetaSilla(s, zona)}
               <span aria-hidden="true" className="text-white/70">×</span>
             </button>
           ))}

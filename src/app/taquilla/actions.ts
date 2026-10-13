@@ -4,15 +4,15 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { MAX_POR_COMPRA } from "@/lib/precios";
+import { MAX_POR_COMPRA, MAX_SILLAS_POR_COMPRA, TIPOS, type Tipo } from "@/lib/precios";
 import { metodoEsEnBs, metodosParaCanal } from "@/lib/pagos";
 import { obtenerTasaActual } from "@/lib/tasa";
 import { registrarVentaInterna } from "@/lib/registrar-venta";
 import { taquillaAbierta } from "@/lib/taquilla";
 
 const taquillaSchema = z.object({
-  tipo: z.enum(["vip", "general"]),
-  sillaIds: z.array(z.string().uuid()).max(MAX_POR_COMPRA.vip).optional(),
+  tipo: z.enum(TIPOS as [Tipo, ...Tipo[]]),
+  sillaIds: z.array(z.string().uuid()).max(MAX_SILLAS_POR_COMPRA).optional(),
   cantidad: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
   // Total en USD (métodos en dólares). En métodos en bolívares el vendedor
@@ -99,7 +99,7 @@ export async function registrarVentaTaquilla(input: unknown): Promise<VentaTaqui
     precioTotalManual,
     totalBsManual,
     // Taquilla = precio regular siempre (no consume cupo de preventa), al
-    // mismo precio que la web (Anita, 25 sep): $140 VIP / $30 General.
+    // mismo precio que la web (Anita, 25 sep): $140 VIP / $70 Preferencial / $30 General.
     etapaForzada: "regular",
     // Descuento en puerta: hasta 30 % salvo admin.
     pisoPrecio: rol === "admin" ? undefined : 0.7,

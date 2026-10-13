@@ -8,6 +8,7 @@ import BuscarComprador from "./BuscarComprador";
 import AprobadasList, { type FilaAprobada } from "./AprobadasList";
 import AutoRefresh from "@/app/dashboard/AutoRefresh";
 import { seleccionarTodo } from "@/lib/db";
+import type { Tipo } from "@/lib/precios";
 
 export default async function FinanzasPage() {
   const perfil = await requerirPerfil();
@@ -90,7 +91,7 @@ export default async function FinanzasPage() {
       compradorNombre: t.comprador_nombre as string,
       compradorTelefono: t.comprador_telefono as string,
       compradorEmail: (t.comprador_email as string | null) ?? null,
-      tipo: t.tipo as "vip" | "general",
+      tipo: t.tipo as Tipo,
       cantidad: 1,
       total: precio,
       totalBs: precioBs,
@@ -191,7 +192,7 @@ export default async function FinanzasPage() {
         ticketId: t.id,
         compradorNombre: t.comprador_nombre,
         compradorEmail: t.comprador_email,
-        tipo: t.tipo === "vip" ? "vip" : "general",
+        tipo: t.tipo as Tipo,
         cantidad: 1,
         total: precio,
         totalBs: precioBs,

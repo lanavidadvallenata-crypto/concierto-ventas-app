@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import MapaVip, { type SillaElegida } from "@/components/MapaVip";
+import MapaVip, { etiquetaSilla, type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
-import { calcularTotal, MAX_POR_COMPRA, type CotizacionCompra } from "@/lib/precios";
+import { calcularTotal, conAsiento, etiquetaTipo, MAX_POR_COMPRA, type CotizacionCompra, type Tipo } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
 import {
   INSTRUCCIONES_PAGO,
@@ -27,21 +27,30 @@ const METODOS_WEB = metodosParaCanal("web");
 
 export default function CheckoutForm({
   mesas,
+  mesasPreferencial = [],
   sillasVipDisponibles,
+  sillasPreferencialDisponibles = 0,
   cupoGeneralRestante,
   tasaEurVes,
   preventa,
 }: {
   mesas: MesaMapa[];
+  /** Mesas de la zona Preferencial. Vacío = la zona no está abierta y la
+   *  pestaña no se muestra. */
+  mesasPreferencial?: MesaMapa[];
   sillasVipDisponibles: number;
+  sillasPreferencialDisponibles?: number;
   cupoGeneralRestante: number;
   tasaEurVes: number | null;
   // Cupo de preventa restante por tipo (null = no hay preventa activa).
   preventa: { vip: number; general: number; precioVip: number; precioGeneral: number } | null;
 }) {
   const [fase, setFase] = useState<Fase>("seleccion");
-  const [tipo, setTipo] = useState<"vip" | "general">("general");
+  const [tipo, setTipo] = useState<Tipo>("general");
   const [sillas, setSillas] = useState<SillaElegida[]>([]);
+  const hayPreferencial = mesasPreferencial.length > 0;
+  // Las pestañas, de más barata a más cara (como estaban: General primero).
+  const tipos: Tipo[] = hayPreferencial ? ["general", "preferencial", "vip"] : ["general", "vip"];
   const [cantidadGeneral, setCantidadGeneral] = useState(1);
 
   const [nombre, setNombre] = useState("");
@@ -89,7 +98,7 @@ export default function CheckoutForm({
 
   const sugerenciaCorreo = email.includes("@") ? sugerirCorreo(email) : null;
 
-  const cantidad = tipo === "vip" ? sillas.length : cantidadGeneral;
+  const cantidad = conAsiento(tipo) ? sillas.length : cantidadGeneral;
 
   // Si el servidor tarda más de lo normal en responder (ej. mucho tráfico a la vez),
   // avisamos en vez de dejar el botón "Confirmando…" sin explicación.
@@ -111,8 +120,9 @@ export default function CheckoutForm({
   }, [fase, expiraEn]);
 
   // Estimación en pantalla antes de reservar (la real la calcula el servidor).
-  const preventaRestante = preventa ? (tipo === "vip" ? preventa.vip : preventa.general) : 0;
-  const unitarioPreventa = preventa ? (tipo === "vip" ? preventa.precioVip : preventa.precioGeneral) : 0;
+  // Preferencial no tiene preventa: siempre precio regular.
+  const preventaRestante = preventa ? (tipo === "vip" ? preventa.vip : tipo === "general" ? preventa.general : 0) : 0;
+  const unitarioPreventa = preventa ? (tipo === "vip" ? preventa.precioVip : tipo === "general" ? preventa.precioGeneral : 0) : 0;
   const unitarioRegular = calcularTotal(tipo).total;
   const enPreventa = Math.min(cantidad, Math.max(0, preventaRestante));
   const enRegular = Math.max(0, cantidad - enPreventa);
@@ -120,7 +130,7 @@ export default function CheckoutForm({
 
   async function irAPago() {
     setError(null);
-    if (tipo === "vip" && sillas.length === 0) {
+    if (conAsiento(tipo) && sillas.length === 0) {
       setError("Toca una mesa y elige tus sillas en el mapa.");
       return;
     }
@@ -136,7 +146,7 @@ export default function CheckoutForm({
     setCargando(true);
     const res = await iniciarCheckoutPublico({
       tipo,
-      sillaIds: tipo === "vip" ? sillas.map((s) => s.id) : undefined,
+      sillaIds: conAsiento(tipo) ? sillas.map((s) => s.id) : undefined,
       cantidad: tipo === "general" ? cantidadGeneral : undefined,
     });
     setCargando(false);
@@ -180,7 +190,7 @@ export default function CheckoutForm({
     setCargando(true);
     const res = await confirmarCheckoutPublico({
       tipo,
-      sillaIds: tipo === "vip" ? sillas.map((s) => s.id) : undefined,
+      sillaIds: conAsiento(tipo) ? sillas.map((s) => s.id) : undefined,
       cantidad: tipo === "general" ? cantidadGeneral : undefined,
       expiraEnEsperado: expiraEn ?? undefined,
       tasaMostrada: tasaCompra ?? undefined,
@@ -218,7 +228,7 @@ export default function CheckoutForm({
   function volverAElegir() {
     // Suelta el hold de estas sillas para que no queden bloqueadas 15 min
     // (y para que el mismo comprador pueda volver a elegirlas).
-    if (tipo === "vip" && sillas.length && expiraEn) {
+    if (conAsiento(tipo) && sillas.length && expiraEn) {
       void liberarHoldPublico({ sillaIds: sillas.map((s) => s.id), expiraEn });
     }
     setSillas([]);
@@ -359,7 +369,7 @@ export default function CheckoutForm({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-white/80">
-                {expirado ? "Se acabó el tiempo" : tipo === "vip" ? "Tus sillas están apartadas" : "Tus entradas están apartadas"}
+                {expirado ? "Se acabó el tiempo" : conAsiento(tipo) ? "Tus sillas están apartadas" : "Tus entradas están apartadas"}
               </p>
               <p className="text-sm font-semibold leading-snug">
                 {expirado
@@ -382,10 +392,11 @@ export default function CheckoutForm({
 
         <p className="text-base font-semibold -mb-1">Completa tu pago</p>
 
-        {tipo === "vip" && sillas.length > 0 && (
+        {conAsiento(tipo) && sillas.length > 0 && (
           <p className="text-sm text-neutral-600">
+            {tipo === "preferencial" ? "Preferencial · " : ""}
             {sillas.length === 1 ? "Silla" : `${sillas.length} sillas`}:{" "}
-            {sillas.map((s) => `${s.fila}${s.mesaNumero}·S${s.numero}`).join(", ")}
+            {sillas.map((s) => etiquetaSilla(s, tipo)).join(", ")}
           </p>
         )}
         {tipo === "general" && (
@@ -455,7 +466,7 @@ export default function CheckoutForm({
 
         {expirado ? (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
-            Se venció el tiempo para pagar{tipo === "vip" ? " y tus sillas se liberaron" : ""}. Vuelve a intentarlo.
+            Se venció el tiempo para pagar{conAsiento(tipo) ? " y tus sillas se liberaron" : ""}. Vuelve a intentarlo.
           </div>
         ) : (
           <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-sm text-neutral-700 whitespace-pre-line flex flex-col gap-3">
@@ -573,9 +584,9 @@ export default function CheckoutForm({
       )}
 
       <div className="flex gap-2">
-        {(["general", "vip"] as const).map((t) => {
+        {tipos.map((t) => {
           const activo = tipo === t;
-          const hayPreventa = preventa && (t === "vip" ? preventa.vip : preventa.general) > 0;
+          const hayPreventa = Boolean(preventa && (t === "vip" ? preventa.vip : t === "general" ? preventa.general : 0) > 0);
           // En preventa se muestra el precio neto (el fee va aparte en el
           // desglose). En regular el precio ya es final: un solo número.
           const base = hayPreventa ? calcularTotal(t, "preventa").base : calcularTotal(t).total;
@@ -584,15 +595,17 @@ export default function CheckoutForm({
               key={t}
               type="button"
               onClick={() => {
+                // Las sillas elegidas son de UNA zona: al cambiar de pestaña
+                // se vacían, para no mandar sillas VIP con tipo Preferencial.
+                if (t !== tipo) setSillas([]);
                 setTipo(t);
-                if (t === "general") setSillas([]);
               }}
-              className={`flex-1 rounded-md py-2 text-sm font-medium border flex flex-col items-center leading-tight ${
+              className={`flex-1 rounded-md py-2 ${tipos.length > 2 ? "text-xs px-1" : "text-sm"} font-medium border flex flex-col items-center leading-tight ${
                 activo ? "bg-marca-secundario text-white border-marca-secundario" : "border-neutral-300 text-neutral-600"
               }`}
             >
-              <span>
-                {t === "vip" ? "VIP" : "General"} · ${Math.round(base)}
+              <span className="whitespace-nowrap">
+                {etiquetaTipo(t)} · ${Math.round(base)}
               </span>
               <span className={`text-[10px] font-normal ${activo ? "text-white/75" : "text-neutral-400"}`}>
                 {hayPreventa ? "preventa · + fee" : "precio final"}
@@ -612,6 +625,21 @@ export default function CheckoutForm({
             seleccionadas={sillas}
             onCambiar={setSillas}
             maximo={MAX_POR_COMPRA.vip}
+            cupoGeneralRestante={cupoGeneralRestante}
+          />
+        </div>
+      ) : tipo === "preferencial" ? (
+        <div>
+          <p className="text-xs text-neutral-500 mb-2">
+            {sillasPreferencialDisponibles} puestos Preferencial disponibles · mesas de 6 · elige hasta {MAX_POR_COMPRA.preferencial} por compra
+          </p>
+          <MapaVip
+            key="preferencial"
+            zona="preferencial"
+            mesas={mesasPreferencial}
+            seleccionadas={sillas}
+            onCambiar={setSillas}
+            maximo={MAX_POR_COMPRA.preferencial}
             cupoGeneralRestante={cupoGeneralRestante}
           />
         </div>

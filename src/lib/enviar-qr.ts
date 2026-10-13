@@ -5,6 +5,7 @@ import { urlWhatsAppSoporte, WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import { codigoCompra } from "@/lib/compra";
 import { codigoEntrada } from "@/lib/qr";
 import { TEXTO_HORARIO, avisoFueraDeHorario } from "@/lib/horario";
+import { conAsiento, etiquetaTipo, nombreEntrada, type Tipo } from "@/lib/precios";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
@@ -128,7 +129,7 @@ export async function enviarCorreoPendiente(params: {
   destinatario: string;
   nombreComprador: string;
   cantidad?: number;
-  tipo?: "vip" | "general";
+  tipo?: Tipo;
   totalUsd?: number;
   // Desglose neto + fee: solo cuando la etapa comprada cobra fee aparte
   // (preventa). Con el precio final no hay nada que desglosar y se muestra un
@@ -164,7 +165,7 @@ export async function enviarCorreoPendiente(params: {
   const detalle =
     params.tipo && params.totalUsd != null
       ? `<div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
-          <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${params.tipo === "vip" ? "VIP" : "General"}</strong>${
+          <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${etiquetaTipo(params.tipo, cantidad)}</strong>${
           desglose || plan ? "" : ` · ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}`
         }${desglose}${
           plan
@@ -286,18 +287,19 @@ export async function enviarCorreoPendiente(params: {
 
 export type EntradaQR = {
   qrToken: string;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   fila?: string | null;
   mesaNumero?: number | null;
   sillaNumero?: number | null;
 };
 
 function describirEntrada(e: EntradaQR) {
-  if (e.tipo !== "vip") return "Entrada General";
+  if (!conAsiento(e.tipo)) return "Entrada General";
   if (e.mesaNumero != null && e.sillaNumero != null) {
-    return `${e.fila ? `Fila ${e.fila} · ` : ""}Mesa ${e.mesaNumero} · Silla ${e.sillaNumero}`;
+    const asiento = `${e.fila ? `Fila ${e.fila} · ` : ""}Mesa ${e.mesaNumero} · Silla ${e.sillaNumero}`;
+    return e.tipo === "preferencial" ? `Preferencial · ${asiento}` : asiento;
   }
-  return "Entrada VIP — tu mesa y silla te las confirma el equipo en la puerta";
+  return `${nombreEntrada(e.tipo)} — tu mesa y silla te las confirma el equipo en la puerta`;
 }
 
 // Un correo con TODAS las entradas de la compra: un bloque + un QR por
@@ -327,7 +329,7 @@ export async function enviarCorreoQR(params: {
     const cid = `qr-entrada-${i + 1}`;
     attachments.push({ filename: `entrada-${i + 1}-qr.png`, content: qrDataUrl.split(",")[1], contentId: cid });
 
-    const etiquetaTipo = e.tipo === "vip" ? "Entrada VIP" : "Acceso general · sin asiento asignado";
+    const etiquetaDeTipo = conAsiento(e.tipo) ? nombreEntrada(e.tipo) : "Acceso general · sin asiento asignado";
     bloques.push(`
     <tr>
       <td style="padding:${i === 0 ? 16 : 8}px 28px 8px;">
@@ -336,7 +338,7 @@ export async function enviarCorreoQR(params: {
             <td align="center" style="padding:16px 20px;">
               ${entradas.length > 1 ? `<div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8782;margin-bottom:4px;">Entrada ${i + 1} de ${entradas.length}</div>` : ""}
               <div style="font-family:Helvetica,Arial,sans-serif;font-weight:800;font-size:20px;letter-spacing:0.5px;color:#3D0507;">${describirEntrada(e)}</div>
-              <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:#680F15;margin-top:4px;">${etiquetaTipo}</div>
+              <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:#680F15;margin-top:4px;">${etiquetaDeTipo}</div>
             </td>
           </tr>
         </table>
@@ -424,7 +426,7 @@ export async function enviarCorreoRechazo(params: {
   destinatario: string;
   nombreComprador: string;
   cantidad: number;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   totalUsd: number;
   totalBs: number | null;
   referencia: string | null;
@@ -452,7 +454,7 @@ export async function enviarCorreoRechazo(params: {
         </table>
         <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, revisamos tu compra y <strong>no encontramos el pago</strong> con los datos que nos diste:</p>
         <p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
-          <strong>${params.cantidad} entrada${params.cantidad === 1 ? "" : "s"} ${params.tipo === "vip" ? "VIP" : "General"}</strong><br>
+          <strong>${params.cantidad} entrada${params.cantidad === 1 ? "" : "s"} ${etiquetaTipo(params.tipo, params.cantidad)}</strong><br>
           Monto: ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}<br>
           Método: ${escapeHtml(params.metodoEtiqueta)}<br>
           Referencia reportada: <strong>${ref}</strong>
@@ -469,7 +471,7 @@ export async function enviarCorreoRechazo(params: {
     <tr>
       <td style="padding:4px 28px 32px;">
         <p style="margin:0;font-size:12.5px;line-height:1.6;color:#8A8782;border-top:1px solid #F1ECE2;padding-top:16px;">${
-          params.tipo === "vip"
+          conAsiento(params.tipo)
             ? "Las sillas que habías elegido volvieron a estar disponibles. Si el pago se confirma, intentaremos asignarte las mismas; si alguien las tomó, te ayudamos a elegir otras."
             : "Si el pago se confirma, tus entradas quedan activas y te llega el correo con los códigos QR."
         }</p>

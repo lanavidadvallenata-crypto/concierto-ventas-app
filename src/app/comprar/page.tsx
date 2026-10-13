@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { obtenerMapaVip } from "@/lib/mapa-vip";
+import { obtenerMapas, sillasDisponibles } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
 import { disponibilidadEtapas } from "@/lib/precios";
 import CheckoutForm from "./CheckoutForm";
@@ -18,12 +18,10 @@ export const revalidate = 5;
 export default async function ComprarPage() {
   const service = createServiceClient();
 
-  const mesas = await obtenerMapaVip(service);
+  const mapas = await obtenerMapas(service);
   const tasaEurVes = await obtenerTasaActual(service);
-  const sillasVipDisponibles = mesas.reduce(
-    (total, m) => total + m.sillas.filter((s) => s.estado === "disponible").length,
-    0
-  );
+  const sillasVipDisponibles = sillasDisponibles(mapas.vip);
+  const sillasPreferencialDisponibles = sillasDisponibles(mapas.preferencial);
 
   const { count: generalVendidos } = await service
     .from("tickets")
@@ -65,14 +63,16 @@ export default async function ComprarPage() {
       />
 
       <SobreElEvento />
-      <PreciosExplicados preventa={preventa} />
+      <PreciosExplicados preventa={preventa} hayPreferencial={mapas.preferencial.length > 0} />
       <ComoComprar />
 
       <div id="comprar" className="scroll-mt-6">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">Elige tu entrada</h2>
         <CheckoutForm
-          mesas={mesas}
+          mesas={mapas.vip}
+          mesasPreferencial={mapas.preferencial}
           sillasVipDisponibles={sillasVipDisponibles}
+          sillasPreferencialDisponibles={sillasPreferencialDisponibles}
           cupoGeneralRestante={cupoGeneralRestante}
           tasaEurVes={tasaEurVes}
           preventa={preventa}

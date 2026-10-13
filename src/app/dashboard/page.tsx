@@ -51,10 +51,12 @@ export default async function DashboardPage() {
   // vigente: si alguien lo subió de 100, la tarjeta tiene que medir contra el
   // número de verdad y no contra la constante del código.
   const config = await leerConfig(service);
-  const [{ data: tickets, error: ticketsError }, { data: evento }, { count: sillasVipTotal }, planes, tasaEurVes] = await Promise.all([
+  const [{ data: tickets, error: ticketsError }, { data: evento }, { data: mesas }, planes, tasaEurVes] = await Promise.all([
     seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa, grupo_id, precio_bs"),
     service.from("eventos").select("aforo_general_total").limit(1).single(),
-    service.from("sillas_vip").select("id", { count: "exact", head: true }),
+    // El aforo con asiento se cuenta por zona (VIP y Preferencial comparten
+    // tablas y se distinguen por mesas_vip.zona).
+    service.from("mesas_vip").select("zona, sillas_total"),
     resumenPlanes(service, config),
     obtenerTasaActual(service),
   ]);
@@ -66,6 +68,7 @@ export default async function DashboardPage() {
   const pendientes = todos.filter((t) => t.estado_pago === "pendiente");
 
   const vipVerificados = verificados.filter((t) => t.tipo === "vip");
+  const preferencialVerificados = verificados.filter((t) => t.tipo === "preferencial");
   const generalVerificados = verificados.filter((t) => t.tipo === "general");
 
   const ingresoTotal = verificados.reduce((s, t) => s + Number(t.precio), 0);
@@ -81,11 +84,19 @@ export default async function DashboardPage() {
   const ingresoPendiente = pendientesSueltos.reduce((s, t) => s + Number(t.precio), 0);
   const enBanco = Math.round((ingresoTotal + planes.enCurso.cobradoUsd) * 100) / 100;
   const ingresoVip = vipVerificados.reduce((s, t) => s + Number(t.precio), 0);
+  const ingresoPreferencial = preferencialVerificados.reduce((s, t) => s + Number(t.precio), 0);
   const ingresoGeneral = generalVerificados.reduce((s, t) => s + Number(t.precio), 0);
 
   const aforoGeneral = evento?.aforo_general_total ?? 4500;
-  const aforoVip = sillasVipTotal ?? 300;
-  const metaIngresos = aforoVip * calcularTotal("vip").total + aforoGeneral * calcularTotal("general").total;
+  const sillasPorZona = (zona: string) =>
+    (mesas ?? []).filter((m) => ((m.zona as string | null) ?? "vip") === zona).reduce((s, m) => s + Number(m.sillas_total ?? 0), 0);
+  const aforoVip = mesas ? sillasPorZona("vip") : 300;
+  const aforoPreferencial = mesas ? sillasPorZona("preferencial") : 0;
+  const hayPreferencial = aforoPreferencial > 0 || preferencialVerificados.length > 0;
+  const metaIngresos =
+    aforoVip * calcularTotal("vip").total +
+    aforoPreferencial * calcularTotal("preferencial").total +
+    aforoGeneral * calcularTotal("general").total;
 
   // Por método se suman los bolívares REALES de cada ticket (`precio_bs`): lo
   // que de verdad entró ese día, a la tasa de ese día. Convertir el total de
@@ -118,9 +129,10 @@ export default async function DashboardPage() {
   const porDia = new Map<string, DiaVenta>();
   for (const t of verificados) {
     const dia = new Date(t.created_at).toLocaleDateString("sv-SE", { timeZone: "America/Caracas" });
-    const actual = porDia.get(dia) ?? { fecha: dia, total: 0, vip: 0, general: 0, usd: 0 };
+    const actual = porDia.get(dia) ?? { fecha: dia, total: 0, vip: 0, preferencial: 0, general: 0, usd: 0 };
     actual.total += 1;
     if (t.tipo === "vip") actual.vip += 1;
+    else if (t.tipo === "preferencial") actual.preferencial += 1;
     else actual.general += 1;
     actual.usd = Math.round((actual.usd + Number(t.precio)) * 100) / 100;
     porDia.set(dia, actual);
@@ -128,7 +140,7 @@ export default async function DashboardPage() {
   const dias = [...porDia.values()].sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-14);
 
   const vendidosTotal = verificados.length;
-  const aforoTotalEntradas = aforoVip + aforoGeneral;
+  const aforoTotalEntradas = aforoVip + aforoPreferencial + aforoGeneral;
   const pctVendido = aforoTotalEntradas > 0 ? Math.round((vendidosTotal / aforoTotalEntradas) * 1000) / 10 : 0;
 
   const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -189,7 +201,7 @@ export default async function DashboardPage() {
           puedeCobrar={perfil.rol === "ventas" || perfil.rol === "finanzas" || perfil.rol === "admin"}
         />
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className={`grid gap-3 ${hayPreferencial ? "grid-cols-3" : "grid-cols-2"}`}>
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
             <p className="text-xs text-neutral-500">VIP vendidos</p>
             <p className="text-2xl font-semibold">
@@ -197,6 +209,15 @@ export default async function DashboardPage() {
             </p>
             <p className="text-xs text-neutral-400 mt-1 tabular-nums">${fmt(ingresoVip)}{bsAprox(ingresoVip) ? ` · ${bsAprox(ingresoVip)}` : ""}</p>
           </div>
+          {hayPreferencial && (
+            <div className="bg-white border border-neutral-200 rounded-xl p-4">
+              <p className="text-xs text-neutral-500">Preferencial vendidos</p>
+              <p className="text-2xl font-semibold">
+                {preferencialVerificados.length} <span className="text-sm font-normal text-neutral-400">/ {aforoPreferencial}</span>
+              </p>
+              <p className="text-xs text-neutral-400 mt-1 tabular-nums">${fmt(ingresoPreferencial)}{bsAprox(ingresoPreferencial) ? ` · ${bsAprox(ingresoPreferencial)}` : ""}</p>
+            </div>
+          )}
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
             <p className="text-xs text-neutral-500">General vendidos</p>
             <p className="text-2xl font-semibold">

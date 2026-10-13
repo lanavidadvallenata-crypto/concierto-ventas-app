@@ -6,7 +6,7 @@ import { formatoUsd } from "@/lib/formato";
 // Un día del gráfico. Además del total se guarda el desglose por tipo y el
 // ingreso, que es lo que Anita necesita leer al tocar una barra: saber que un
 // día bueno lo fue por VIP o por General cambia la decisión del día siguiente.
-export type DiaVenta = { fecha: string; total: number; vip: number; general: number; usd: number };
+export type DiaVenta = { fecha: string; total: number; vip: number; preferencial: number; general: number; usd: number };
 
 export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
   // Arranca mostrando el día más reciente: el gráfico nunca se ve "vacío".
@@ -53,7 +53,7 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
             const resumen = `${new Date(d.fecha + "T12:00:00").toLocaleDateString("es-VE", {
               day: "numeric",
               month: "short",
-            })}: ${d.general} General · ${d.vip} VIP · ${formatoUsd(d.usd)}`;
+            })}: ${d.general} General · ${d.preferencial ? `${d.preferencial} Preferencial · ` : ""}${d.vip} VIP · ${formatoUsd(d.usd)}`;
             return (
               <g key={d.fecha}>
                 <title>{resumen}</title>
@@ -101,7 +101,7 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
           {activo.total} entrada{activo.total === 1 ? "" : "s"}
           <span className="font-normal text-neutral-500">
             {" · "}
-            {activo.general} General {" · "} {activo.vip} VIP {" · "} {formatoUsd(activo.usd)}
+            {activo.general} General {" · "} {activo.preferencial > 0 && <>{activo.preferencial} Preferencial {" · "}</>}{activo.vip} VIP {" · "} {formatoUsd(activo.usd)}
           </span>
         </p>
         <p className="text-[11px] text-neutral-400 mt-0.5">Toca cualquier barra para ver ese día.</p>

@@ -11,6 +11,7 @@ import { fechaCorta, usd } from "@/lib/cuotas";
 import { guardarTasaManual } from "@/lib/tasa";
 import { obtenerAsiento } from "@/lib/asiento";
 import { ETIQUETA_METODO } from "@/lib/formato";
+import type { Tipo } from "@/lib/precios";
 
 type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
 
@@ -31,7 +32,7 @@ type TicketGrupo = {
   id: string;
   grupo_id: string | null;
   vendido_por: string | null;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   silla_id: string | null;
   comprador_nombre: string;
   comprador_email: string | null;
@@ -85,10 +86,10 @@ async function entradasParaCorreo(tickets: { tipo: string; silla_id: string | nu
   const entradas: EntradaQR[] = [];
   for (const t of tickets) {
     if (!t.qr_token) continue;
-    const asiento = t.tipo === "vip" ? await obtenerAsiento(service, t.silla_id) : null;
+    const asiento = t.silla_id ? await obtenerAsiento(service, t.silla_id) : null;
     entradas.push({
       qrToken: t.qr_token,
-      tipo: t.tipo as "vip" | "general",
+      tipo: t.tipo as Tipo,
       fila: asiento?.fila ?? null,
       mesaNumero: asiento?.mesaNumero ?? null,
       sillaNumero: asiento?.sillaNumero ?? null,
@@ -230,7 +231,7 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
       .maybeSingle();
     if (updateError || !actualizado) continue; // otra persona lo procesó justo ahora
     verificados.push({ ...t, qr_token: qrToken });
-    if (t.tipo === "vip" && t.silla_id) {
+    if (t.silla_id) {
       await service.from("sillas_vip").update({ estado: "vendida", reservado_hasta: null }).eq("id", t.silla_id);
     }
   }
@@ -300,7 +301,7 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
       .maybeSingle();
     if (updateError || !actualizado) continue;
     rechazados.push(t);
-    if (t.tipo === "vip" && t.silla_id) {
+    if (t.silla_id) {
       await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).eq("id", t.silla_id);
     }
   }
@@ -388,7 +389,7 @@ export async function reabrirPago(ticketId: string): Promise<Resultado> {
   const service = createServiceClient();
 
   // Sillas VIP: todas deben seguir disponibles.
-  const sillaIds = rechazados.filter((t) => t.tipo === "vip" && t.silla_id).map((t) => t.silla_id!);
+  const sillaIds = rechazados.filter((t) => t.silla_id).map((t) => t.silla_id!);
   if (sillaIds.length) {
     const { data: sillas } = await service.from("sillas_vip").select("id, estado, numero").in("id", sillaIds);
     const ocupadas = (sillas ?? []).filter((s) => s.estado !== "disponible");
@@ -525,7 +526,7 @@ export type TicketBuscado = {
   compradorNombre: string;
   compradorEmail: string | null;
   compradorTelefono: string;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   cantidad: number;
   precio: number;
   precioBs: number | null;
@@ -590,7 +591,7 @@ export async function buscarTickets(consulta: string): Promise<{ ok: true; ticke
       compradorNombre: t.comprador_nombre as string,
       compradorEmail: (t.comprador_email as string | null) ?? null,
       compradorTelefono: t.comprador_telefono as string,
-      tipo: t.tipo as "vip" | "general",
+      tipo: t.tipo as Tipo,
       cantidad: 1,
       precio: Number(t.precio),
       precioBs: t.precio_bs == null ? null : Number(t.precio_bs),
@@ -682,7 +683,7 @@ export async function anularCompraVerificada(ticketId: string): Promise<Resultad
       .maybeSingle();
     if (updateError || !actualizado) continue;
     anulados.push(t);
-    if (t.tipo === "vip" && t.silla_id) {
+    if (t.silla_id) {
       await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).eq("id", t.silla_id);
     }
   }

@@ -4,6 +4,7 @@ import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
 import { registrarIngreso } from "./actions";
 import BotonDejarEntrar from "./BotonDejarEntrar";
 import { marcaIngresoValida } from "@/lib/marca-ingreso";
+import type { Tipo } from "@/lib/precios";
 
 // Pantalla de la puerta. Abrir el enlace del QR NO cambia nada: solo muestra
 // la entrada. El ingreso se registra con el toque en "DEJAR ENTRAR"
@@ -58,8 +59,8 @@ export default async function ValidarAccesoPage({
     return <Resultado color="red" titulo="INVÁLIDO" detalle="Este código no corresponde a ninguna entrada." />;
   }
 
-  const asiento = ticket.tipo === "vip" ? await obtenerAsiento(service, ticket.silla_id) : null;
-  const descripcion = `${ticket.comprador_nombre} · ${describirAsiento(ticket.tipo as "vip" | "general", asiento)}`;
+  const asiento = ticket.silla_id ? await obtenerAsiento(service, ticket.silla_id) : null;
+  const descripcion = `${ticket.comprador_nombre} · ${describirAsiento(ticket.tipo as Tipo, asiento)}`;
 
   if (ticket.estado_pago !== "verificado") {
     await service.from("accesos").insert({ ticket_id: ticket.id, resultado: "invalido", escaneado_por: perfil.id });
@@ -111,7 +112,7 @@ export default async function ValidarAccesoPage({
       <div className="flex flex-col gap-2">
         <p className="text-xs uppercase tracking-widest text-neutral-400">Entrada verificada · sin usar</p>
         <h1 className="text-3xl font-bold leading-tight">{ticket.comprador_nombre}</h1>
-        <p className="text-xl text-neutral-200">{describirAsiento(ticket.tipo as "vip" | "general", asiento)}</p>
+        <p className="text-xl text-neutral-200">{describirAsiento(ticket.tipo as Tipo, asiento)}</p>
       </div>
       {errorAccion === "1" ? (
         <p className="text-sm bg-red-700/60 rounded-lg px-3 py-2">No se pudo registrar por un problema de conexión. Toca de nuevo.</p>

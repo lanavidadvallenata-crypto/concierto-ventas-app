@@ -5,13 +5,13 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarCorreoPendiente } from "@/lib/enviar-qr";
-import { MAX_POR_COMPRA } from "@/lib/precios";
+import { conAsiento, MAX_POR_COMPRA, TIPOS, type Tipo } from "@/lib/precios";
 import { metodosParaCanal } from "@/lib/pagos";
 import { registrarVentaInterna } from "@/lib/registrar-venta";
 
 const ventaSchema = z.object({
-  tipo: z.enum(["vip", "general"]),
-  sillaIds: z.string().optional(), // JSON array de uuids (VIP)
+  tipo: z.enum(TIPOS as [Tipo, ...Tipo[]]),
+  sillaIds: z.string().optional(), // JSON array de uuids (VIP / Preferencial)
   cantidadGeneral: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   compradorNombre: z.string().trim().min(2, "Escribe el nombre del comprador."),
   compradorTelefono: z.string().trim().min(7, "Escribe un teléfono válido."),
@@ -55,14 +55,14 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
   }
 
   let sillaIds: string[] = [];
-  if (v.tipo === "vip") {
+  if (conAsiento(v.tipo)) {
     try {
       const arr = JSON.parse(v.sillaIds ?? "[]");
       sillaIds = Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
     } catch {
       sillaIds = [];
     }
-    if (sillaIds.length === 0) return { ok: false, error: "Selecciona al menos una silla VIP." };
+    if (sillaIds.length === 0) return { ok: false, error: "Selecciona al menos una silla en el mapa." };
   }
 
   const service = createServiceClient();

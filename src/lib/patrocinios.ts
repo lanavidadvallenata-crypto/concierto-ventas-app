@@ -1,3 +1,5 @@
+import type { Tipo } from "@/lib/precios";
+
 // Paquetes de patrocinio (media kit oficial). Las entradas incluidas se
 // emiten como tickets de cortesía: ocupan aforo real para que la tienda no
 // venda dos veces la misma silla ni pase del cupo general.
@@ -7,7 +9,7 @@ export const PAQUETES: {
   id: Paquete;
   nombre: string;
   monto: number;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   entradas: number;
   incluye: string;
 }[] = [

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import QRCode from "qrcode";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerTasaActual } from "@/lib/tasa";
-import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
+import { obtenerAsiento, descripcionEntrada } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import BotonSoporte from "@/components/BotonSoporte";
@@ -11,6 +11,7 @@ import { codigoEntrada } from "@/lib/qr";
 import { leerPlanPorGrupo } from "@/lib/abona618";
 import { INSTRUCCIONES_PAGO } from "@/lib/pagos";
 import PlanComprador, { type CuotaVista } from "./PlanComprador";
+import { etiquetaTipo, nombreEntrada, type Tipo } from "@/lib/precios";
 
 // "Mis entradas": todas las entradas de UNA compra, con un botón de WhatsApp
 // por entrada para mandarle a cada invitado la suya (enlace /entrada/<token>).
@@ -35,7 +36,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type TicketFila = {
   id: string;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   silla_id: string | null;
   comprador_nombre: string;
   estado_pago: string;
@@ -78,14 +79,14 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
 
   const filas = await Promise.all(
     verificadas.map(async (t, i) => {
-      const asiento = t.tipo === "vip" ? await obtenerAsiento(service, t.silla_id) : null;
+      const asiento = t.silla_id ? await obtenerAsiento(service, t.silla_id) : null;
       const urlEntrada = `${SITE_URL}/entrada/${t.qr_token}`;
       const qr = await QRCode.toDataURL(`${URL_EQUIPO}/acceso/${t.qr_token}`, { width: 320, margin: 1 });
       const texto = `Tu entrada para La Navidad Vallenata (vie 4 dic · Hangar Grano de Oro, Maracaibo):\n${urlEntrada}\nÁbrela en tu teléfono y muestra el QR en la puerta. Es personal: solo entra una vez.`;
       return {
         n: i + 1,
         tipo: t.tipo,
-        detalle: t.tipo === "vip" ? describirAsiento("vip", asiento) : "Acceso general · sin asiento asignado",
+        detalle: descripcionEntrada(t.tipo as string, asiento),
         usada: t.qr_usado,
         codigo: codigoEntrada(t.qr_token),
         urlEntrada,
@@ -104,7 +105,7 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
           <p className="text-sm text-[#E8C9C9] mt-1">
             Compra {codigo} · a nombre de {nombre} ·{" "}
             {plan && verificadas.length === 0
-              ? `${plan.cantidad} ${plan.cantidad === 1 ? "entrada" : "entradas"} ${plan.tipo === "vip" ? "VIP" : "General"} en plan de pago`
+              ? `${plan.cantidad} ${plan.cantidad === 1 ? "entrada" : "entradas"} ${etiquetaTipo(plan.tipo, plan.cantidad)} en plan de pago`
               : `${verificadas.length} ${verificadas.length === 1 ? "entrada" : "entradas"}`}
           </p>
         </div>
@@ -158,7 +159,7 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
               </div>
               <div className="min-w-0 flex flex-col gap-0.5">
                 <p className="text-[11px] uppercase tracking-[0.12em] text-[#898477]">Entrada {f.n} de {filas.length}</p>
-                <p className="font-bold text-[#3D0507] leading-tight">{f.tipo === "vip" ? "Entrada VIP" : "Entrada General"}</p>
+                <p className="font-bold text-[#3D0507] leading-tight">{nombreEntrada(f.tipo)}</p>
                 <p className="text-sm text-neutral-600 leading-snug">{f.detalle}</p>
                 <p className={`text-xs mt-1 ${f.usada ? "text-red-700" : "text-green-800"}`}>{f.usada ? "Ya ingresó" : "Válida · sin usar"}</p>
                 {f.codigo ? <p className="text-[11px] text-neutral-500">Código <span className="font-mono font-semibold text-neutral-700 tracking-wider">{f.codigo}</span></p> : null}

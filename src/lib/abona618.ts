@@ -19,6 +19,7 @@ import {
   type Plan,
   type SinPlan,
 } from "@/lib/cuotas";
+import type { Tipo } from "@/lib/precios";
 
 export type Config = {
   activo: boolean;
@@ -111,7 +112,7 @@ export type Ofrecible = { plan: Plan | SinPlan; config: Config; vipEnPlan: numbe
  */
 export async function planOfrecible(
   service: SupabaseClient,
-  d: { tipo: "vip" | "general"; cantidad: number; total: number; canal?: string; hoy?: string }
+  d: { tipo: Tipo; cantidad: number; total: number; canal?: string; hoy?: string }
 ): Promise<Ofrecible> {
   const config = await leerConfig(service);
   const hoy = d.hoy ?? hoyEnVenezuela();
@@ -146,7 +147,7 @@ export async function planOfrecible(
 export type DatosNuevoPlan = {
   grupoId: string;
   total: number;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   cantidad: number;
   cuotas: Cuota[];
   canal: string;
@@ -252,7 +253,7 @@ export type PlanGuardado = {
   id: string;
   grupoId: string;
   totalUsd: number;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   cantidad: number;
   estado: "al_dia" | "en_mora" | "vencido" | "completado" | "anulado";
   aceptoCondicionesEn: string;
@@ -297,7 +298,7 @@ function armarPlan(fila: Record<string, unknown>, filasCuotas: Record<string, un
     id: String(fila.id),
     grupoId: String(fila.grupo_id),
     totalUsd: total,
-    tipo: fila.tipo as "vip" | "general",
+    tipo: fila.tipo as Tipo,
     cantidad: Number(fila.cantidad),
     estado: fila.estado as PlanGuardado["estado"],
     aceptoCondicionesEn: String(fila.acepto_condiciones_en),
@@ -758,7 +759,7 @@ export type CuotaPorCobrar = {
   totalUsd: number;
   pagado: number;
   saldo: number;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   cantidad: number;
   estadoPlan: PlanGuardado["estado"];
   compradorNombre: string | null;

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { conAsiento, ETIQUETA_TIPO, type Tipo } from "@/lib/precios";
 
 export type Asiento = { fila: string; mesaNumero: number; sillaNumero: number };
 
@@ -45,8 +46,18 @@ export async function obtenerAsiento(service: SupabaseClient, sillaId: string | 
   return { fila: mesa.fila as string, mesaNumero: mesa.numero as number, sillaNumero: silla.numero as number };
 }
 
-export function describirAsiento(tipo: "vip" | "general", asiento: Asiento | null): string {
-  if (tipo !== "vip") return "General";
-  if (!asiento) return "VIP (silla no encontrada — revisar en Finanzas)";
-  return `Fila ${asiento.fila} · Mesa ${asiento.mesaNumero} · Silla ${asiento.sillaNumero}`;
+// VIP se lee como siempre ("Fila A · Mesa 4 · Silla 3"). Preferencial lleva
+// su nombre adelante porque sus filas son "1" y "2", y en la puerta "Fila 1"
+// a secas se confunde con la primera fila del VIP.
+export function describirAsiento(tipo: Tipo | string, asiento: Asiento | null): string {
+  if (!conAsiento(tipo as Tipo)) return "General";
+  if (!asiento) return `${ETIQUETA_TIPO[tipo as Tipo]} (silla no encontrada — revisar en Finanzas)`;
+  const base = `Fila ${asiento.fila} · Mesa ${asiento.mesaNumero} · Silla ${asiento.sillaNumero}`;
+  return tipo === "preferencial" ? `Preferencial · ${base}` : base;
+}
+
+/** Lo que se imprime en la entrada, el correo y la puerta para cualquier tipo. */
+export function descripcionEntrada(tipo: Tipo | string, asiento: Asiento | null): string {
+  if (!conAsiento(tipo as Tipo)) return "Acceso general · sin asiento asignado";
+  return describirAsiento(tipo, asiento);
 }

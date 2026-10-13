@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { verificarPago, rechazarPago } from "./actions";
 import { convertirABs } from "@/lib/tasa";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, METODOS_EN_BS, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
+import { conAsiento, etiquetaTipo, type Tipo } from "@/lib/precios";
 
 export type CompraPendiente = {
   id: string; // id de un ticket del grupo (cualquiera sirve para las acciones)
@@ -12,7 +13,7 @@ export type CompraPendiente = {
   compradorNombre: string;
   compradorTelefono: string;
   compradorEmail: string | null;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   cantidad: number;
   total: number;
   totalBs: number | null; // monto exacto que se le indicó al comprador (si pagó en Bs)
@@ -90,7 +91,7 @@ export default function PendientesList({
             ? { tipo: "error", texto: res.aviso }
             : {
                 tipo: "ok",
-                texto: `Pago de ${c.compradorNombre} rechazado${c.tipo === "vip" ? " — sus sillas volvieron a estar disponibles" : ""}. Le llegó un correo con botón de WhatsApp para mandar el comprobante.`,
+                texto: `Pago de ${c.compradorNombre} rechazado${conAsiento(c.tipo) ? " — sus sillas volvieron a estar disponibles" : ""}. Le llegó un correo con botón de WhatsApp para mandar el comprobante.`,
               }
         );
       }
@@ -148,8 +149,8 @@ export default function PendientesList({
               <div className="min-w-0">
                 <p className="font-semibold text-base leading-tight truncate">{c.compradorNombre}</p>
                 <p className="text-sm text-neutral-600 mt-0.5">
-                  <span className={c.tipo === "vip" ? "font-medium text-marca-secundario" : ""}>
-                    {c.cantidad} × {c.tipo === "vip" ? "VIP" : "General"}
+                  <span className={conAsiento(c.tipo) ? "font-medium text-marca-secundario" : ""}>
+                    {c.cantidad} × {etiquetaTipo(c.tipo, c.cantidad)}
                   </span>
                   {c.asientos.length > 0 && <span className="text-neutral-500"> · {c.asientos.join(", ")}</span>}
                   {c.enPreventa > 0 && (

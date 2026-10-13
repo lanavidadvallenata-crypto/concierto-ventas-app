@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, type TicketBuscado } from "./actions";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
+import { etiquetaTipo } from "@/lib/precios";
 
 const ESTADO: Record<TicketBuscado["estadoPago"], { texto: string; clase: string }> = {
   pendiente: { texto: "Pendiente", clase: "bg-amber-100 text-amber-800" },
@@ -128,7 +129,7 @@ export default function BuscarComprador() {
                   <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 shrink-0 ${estado.clase}`}>{estado.texto}</span>
                 </div>
                 <p className="text-xs text-neutral-600">
-                  {t.cantidad} × {t.tipo === "vip" ? "VIP" : "General"} · {formatoUsd(t.precio)}
+                  {t.cantidad} × {etiquetaTipo(t.tipo, t.cantidad)} · {formatoUsd(t.precio)}
                   {t.precioBs != null ? ` · ${formatoBs(t.precioBs)}` : ""} · {ETIQUETA_METODO[t.metodoPago] ?? t.metodoPago}
                   {t.referenciaPago ? ` · ref. ${t.referenciaPago}` : ""} · {ETIQUETA_CANAL[t.canal] ?? t.canal}
                 </p>

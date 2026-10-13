@@ -7,6 +7,7 @@ import EntradaManual from "./EntradaManual";
 import { interpretarConsulta, rangoCompra, patronIlike, telefonoEnmascarado } from "@/lib/buscar-entrada";
 import { codigoEntrada } from "@/lib/qr";
 import { codigoCompra } from "@/lib/compra";
+import { conAsiento, ETIQUETA_TIPO, type Tipo } from "@/lib/precios";
 
 // Puerta — "si el QR no escanea". Acepta, en una sola caja:
 //   · el código de entrada de 10 caracteres que va debajo de cada QR,
@@ -21,7 +22,7 @@ type Fila = {
   grupo_id: string | null;
   comprador_nombre: string;
   comprador_telefono: string | null;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   silla_id: string | null;
   estado_pago: string;
   qr_token: string | null;
@@ -105,10 +106,11 @@ export default async function AccesoPage({ searchParams }: { searchParams: Promi
   const sillaPorId = new Map((sillas ?? []).map((s) => [s.id, s]));
   const mesaPorId = new Map((mesas ?? []).map((m) => [m.id, m]));
   const asientoDe = (f: Fila) => {
-    if (f.tipo !== "vip") return "General";
+    if (!conAsiento(f.tipo)) return "General";
     const s = f.silla_id ? sillaPorId.get(f.silla_id) : null;
     const m = s ? mesaPorId.get(s.mesa_id) : null;
-    return s && m ? `VIP · Fila ${m.fila} · Mesa ${m.numero} · Silla ${s.numero}` : "VIP";
+    const etiqueta = ETIQUETA_TIPO[f.tipo] ?? f.tipo;
+    return s && m ? `${etiqueta} · Fila ${m.fila} · Mesa ${m.numero} · Silla ${s.numero}` : etiqueta;
   };
 
   return (

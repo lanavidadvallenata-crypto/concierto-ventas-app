@@ -10,6 +10,7 @@ import { metodoEsEnBs, normalizarReferencia, validarReferencia } from "@/lib/pag
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR } from "@/lib/enviar-qr";
 import { obtenerAsiento } from "@/lib/asiento";
+import type { Tipo } from "@/lib/precios";
 
 type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
 
@@ -351,7 +352,7 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
       .maybeSingle();
     if (!ok) continue;
     verificados.push({ id: String(t.id), tipo: String(t.tipo), silla_id: (t.silla_id as string | null) ?? null, qr_token: qrToken });
-    if (t.tipo === "vip" && t.silla_id) {
+    if (t.silla_id) {
       await service.from("sillas_vip").update({ estado: "vendida", reservado_hasta: null }).eq("id", t.silla_id);
     }
   }
@@ -369,10 +370,10 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
 
   const entradas = [];
   for (const t of verificados) {
-    const asiento = t.tipo === "vip" ? await obtenerAsiento(service, t.silla_id) : null;
+    const asiento = t.silla_id ? await obtenerAsiento(service, t.silla_id) : null;
     entradas.push({
       qrToken: t.qr_token,
-      tipo: t.tipo as "vip" | "general",
+      tipo: t.tipo as Tipo,
       fila: asiento?.fila ?? null,
       mesaNumero: asiento?.mesaNumero ?? null,
       sillaNumero: asiento?.sillaNumero ?? null,
@@ -447,7 +448,7 @@ export async function anularPorFaltaDePago(grupoId: string): Promise<Resultado> 
       .maybeSingle();
     if (!ok) continue;
     liberadas++;
-    if (t.tipo === "vip" && t.silla_id) {
+    if (t.silla_id) {
       await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).eq("id", t.silla_id);
     }
   }

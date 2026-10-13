@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import QRCode from "qrcode";
 import { createServiceClient } from "@/lib/supabase/server";
-import { obtenerAsiento, describirAsiento } from "@/lib/asiento";
+import { obtenerAsiento, descripcionEntrada } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import BotonSoporte from "@/components/BotonSoporte";
 import { codigoEntrada } from "@/lib/qr";
+import { nombreEntrada, type Tipo } from "@/lib/precios";
 
 // Página pública de UNA entrada: el mismo QR que va en el correo, abierto
 // desde un enlace que el comprador puede mandar por WhatsApp a cada invitado.
@@ -55,9 +56,9 @@ export default async function EntradaPublicaPage({ params }: { params: Promise<{
     return <Aviso titulo="Entrada no válida" detalle={`Esta entrada no tiene el pago confirmado (estado: ${ticket.estado_pago}). Escríbenos por WhatsApp al ${WHATSAPP_SOPORTE_VISIBLE}.`} />;
   }
 
-  const tipo = ticket.tipo as "vip" | "general";
-  const asiento = tipo === "vip" ? await obtenerAsiento(service, ticket.silla_id) : null;
-  const descripcionAsiento = tipo === "vip" ? describirAsiento(tipo, asiento) : "Acceso general · sin asiento asignado";
+  const tipo = ticket.tipo as Tipo;
+  const asiento = ticket.silla_id ? await obtenerAsiento(service, ticket.silla_id) : null;
+  const descripcionAsiento = descripcionEntrada(tipo, asiento);
 
   const urlAcceso = `${URL_EQUIPO}/acceso/${token}`;
   const qrDataUrl = await QRCode.toDataURL(urlAcceso, { width: 640, margin: 2 });
@@ -76,7 +77,7 @@ export default async function EntradaPublicaPage({ params }: { params: Promise<{
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm overflow-hidden">
         <div className="bg-[#3D0507] text-white px-6 pt-6 pb-5">
           <p className="text-[11px] uppercase tracking-[0.15em] text-[#E8C9C9]">La Navidad Vallenata · 4 dic 2026</p>
-          <h1 className="text-2xl font-bold mt-1 leading-tight">{tipo === "vip" ? "Entrada VIP" : "Entrada General"}</h1>
+          <h1 className="text-2xl font-bold mt-1 leading-tight">{nombreEntrada(tipo)}</h1>
           <p className="text-sm text-[#E8C9C9] mt-1">{descripcionAsiento}</p>
         </div>
 

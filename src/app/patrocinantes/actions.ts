@@ -9,6 +9,7 @@ import { obtenerAsiento } from "@/lib/asiento";
 import { generarTokenQR } from "@/lib/qr";
 import { buscarPaquete, type Paquete } from "@/lib/patrocinios";
 import { validarReferencia, normalizarReferencia } from "@/lib/pagos";
+import type { Tipo } from "@/lib/precios";
 
 export type ResultadoPatrocinio = { ok: true; aviso?: string } | { ok: false; error: string };
 
@@ -133,10 +134,10 @@ export async function registrarPatrocinio(formData: FormData): Promise<Resultado
   for (const t of tickets ?? []) {
     const qrToken = generarTokenQR();
     await service.from("tickets").update({ qr_token: qrToken }).eq("id", t.id);
-    const asiento = t.tipo === "vip" ? await obtenerAsiento(service, t.silla_id) : null;
+    const asiento = t.silla_id ? await obtenerAsiento(service, t.silla_id) : null;
     entradas.push({
       qrToken,
-      tipo: t.tipo as "vip" | "general",
+      tipo: t.tipo as Tipo,
       fila: asiento?.fila ?? null,
       mesaNumero: asiento?.mesaNumero ?? null,
       sillaNumero: asiento?.sillaNumero ?? null,
@@ -266,7 +267,7 @@ export async function registrarCortesia(formData: FormData): Promise<ResultadoPa
   // Una cortesía mixta emite dos grupos: uno VIP y uno general. Se registran en
   // orden y, si el segundo falla, el primero queda emitido y se avisa — no se
   // revierte en silencio porque ya ocupa aforo.
-  const lotes: { tipo: "vip" | "general"; cantidad: number; sillas: string[] }[] = [];
+  const lotes: { tipo: Tipo; cantidad: number; sillas: string[] }[] = [];
   if (d.cantidadVip > 0) lotes.push({ tipo: "vip", cantidad: d.cantidadVip, sillas: sillaIds });
   if (d.cantidadGeneral > 0) lotes.push({ tipo: "general", cantidad: d.cantidadGeneral, sillas: [] });
 
@@ -328,10 +329,10 @@ export async function registrarCortesia(formData: FormData): Promise<ResultadoPa
     for (const t of tickets ?? []) {
       const qrToken = generarTokenQR();
       await service.from("tickets").update({ qr_token: qrToken }).eq("id", t.id);
-      const asiento = t.tipo === "vip" ? await obtenerAsiento(service, t.silla_id) : null;
+      const asiento = t.silla_id ? await obtenerAsiento(service, t.silla_id) : null;
       entradas.push({
         qrToken,
-        tipo: t.tipo as "vip" | "general",
+        tipo: t.tipo as Tipo,
         fila: asiento?.fila ?? null,
         mesaNumero: asiento?.mesaNumero ?? null,
         sillaNumero: asiento?.sillaNumero ?? null,

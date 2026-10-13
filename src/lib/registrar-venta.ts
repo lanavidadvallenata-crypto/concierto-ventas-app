@@ -1,12 +1,13 @@
 import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { cotizarCompra, cotizar, disponibilidadEtapas, MAX_POR_COMPRA, type Etapa, type Tipo } from "@/lib/precios";
+import { conAsiento, cotizarCompra, cotizar, disponibilidadEtapas, MAX_POR_COMPRA, type Etapa, type Tipo } from "@/lib/precios";
+import { sillasSonDeZona } from "@/lib/mapa-vip";
 import { metodoEsEnBs, type Canal, type MetodoPago } from "@/lib/pagos";
 import { obtenerTasaActual, convertirABs, repartirBs } from "@/lib/tasa";
 
 export type DatosVentaInterna = {
   tipo: Tipo;
-  sillaIds: string[]; // VIP: una por ticket
+  sillaIds: string[]; // VIP / Preferencial: una por ticket
   cantidad: number; // General
   compradorNombre: string;
   compradorTelefono: string;
@@ -43,15 +44,21 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
   const { data: evento } = await service.from("eventos").select("id, aforo_general_total").limit(1).single();
   if (!evento) return { ok: false, error: "No se encontró el evento en la base de datos." };
 
-  const sillaIds = d.tipo === "vip" ? [...new Set(d.sillaIds)] : [];
-  const cantidad = d.tipo === "vip" ? sillaIds.length : Math.floor(d.cantidad);
+  const sillaIds = conAsiento(d.tipo) ? [...new Set(d.sillaIds)] : [];
+  const cantidad = conAsiento(d.tipo) ? sillaIds.length : Math.floor(d.cantidad);
 
-  if (cantidad < 1) return { ok: false, error: d.tipo === "vip" ? "Elige al menos una silla en el mapa." : "La cantidad debe ser al menos 1." };
+  if (cantidad < 1) return { ok: false, error: conAsiento(d.tipo) ? "Elige al menos una silla en el mapa." : "La cantidad debe ser al menos 1." };
   if (cantidad > MAX_POR_COMPRA[d.tipo]) {
-    return { ok: false, error: `Máximo ${MAX_POR_COMPRA[d.tipo]} ${d.tipo === "vip" ? "sillas" : "entradas generales"} por venta.` };
+    return { ok: false, error: `Máximo ${MAX_POR_COMPRA[d.tipo]} ${conAsiento(d.tipo) ? "sillas" : "entradas generales"} por venta.` };
   }
 
-  if (d.tipo === "vip") {
+  if (conAsiento(d.tipo)) {
+    // Las sillas tienen que ser de la zona que se cobra (el precio sale del
+    // tipo, y el tipo viene del formulario).
+    if (!(await sillasSonDeZona(service, sillaIds, d.tipo))) {
+      return { ok: false, error: "Esas sillas no son de la zona elegida — revisa el mapa." };
+    }
+
     // Reserva atómica silla por silla; si alguna falla, se liberan las tomadas.
     const tomadas: string[] = [];
     for (const id of sillaIds) {
@@ -123,7 +130,7 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
     canal: d.canal,
     etapa: linea.etapa,
     tipo: d.tipo,
-    silla_id: d.tipo === "vip" ? sillaIds[i] : null,
+    silla_id: conAsiento(d.tipo) ? sillaIds[i] : null,
     comprador_nombre: d.compradorNombre,
     comprador_telefono: d.compradorTelefono,
     comprador_email: d.compradorEmail,

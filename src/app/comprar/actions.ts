@@ -6,8 +6,8 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarCorreoPendiente } from "@/lib/enviar-qr";
 import { codigoCompra } from "@/lib/compra";
-import { liberarSillasVencidas } from "@/lib/mapa-vip";
-import { cotizarCompra, MAX_POR_COMPRA, type CotizacionCompra, type DisponibilidadEtapa } from "@/lib/precios";
+import { liberarSillasVencidas, sillasSonDeZona } from "@/lib/mapa-vip";
+import { conAsiento, cotizarCompra, MAX_POR_COMPRA, MAX_SILLAS_POR_COMPRA, TIPOS, type CotizacionCompra, type DisponibilidadEtapa, type Tipo } from "@/lib/precios";
 import { METODOS_PAGO_ACTIVOS, metodoEsEnBs, normalizarReferencia, validarReferencia, validarTelefono } from "@/lib/pagos";
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
 import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
@@ -22,18 +22,22 @@ const MINUTOS_BLOQUEO = 15;
 
 const iniciarSchema = z
   .object({
-    tipo: z.enum(["vip", "general"]),
-    sillaIds: z.array(z.string().uuid()).max(MAX_POR_COMPRA.vip).optional(),
+    tipo: z.enum(TIPOS as [Tipo, ...Tipo[]]),
+    sillaIds: z.array(z.string().uuid()).max(MAX_SILLAS_POR_COMPRA).optional(),
     cantidad: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   })
-  .refine((v) => (v.tipo === "vip" ? (v.sillaIds?.length ?? 0) >= 1 : (v.cantidad ?? 0) >= 1), {
+  .refine((v) => (conAsiento(v.tipo) ? (v.sillaIds?.length ?? 0) >= 1 : (v.cantidad ?? 0) >= 1), {
     message: "Elige al menos una entrada.",
+  })
+  // El tope por compra depende del tipo (10 VIP, 6 Preferencial).
+  .refine((v) => !conAsiento(v.tipo) || new Set(v.sillaIds ?? []).size <= MAX_POR_COMPRA[v.tipo], {
+    message: "Elegiste más sillas de las que permite una compra.",
   });
 
 export type IniciarCheckoutResult =
   | {
       ok: true;
-      tipo: "vip" | "general";
+      tipo: Tipo;
       sillaIds: string[];
       cantidad: number;
       expiraEn: string;
@@ -51,8 +55,9 @@ export type IniciarCheckoutResult =
     }
   | { ok: false; error: string };
 
-// Fase 1: bloquea las sillas (si es VIP) por 15 minutos mientras el comprador
-// va a pagar, y cotiza la compra con la etapa vigente (preventa / regular).
+// Fase 1: bloquea las sillas (si es VIP o Preferencial) por 15 minutos
+// mientras el comprador va a pagar, y cotiza la compra con la etapa vigente
+// (preventa / regular).
 export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarCheckoutResult> {
   const parsed = iniciarSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
@@ -67,10 +72,16 @@ export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarChe
   let sillaIds: string[] = [];
   let cantidad = v.cantidad ?? 1;
 
-  if (v.tipo === "vip") {
+  if (conAsiento(v.tipo)) {
     sillaIds = [...new Set(v.sillaIds ?? [])];
     cantidad = sillaIds.length;
     if (cantidad === 0) return { ok: false, error: "Selecciona al menos una silla en el mapa." };
+
+    // Las sillas tienen que ser de la zona que se está cobrando: el precio
+    // sale del tipo y el tipo lo manda el navegador.
+    if (!(await sillasSonDeZona(service, sillaIds, v.tipo))) {
+      return { ok: false, error: "Esas sillas no corresponden a la zona elegida — vuelve al mapa y elige de nuevo." };
+    }
 
     await liberarSillasVencidas(service);
 
@@ -132,8 +143,8 @@ export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarChe
 }
 
 const confirmarSchema = z.object({
-  tipo: z.enum(["vip", "general"]),
-  sillaIds: z.array(z.string().uuid()).max(MAX_POR_COMPRA.vip).optional(),
+  tipo: z.enum(TIPOS as [Tipo, ...Tipo[]]),
+  sillaIds: z.array(z.string().uuid()).max(MAX_SILLAS_POR_COMPRA).optional(),
   cantidad: z.coerce.number().int().min(1).max(MAX_POR_COMPRA.general).optional(),
   expiraEnEsperado: z.string().optional(),
   // Tasa con la que se le mostró el monto en Bs al comprador (viene de iniciar).
@@ -190,7 +201,7 @@ export type ConfirmarCheckoutResult =
 // sillas. Solo suelta sillas que sigan reservadas con esa misma hora de
 // vencimiento (no toca sillas que ya tengan ticket o que otro haya tomado).
 export async function liberarHoldPublico(input: unknown): Promise<{ ok: true }> {
-  const parsed = z.object({ sillaIds: z.array(z.string().uuid()).max(MAX_POR_COMPRA.vip), expiraEn: z.string() }).safeParse(input);
+  const parsed = z.object({ sillaIds: z.array(z.string().uuid()).max(MAX_SILLAS_POR_COMPRA), expiraEn: z.string() }).safeParse(input);
   if (!parsed.success || parsed.data.sillaIds.length === 0) return { ok: true };
   const service = createServiceClient();
   await service
@@ -204,8 +215,9 @@ export async function liberarHoldPublico(input: unknown): Promise<{ ok: true }> 
 }
 
 // Fase 2: el comprador ya pagó y vuelve con la referencia — se crean los
-// tickets pendientes (uno por asistente, todos con el mismo grupo_id) y, si es
-// VIP, el bloqueo temporal pasa a ser permanente porque ya hay ticket.
+// tickets pendientes (uno por asistente, todos con el mismo grupo_id) y, si
+// lleva asiento (VIP / Preferencial), el bloqueo temporal pasa a ser
+// permanente porque ya hay ticket.
 export async function confirmarCheckoutPublico(input: unknown): Promise<ConfirmarCheckoutResult> {
   const parsed = confirmarSchema.safeParse(input);
   if (!parsed.success) {
@@ -248,9 +260,10 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   const { data: evento } = await service.from("eventos").select("id, aforo_general_total").limit(1).single();
   if (!evento) return { ok: false, error: "No se encontró el evento en la base de datos." };
 
-  const sillaIds = v.tipo === "vip" ? [...new Set(v.sillaIds ?? [])] : [];
-  const cantidad = v.tipo === "vip" ? sillaIds.length : (v.cantidad ?? 1);
+  const sillaIds = conAsiento(v.tipo) ? [...new Set(v.sillaIds ?? [])] : [];
+  const cantidad = conAsiento(v.tipo) ? sillaIds.length : (v.cantidad ?? 1);
   if (cantidad < 1) return { ok: false, error: "Elige al menos una entrada." };
+  if (cantidad > MAX_POR_COMPRA[v.tipo]) return { ok: false, error: `Máximo ${MAX_POR_COMPRA[v.tipo]} por compra.` };
 
   // Idempotencia: misma persona, misma referencia, mismo tipo, en los últimos
   // 10 minutos → no crear un segundo grupo de tickets; avisar que ya estaba.
@@ -293,6 +306,12 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   } else {
     if (!v.expiraEnEsperado) {
       return { ok: false, error: "Falta la reserva de sillas — vuelve a intentarlo desde el mapa." };
+    }
+
+    // Mismo chequeo que al iniciar: el tipo (y con él el precio) lo manda el
+    // navegador, y entre iniciar y confirmar puede venir cambiado.
+    if (!(await sillasSonDeZona(service, sillaIds, v.tipo))) {
+      return { ok: false, error: "Esas sillas no corresponden a la zona elegida — vuelve al mapa y elige de nuevo." };
     }
 
     await liberarSillasVencidas(service);
@@ -350,7 +369,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     canal: "web",
     etapa: linea.etapa,
     tipo: v.tipo,
-    silla_id: v.tipo === "vip" ? sillaIds[i] : null,
+    silla_id: conAsiento(v.tipo) ? sillaIds[i] : null,
     comprador_nombre: v.compradorNombre,
     comprador_telefono: v.compradorTelefono,
     comprador_email: v.compradorEmail,
@@ -368,7 +387,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   const { error: insertError } = await service.from("tickets").insert(filas);
 
   if (insertError) {
-    if (v.tipo === "vip" && sillaIds.length) {
+    if (sillaIds.length) {
       await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).in("id", sillaIds);
     }
     console.error("Error creando tickets públicos:", insertError.message);

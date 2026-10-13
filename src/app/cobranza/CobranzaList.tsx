@@ -8,6 +8,7 @@ import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
 import { codigoCompra } from "@/lib/compra";
 import { DOMINIO_RAIZ } from "@/lib/dominios";
+import { etiquetaTipo, type Tipo } from "@/lib/precios";
 
 // Esta pantalla está armada POR PERSONA, no por cuota (Anita, 12 oct).
 //
@@ -94,7 +95,7 @@ type Persona = {
   nombre: string | null;
   telefono: string | null;
   email: string | null;
-  tipo: "vip" | "general";
+  tipo: Tipo;
   cantidad: number;
   totalUsd: number;
   pagado: number;
@@ -390,7 +391,7 @@ export default function CobranzaList({
                         <span className="text-neutral-400 font-normal font-mono text-xs"> · {codigoCompra(p.grupoId)}</span>
                       </p>
                       <p className="text-xs text-neutral-600">
-                        {p.cantidad} {p.tipo === "vip" ? "VIP" : p.cantidad === 1 ? "General" : "Generales"} ·{" "}
+                        {p.cantidad} {etiquetaTipo(p.tipo, p.cantidad)} ·{" "}
                         {formatoUsd(p.totalUsd)}
                       </p>
                     </div>

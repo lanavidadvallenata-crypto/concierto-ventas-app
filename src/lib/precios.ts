@@ -1,7 +1,38 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type Tipo = "vip" | "general";
+// Los tres tipos de entrada, del más caro al más barato. Preferencial se abrió
+// el 13 de octubre (Anita): "solo había entradas muy caras o muy baratas".
+// Son mesas redondas de 6 puestos entre el VIP y la zona general, a $70 por
+// persona, con mesa y silla elegidas en el mapa igual que VIP.
+export type Tipo = "vip" | "preferencial" | "general";
 export type Etapa = "preventa" | "regular";
+
+export const TIPOS: readonly Tipo[] = ["vip", "preferencial", "general"] as const;
+
+/** Las zonas con mesa y silla numerada (viven en mesas_vip / sillas_vip). */
+export type Zona = "vip" | "preferencial";
+
+/** ¿Este tipo se vende con silla elegida en el mapa? */
+export function conAsiento(tipo: Tipo): tipo is Zona {
+  return tipo === "vip" || tipo === "preferencial";
+}
+
+export const ETIQUETA_TIPO: Record<Tipo, string> = {
+  vip: "VIP",
+  preferencial: "Preferencial",
+  general: "General",
+};
+
+/** "VIP", "Preferencial", "General" / "Generales" según la cantidad. */
+export function etiquetaTipo(tipo: Tipo | string, cantidad = 1): string {
+  if (tipo === "general") return cantidad === 1 ? "General" : "Generales";
+  return ETIQUETA_TIPO[tipo as Tipo] ?? String(tipo);
+}
+
+/** "Entrada VIP" / "Entrada Preferencial" / "Entrada General". */
+export function nombreEntrada(tipo: Tipo | string): string {
+  return `Entrada ${ETIQUETA_TIPO[tipo as Tipo] ?? String(tipo)}`;
+}
 
 // Etapas de precio, en orden. Cada etapa tiene un precio base por tipo, su
 // propio fee de servicio y un cupo (null = sin límite). Una etapa se agota
@@ -24,8 +55,9 @@ export const ETAPAS: {
   fee: number;
   cupo: Record<Tipo, number> | null;
 }[] = [
-  { id: "preventa", nombre: "Preventa", base: { vip: 100, general: 20 }, fee: 0.1, cupo: { vip: 30, general: 50 } },
-  { id: "regular", nombre: "Precio regular", base: { vip: 140, general: 30 }, fee: 0, cupo: null },
+  // Preferencial nunca tuvo preventa: cupo 0 = va directo a precio regular.
+  { id: "preventa", nombre: "Preventa", base: { vip: 100, preferencial: 70, general: 20 }, fee: 0.1, cupo: { vip: 30, preferencial: 0, general: 50 } },
+  { id: "regular", nombre: "Precio regular", base: { vip: 140, preferencial: 70, general: 30 }, fee: 0, cupo: null },
 ];
 
 const ETAPA_REGULAR = ETAPAS[ETAPAS.length - 1];
@@ -34,7 +66,12 @@ function buscarEtapa(etapa: Etapa) {
   return ETAPAS.find((x) => x.id === etapa) ?? ETAPA_REGULAR;
 }
 
-export const MAX_POR_COMPRA: Record<Tipo, number> = { vip: 10, general: 20 };
+// Preferencial: una mesa completa (6) como tope por compra (Anita, 13 oct).
+export const MAX_POR_COMPRA: Record<Tipo, number> = { vip: 10, preferencial: 6, general: 20 };
+
+/** El máximo de sillas que puede traer una compra con asiento, para validar
+ *  entradas sin saber todavía el tipo. */
+export const MAX_SILLAS_POR_COMPRA = Math.max(MAX_POR_COMPRA.vip, MAX_POR_COMPRA.preferencial);
 
 export function desglosar(base: number, feeRate: number) {
   const fee = Math.round(base * feeRate * 100) / 100;
