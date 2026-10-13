@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
-import { registrarPagoDeCuotas, aprobarCuotas, anularPorFaltaDePago, rechazarPagoAnotado } from "./actions";
+import { registrarPagoDeCuotas, aprobarCuotas, anularPorFaltaDePago, rechazarPagoAnotado, anularCompraEnPlan } from "./actions";
 import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox, formatoUsd, parsearMontoBs } from "@/lib/formato";
 import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
@@ -226,8 +226,12 @@ export default function CobranzaList({
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [rechazando, setRechazando] = useState<string | null>(null);
   const [motivoRechazo, setMotivoRechazo] = useState("");
+  // "Anular compra" (solo admin): compra duplicada, arrepentido, prueba.
+  const [anulando, setAnulando] = useState<string | null>(null);
+  const [motivoAnulacion, setMotivoAnulacion] = useState("");
 
   const puedeAprobar = miRol === "finanzas" || miRol === "admin";
+  const esAdmin = miRol === "admin";
 
   // Una fila por cuota se vuelve una fila por persona. La urgencia de la
   // persona es la de su cuota más urgente: si debe algo desde ayer, no
@@ -282,6 +286,7 @@ export default function CobranzaList({
       const res = await fn();
       setProcesando((actual) => (actual === id ? null : actual));
       setConfirmando((actual) => (actual === id ? null : actual));
+      setAnulando((actual) => (actual === id ? null : actual));
       if (!res.ok) {
         poner(id, { tipo: "error", texto: res.error ?? "No se pudo completar." });
         return;
@@ -566,6 +571,16 @@ export default function CobranzaList({
                       </button>
                     )}
 
+                    {esAdmin && (p.urgencia !== "paraAnular" || p.anotadas.length > 0) && anulando !== p.grupoId && (
+                      <button
+                        type="button"
+                        onClick={() => { setAnulando(p.grupoId); setMotivoAnulacion(""); }}
+                        className="h-11 px-3 rounded-lg border border-neutral-300 text-neutral-600 bg-white text-sm font-semibold"
+                      >
+                        Anular compra
+                      </button>
+                    )}
+
                     {p.urgencia === "paraAnular" && puedeAprobar && p.anotadas.length === 0 && (
                       confirmando === p.grupoId ? (
                         <button
@@ -587,6 +602,40 @@ export default function CobranzaList({
                       )
                     )}
                   </div>
+
+                  {esAdmin && anulando === p.grupoId && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-2">
+                      <p className="text-sm font-semibold text-red-900">Anular esta compra y devolver sus entradas a la venta</p>
+                      <p className="text-xs text-red-900/80">
+                        Es para compras duplicadas, pruebas o compradores que se arrepintieron. Si no pagó a tiempo, usa
+                        &ldquo;Anular por falta de pago&rdquo; cuando le aparezca.
+                        {p.pagado > 0 && ` Tiene ${formatoUsd(p.pagado)} confirmados: lo que se haga con ese dinero lo decides tú con el comprador.`}
+                        {p.anotadas.length > 0 &&
+                          ` Ojo: tiene ${formatoUsd(Math.round(p.anotadas.reduce((s, x) => s + x.montoUsd, 0) * 100) / 100)} anotados sin confirmar que se van a descartar.`}
+                      </p>
+                      <input
+                        value={motivoAnulacion}
+                        onChange={(e) => setMotivoAnulacion(e.target.value)}
+                        placeholder="Motivo (queda en el registro). Ej: compra de prueba"
+                        className="w-full h-11 rounded-md border border-neutral-300 bg-white px-2 text-sm"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={esteProcesando || motivoAnulacion.trim().length < 5}
+                          onClick={() =>
+                            correr(p.grupoId, () => anularCompraEnPlan({ grupoId: p.grupoId, motivo: motivoAnulacion.trim() }))
+                          }
+                          className="h-11 px-3 rounded-lg bg-red-600 text-white text-sm font-semibold disabled:opacity-50"
+                        >
+                          {esteProcesando ? "Anulando…" : "Sí, anular la compra"}
+                        </button>
+                        <button type="button" onClick={() => setAnulando(null)} className="h-11 px-3 text-sm text-neutral-600">
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {abierto === p.grupoId && (
                     <FormularioPago

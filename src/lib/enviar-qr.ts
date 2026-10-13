@@ -817,8 +817,12 @@ export async function enviarCorreoPlanAnulado(params: {
   aceptoEn: string | null;
   /** falta_de_pago: se le pasó la fecha de una cuota (hay dinero abonado).
    *  inicial_no_llego: Finanzas no encontró el pago inicial en el banco; no
-   *  hay nada abonado y el texto no puede hablar de dinero retenido. */
-  motivo?: "falta_de_pago" | "inicial_no_llego";
+   *  hay nada abonado y el texto no puede hablar de dinero retenido.
+   *  por_el_equipo: un admin anuló la compra a mano (compra duplicada,
+   *  comprador que se arrepintió, prueba). Aquí NO se afirma que lo abonado
+   *  no se devuelve: eso lo decide el equipo caso por caso y se le dice por
+   *  WhatsApp. */
+  motivo?: "falta_de_pago" | "inicial_no_llego" | "por_el_equipo";
 }) {
   const resend = clienteResend("el correo de compra anulada");
   const codigo = codigoCompra(params.grupoId);
@@ -827,13 +831,17 @@ export async function enviarCorreoPlanAnulado(params: {
   const apertura =
     motivo === "inicial_no_llego"
       ? `No pudimos confirmar en el banco tu pago inicial de <strong>${fmtUsd(params.montoPendiente)}</strong>, así que anulamos tu reserva y tu entrada volvió a estar disponible para otra persona.`
-      : `No recibimos el pago pendiente de <strong>${fmtUsd(params.montoPendiente)}</strong> dentro de la fecha, así que anulamos tu reserva y tu entrada volvió a estar disponible para otra persona.`;
+      : motivo === "por_el_equipo"
+        ? `Tu compra en plan de pago quedó <strong>anulada</strong> y tu entrada volvió a estar disponible para otra persona.`
+        : `No recibimos el pago pendiente de <strong>${fmtUsd(params.montoPendiente)}</strong> dentro de la fecha, así que anulamos tu reserva y tu entrada volvió a estar disponible para otra persona.`;
   const retenido =
-    params.abonado > 0
-      ? `<p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">Según las condiciones del plan de pago que aceptaste${
-          params.aceptoEn ? ` el <strong style="color:#303030;">${escapeHtml(params.aceptoEn)}</strong>` : ""
-        }, los <strong style="color:#303030;">${fmtUsd(params.abonado)}</strong> abonados no se devuelven.</p>`
-      : `<p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">No tenemos ningún pago tuyo registrado para esta compra.</p>`;
+    params.abonado > 0 && motivo === "por_el_equipo"
+      ? `<p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">Tienes <strong style="color:#303030;">${fmtUsd(params.abonado)}</strong> abonados en esta compra. El equipo se comunica contigo por WhatsApp para resolverlo.</p>`
+      : params.abonado > 0
+        ? `<p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">Según las condiciones del plan de pago que aceptaste${
+            params.aceptoEn ? ` el <strong style="color:#303030;">${escapeHtml(params.aceptoEn)}</strong>` : ""
+          }, los <strong style="color:#303030;">${fmtUsd(params.abonado)}</strong> abonados no se devuelven.</p>`
+        : `<p style="margin:0;font-size:13.5px;line-height:1.6;color:#5A5650;">No tenemos ningún pago tuyo registrado para esta compra.</p>`;
 
   const html = envolverCorreo(`
     <tr>

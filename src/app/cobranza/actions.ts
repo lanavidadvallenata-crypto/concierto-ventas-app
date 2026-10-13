@@ -497,6 +497,112 @@ export async function anularPorFaltaDePago(grupoId: string): Promise<Resultado> 
 }
 
 /**
+ * Anular una compra en plan que NO está vencida: compra duplicada, comprador
+ * que se arrepintió, prueba del equipo. Solo admin, con motivo escrito.
+ *
+ * Nació el 13 de octubre: la primera compra Preferencial fue una prueba en
+ * cuotas y no había ningún botón para deshacerla — al estar en plan no sale
+ * en la cola de Finanzas, y en Cobranza "Anular" solo aparece vencida. Se
+ * resolvió por SQL esa vez; esto es para que no haga falta la próxima.
+ *
+ * Diferencias con anularPorFaltaDePago, a propósito:
+ *   · Se permite aunque haya un pago anotado sin confirmar: el admin ya
+ *     decidió, y la pantalla le avisa cuánto hay en camino antes de apretar.
+ *   · El correo NO dice "lo abonado no se devuelve": eso aquí lo decide el
+ *     equipo caso por caso y se habla por WhatsApp.
+ *   · El plan queda "anulado" (no "vencido"), con el motivo en las notas,
+ *     para que en el dashboard no cuente como impago.
+ */
+export async function anularCompraEnPlan(input: unknown): Promise<Resultado> {
+  const parsed = z
+    .object({ grupoId: z.string().uuid(), motivo: z.string().trim().min(5, "Escribe el motivo (mínimo 5 letras).").max(200) })
+    .safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  const { grupoId, motivo } = parsed.data;
+
+  const { user, error } = await requiereEquipo(["admin"]);
+  if (!user) return { ok: false, error: error! };
+
+  const service = createServiceClient();
+  const plan = await leerPlanPorGrupo(service, grupoId);
+  if (!plan) return { ok: false, error: "No encontramos el plan de esa compra." };
+  if (plan.estado === "completado") {
+    return { ok: false, error: "Esa compra ya está pagada completa y con QR. Se anula desde Finanzas → Aprobadas → Anular compra." };
+  }
+  if (plan.estado === "anulado" || plan.estado === "vencido") return { ok: false, error: "Esa compra ya estaba anulada." };
+
+  const { data: perfil } = await service.from("perfiles").select("nombre").eq("id", user.id).maybeSingle();
+  const quien = (perfil?.nombre as string | undefined) ?? "admin";
+  const enVuelo = plan.cuotas.filter((c) => c.reportadoEn && !c.verificadoEn);
+
+  const r = await anularPlan(service, {
+    grupoId,
+    por: user.id,
+    motivo: "anulado",
+    nota:
+      `Anulada por ${quien}: ${motivo}. Abonado ${usd(plan.pagado)}.` +
+      (enVuelo.length ? ` Se descartaron ${enVuelo.length} pago(s) anotado(s) sin confirmar.` : ""),
+  });
+  if (!r.anulado) return { ok: false, error: "Ese plan ya estaba anulado o vencido." };
+
+  // Las entradas vuelven al inventario: se rechazan y se liberan las sillas.
+  const { data: tickets } = await service
+    .from("tickets")
+    .select("id, tipo, silla_id, estado_pago, comprador_nombre, comprador_email")
+    .eq("grupo_id", grupoId);
+  const ahora = new Date().toISOString();
+  let liberadas = 0;
+  for (const t of tickets ?? []) {
+    if (t.estado_pago !== "pendiente") continue;
+    const { data: ok } = await service
+      .from("tickets")
+      .update({ estado_pago: "rechazado", verificado_por: user.id, verificado_en: ahora })
+      .eq("id", t.id)
+      .eq("estado_pago", "pendiente")
+      .select("id")
+      .maybeSingle();
+    if (!ok) continue;
+    liberadas++;
+    if (t.silla_id) {
+      await service.from("sillas_vip").update({ estado: "disponible", reservado_hasta: null }).eq("id", t.silla_id);
+    }
+  }
+
+  revalidar();
+
+  let avisoCorreo = " Avísale por WhatsApp.";
+  const comprador = (tickets ?? [])[0];
+  const correo = comprador?.comprador_email as string | null | undefined;
+  if (correo) {
+    try {
+      await enviarCorreoPlanAnulado({
+        destinatario: correo,
+        nombreComprador: String(comprador.comprador_nombre ?? ""),
+        grupoId,
+        montoPendiente: plan.saldo,
+        abonado: plan.pagado,
+        aceptoEn: null,
+        motivo: "por_el_equipo",
+      });
+      avisoCorreo = ` Le avisamos por correo a ${correo}.`;
+    } catch (e) {
+      console.error("Error enviando el correo de anulación:", (e as Error).message);
+      avisoCorreo = ` El correo a ${correo} NO salió — avísale tú por WhatsApp.`;
+    }
+  } else {
+    avisoCorreo = " Esta compra no tiene correo: avísale por WhatsApp.";
+  }
+
+  return {
+    ok: true,
+    aviso:
+      `Compra anulada. ${liberadas} entrada${liberadas === 1 ? "" : "s"} de vuelta a la venta.` +
+      (plan.pagado > 0 ? ` Tiene ${usd(plan.pagado)} abonados: define con el comprador qué se hace con eso.` : "") +
+      avisoCorreo,
+  };
+}
+
+/**
  * Finanzas buscó en el banco el pago anotado y no estaba. La cuota vuelve a
  * "sin pagar", con su fecha, y el cron le vuelve a escribir. Es el único
  * camino para deshacer un reporte equivocado o inventado: sin esto, cualquier
