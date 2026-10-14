@@ -56,7 +56,11 @@ export const ETAPAS: {
   cupo: Record<Tipo, number> | null;
 }[] = [
   // Preferencial nunca tuvo preventa: cupo 0 = va directo a precio regular.
-  { id: "preventa", nombre: "Preventa", base: { vip: 100, preferencial: 70, general: 20 }, fee: 0.1, cupo: { vip: 30, preferencial: 0, general: 50 } },
+  // General: 50 -> 41 (Anita, 14 oct). La preventa General ya se agotó y no
+  // se vuelve a vender. Un grupo pasa 9 entradas de preventa a Preferencial;
+  // al anularlas el conteo baja 9 y, con 50, la web habría reabierto 9
+  // entradas a $22 sola. Con 41 queda cerrada.
+  { id: "preventa", nombre: "Preventa", base: { vip: 100, preferencial: 70, general: 20 }, fee: 0.1, cupo: { vip: 30, preferencial: 0, general: 41 } },
   { id: "regular", nombre: "Precio regular", base: { vip: 140, preferencial: 70, general: 30 }, fee: 0, cupo: null },
 ];
 
