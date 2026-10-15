@@ -9,7 +9,7 @@ import { fechaCorta, usd } from "@/lib/cuotas";
 import { metodoEsEnBs, normalizarReferencia, validarReferencia } from "@/lib/pagos";
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR } from "@/lib/enviar-qr";
-import { obtenerAsiento } from "@/lib/asiento";
+import { lineasDeAsientos, obtenerAsiento } from "@/lib/asiento";
 import type { Tipo } from "@/lib/precios";
 
 type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
@@ -312,10 +312,13 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
 
     const correo = primero?.comprador_email as string | null | undefined;
     if (correo) {
+      const asientos = await lineasDeAsientos(service, String(primero.tipo), lista.map((t) => t.silla_id as string | null));
       try {
         await enviarCorreoCuotaVerificada({
           destinatario: correo,
           nombreComprador: String(primero.comprador_nombre),
+          asientos,
+          cantidad: lista.length,
           grupoId,
           etiquetaCuota: queSeAprobo,
           montoVerificado: montoTotal,

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarCorreoPendiente } from "@/lib/enviar-qr";
+import { lineasDeAsientos } from "@/lib/asiento";
 import { codigoCompra } from "@/lib/compra";
 import { liberarSillasVencidas, sillasSonDeZona } from "@/lib/mapa-vip";
 import { conAsiento, cotizarCompra, MAX_POR_COMPRA, MAX_SILLAS_POR_COMPRA, TIPOS, type CotizacionCompra, type DisponibilidadEtapa, type Tipo } from "@/lib/precios";
@@ -528,6 +529,8 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
   revalidatePath("/dashboard");
 
   let avisoEmail: string | undefined = avisoPlan;
+  // Mesa y sillas en el correo (vacío para General o si no se pudo leer).
+  const asientos = await lineasDeAsientos(service, v.tipo, sillaIds);
   try {
     await enviarCorreoPendiente({
       destinatario: v.compradorEmail,
@@ -541,6 +544,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
       referencia: v.referenciaPago,
       grupoId,
       plan: planCreado,
+      asientos,
     });
   } catch (e) {
     console.error("Error enviando correo de compra recibida:", (e as Error).message);

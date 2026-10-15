@@ -9,7 +9,7 @@ import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, envia
 import { anularPlan, leerPlanPorGrupo, planConSaldo, verificarCuota } from "@/lib/abona618";
 import { fechaCorta, usd } from "@/lib/cuotas";
 import { guardarTasaManual } from "@/lib/tasa";
-import { obtenerAsiento } from "@/lib/asiento";
+import { lineasDeAsientos, obtenerAsiento } from "@/lib/asiento";
 import { ETIQUETA_METODO } from "@/lib/formato";
 import type { Tipo } from "@/lib/precios";
 
@@ -186,10 +186,13 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
       if (r.yaEstaba) {
         aviso = `Esa cuota ya estaba aprobada. ${aviso}`;
       } else if (correo) {
+        const asientos = await lineasDeAsientos(service, grupo.tickets[0].tipo, grupo.tickets.map((t) => t.silla_id));
         try {
           await enviarCorreoCuotaVerificada({
             destinatario: correo,
             nombreComprador: grupo.tickets[0].comprador_nombre,
+            asientos,
+            cantidad: grupo.tickets.length,
             grupoId,
             etiquetaCuota: r.cuota.etiqueta,
             montoVerificado: r.cuota.montoUsd,

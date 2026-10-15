@@ -56,6 +56,87 @@ export function describirAsiento(tipo: Tipo | string, asiento: Asiento | null): 
   return tipo === "preferencial" ? `Preferencial · ${base}` : base;
 }
 
+// ---------------------------------------------------------------------------
+// Puestos apartados de una compra, para mostrarlos ANTES del QR (Anita, 15 oct:
+// quien paga en cuotas pasaba seis semanas sin ver por escrito qué mesa y qué
+// sillas apartó; solo salían en el correo final de los QR).
+//
+// Dos consultas en total, no una por silla. Si algo no cuadra (la base falla,
+// falta una silla o su mesa) devuelve null y quien llama NO muestra nada:
+// un "Sillas 3 y 4" cuando compró tres sería peor que no decir nada.
+// ---------------------------------------------------------------------------
+export async function obtenerAsientos(
+  service: SupabaseClient,
+  sillaIds: readonly (string | null | undefined)[]
+): Promise<Asiento[] | null> {
+  const ids = [...new Set(sillaIds.filter((x): x is string => Boolean(x)))];
+  if (ids.length === 0) return [];
+  try {
+    const { data: sillas, error } = await service.from("sillas_vip").select("id, numero, mesa_id").in("id", ids);
+    if (error) {
+      console.error("Error leyendo las sillas de la compra:", error.message);
+      return null;
+    }
+    if (!sillas || sillas.length !== ids.length) return null;
+
+    const mesaIds = [...new Set(sillas.map((s) => String(s.mesa_id)))];
+    const { data: mesas, error: mesaError } = await service.from("mesas_vip").select("id, numero, fila").in("id", mesaIds);
+    if (mesaError) {
+      console.error("Error leyendo las mesas de la compra:", mesaError.message);
+      return null;
+    }
+    const mesaPorId = new Map((mesas ?? []).map((m) => [String(m.id), m]));
+
+    const asientos: Asiento[] = [];
+    for (const s of sillas) {
+      const m = mesaPorId.get(String(s.mesa_id));
+      if (!m) return null;
+      asientos.push({ fila: String(m.fila), mesaNumero: Number(m.numero), sillaNumero: Number(s.numero) });
+    }
+    return asientos;
+  } catch (e) {
+    console.error("Error leyendo los puestos de la compra:", (e as Error).message);
+    return null;
+  }
+}
+
+/** "3", "3 y 4", "3, 4 y 5" */
+function listaNumeros(nums: number[]): string {
+  if (nums.length <= 1) return nums.join("");
+  return `${nums.slice(0, -1).join(", ")} y ${nums[nums.length - 1]}`;
+}
+
+/** Una línea por mesa, en orden de fila, mesa y silla:
+ *  "Preferencial · Fila 1 · Mesa 4 · Sillas 3, 4 y 5" / "Fila A · Mesa 2 · Silla 7". */
+export function resumirAsientos(tipo: Tipo | string, asientos: readonly Asiento[]): string[] {
+  const porMesa = new Map<string, { fila: string; mesa: number; sillas: number[] }>();
+  for (const a of asientos) {
+    const clave = `${a.fila}|${a.mesaNumero}`;
+    const grupo = porMesa.get(clave) ?? { fila: a.fila, mesa: a.mesaNumero, sillas: [] };
+    grupo.sillas.push(a.sillaNumero);
+    porMesa.set(clave, grupo);
+  }
+  return [...porMesa.values()]
+    .sort((x, y) => x.fila.localeCompare(y.fila, "es", { numeric: true }) || x.mesa - y.mesa)
+    .map((g) => {
+      const sillas = [...new Set(g.sillas)].sort((a, b) => a - b);
+      const base = `Fila ${g.fila} · Mesa ${g.mesa} · ${sillas.length === 1 ? "Silla" : "Sillas"} ${listaNumeros(sillas)}`;
+      return tipo === "preferencial" ? `Preferencial · ${base}` : base;
+    });
+}
+
+/** Lo que muestran el correo y la página de compra. [] = no mostrar nada
+ *  (General, sin sillas, o no se pudo leer con certeza). Nunca lanza. */
+export async function lineasDeAsientos(
+  service: SupabaseClient,
+  tipo: Tipo | string,
+  sillaIds: readonly (string | null | undefined)[]
+): Promise<string[]> {
+  if (!conAsiento(tipo as Tipo)) return [];
+  const asientos = await obtenerAsientos(service, sillaIds);
+  return asientos && asientos.length > 0 ? resumirAsientos(tipo, asientos) : [];
+}
+
 /** Lo que se imprime en la entrada, el correo y la puerta para cualquier tipo. */
 export function descripcionEntrada(tipo: Tipo | string, asiento: Asiento | null): string {
   if (!conAsiento(tipo as Tipo)) return "Acceso general · sin asiento asignado";

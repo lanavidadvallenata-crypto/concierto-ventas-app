@@ -125,6 +125,23 @@ function clienteResend(motivo: string) {
 const fmtUsd = (n: number) => `$${n.toFixed(2)}`;
 const fmtBs = (n: number) => `Bs ${n.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Mesa y sillas de la compra, dentro de la caja beige del correo. Sin líneas
+// no se pinta nada: el correo queda exactamente como antes.
+function bloqueAsientos(lineas: string[] | undefined, cantidad: number) {
+  if (!lineas || lineas.length === 0) return "";
+  const titulo = cantidad === 1 ? "Tu puesto" : "Tus puestos";
+  return `<div style="margin-top:8px;border-top:1px solid #E4DDD0;padding-top:6px;">
+      <div style="font-size:12.5px;color:#5A5650;">${titulo}</div>
+      ${lineas
+        .map(
+          (l) =>
+            // "4 y 5" no se separa en dos renglones.
+            `<div style="font-size:14px;font-weight:700;color:#3D0507;line-height:1.5;">${escapeHtml(l).replace(/ y (\d+)$/, "&nbsp;y&nbsp;$1")}</div>`
+        )
+        .join("")}
+    </div>`;
+}
+
 export async function enviarCorreoPendiente(params: {
   destinatario: string;
   nombreComprador: string;
@@ -146,6 +163,9 @@ export async function enviarCorreoPendiente(params: {
   // tu pago inicial es lo que debe decir"). Sin este parámetro el correo sale
   // exactamente igual que siempre, que es como se queda para el contado.
   plan?: { inicialUsd: number; inicialBs?: number | null };
+  /** Mesa y sillas elegidas, ya redactadas (lineasDeAsientos). Vacío o
+   *  ausente = no se muestra el bloque. */
+  asientos?: string[];
 }) {
   const resend = clienteResend("el correo de bienvenida");
   const plan = params.plan;
@@ -167,7 +187,7 @@ export async function enviarCorreoPendiente(params: {
       ? `<div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
           <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${etiquetaTipo(params.tipo, cantidad)}</strong>${
           desglose || plan ? "" : ` · ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}`
-        }${desglose}${
+        }${bloqueAsientos(params.asientos, cantidad)}${desglose}${
           plan
             ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-top:1px solid #E4DDD0;padding-top:6px;">
                 ${filaMonto("Total de tu compra", fmtUsd(params.totalUsd ?? 0))}
@@ -513,6 +533,9 @@ export async function enviarCorreoCuotaVerificada(params: {
    *  dice al comprador (Anita, 12 oct): si lo sabe, espera hasta el último día
    *  y pide prórroga. Ve su fecha y nada más. */
   proximaFecha: string | null;
+  /** Mesa y sillas apartadas (lineasDeAsientos). Vacío = no se muestra. */
+  asientos?: string[];
+  cantidad?: number;
 }) {
   const resend = clienteResend("el correo de cuota verificada");
   const codigo = codigoCompra(params.grupoId);
@@ -539,7 +562,9 @@ export async function enviarCorreoCuotaVerificada(params: {
             </td>
           </tr>
         </table>
-        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, confirmamos tu pago de <strong>${fmtUsd(params.montoVerificado)}</strong> (${escapeHtml(params.etiquetaCuota)}). Tu entrada sigue apartada a tu nombre.</p>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, confirmamos tu pago de <strong>${fmtUsd(params.montoVerificado)}</strong> (${escapeHtml(params.etiquetaCuota)}). ${
+          (params.cantidad ?? 1) > 1 ? "Tus entradas siguen apartadas" : "Tu entrada sigue apartada"
+        } a tu nombre.</p>
 
         <div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -554,7 +579,7 @@ export async function enviarCorreoCuotaVerificada(params: {
           </table>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">
             ${filas}
-          </table>
+          </table>${bloqueAsientos(params.asientos, params.cantidad ?? 1)}
           <div style="color:#8A8782;font-size:12.5px;margin-top:8px;">Código de compra: <strong style="color:#303030;letter-spacing:1px;">${codigo}</strong></div>
         </div>
 

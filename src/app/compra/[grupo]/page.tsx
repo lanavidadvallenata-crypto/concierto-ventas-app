@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import QRCode from "qrcode";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerTasaActual } from "@/lib/tasa";
-import { obtenerAsiento, descripcionEntrada } from "@/lib/asiento";
+import { obtenerAsiento, descripcionEntrada, lineasDeAsientos } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import BotonSoporte from "@/components/BotonSoporte";
@@ -76,6 +76,12 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
   const verificadas = tickets.filter((t) => t.estado_pago === "verificado" && t.qr_token);
   const pendientes = tickets.filter((t) => t.estado_pago === "pendiente");
   const rechazadas = tickets.filter((t) => t.estado_pago === "rechazado");
+  // Mesa y sillas apartadas mientras la compra no tiene QR (plan en cuotas o
+  // pago en verificación). Con QR, cada entrada ya muestra su asiento abajo.
+  const puestosApartados =
+    verificadas.length === 0 && pendientes.length > 0
+      ? await lineasDeAsientos(service, pendientes[0].tipo, pendientes.map((t) => t.silla_id))
+      : [];
 
   const filas = await Promise.all(
     verificadas.map(async (t, i) => {
@@ -109,6 +115,24 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
               : `${verificadas.length} ${verificadas.length === 1 ? "entrada" : "entradas"}`}
           </p>
         </div>
+
+        {puestosApartados.length > 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm px-5 py-4">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[#898477]">
+              {pendientes.length === 1 ? "Tu puesto apartado" : "Tus puestos apartados"}
+            </p>
+            {puestosApartados.map((linea) => (
+              <p key={linea} className="font-bold text-[#3D0507] leading-snug mt-1">
+                {linea.replace(/ y (\d+)$/, "\u00a0y\u00a0$1")}
+              </p>
+            ))}
+            <p className="text-xs text-neutral-600 mt-2">
+              {plan
+                ? "Quedan a tu nombre mientras completas tu plan de pago. Tus QR llegan cuando pagues el total."
+                : "Quedan a tu nombre mientras confirmamos tu pago."}
+            </p>
+          </div>
+        ) : null}
 
         {plan ? (
           <PlanComprador

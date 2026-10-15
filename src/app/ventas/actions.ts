@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarCorreoPendiente } from "@/lib/enviar-qr";
+import { lineasDeAsientos } from "@/lib/asiento";
 import { conAsiento, MAX_POR_COMPRA, TIPOS, type Tipo } from "@/lib/precios";
 import { metodosParaCanal } from "@/lib/pagos";
 import { registrarVentaInterna } from "@/lib/registrar-venta";
@@ -92,6 +93,7 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
   revalidatePath("/comprar");
 
   let avisoEmail: string | undefined;
+  const asientos = await lineasDeAsientos(service, v.tipo, sillaIds);
   try {
     await enviarCorreoPendiente({
       destinatario: v.compradorEmail,
@@ -102,6 +104,7 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
       totalBs: res.totalBs,
       referencia: v.referenciaPago || null,
       grupoId: res.grupoId,
+      asientos,
     });
   } catch {
     avisoEmail = "La venta quedó registrada, pero el correo de bienvenida no se pudo enviar — avísale al comprador por WhatsApp que su pago está en verificación.";
