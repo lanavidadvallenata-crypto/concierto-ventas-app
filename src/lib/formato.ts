@@ -21,6 +21,34 @@ export function horaCaracas(iso: string): string {
   });
 }
 
+const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+/**
+ * Cuándo pasó algo, en hora de Venezuela y en palabras que se leen de un
+ * vistazo: "hoy 3:42 p. m.", "ayer 10:05 a. m.", "15 oct · 3:42 p. m.".
+ * `hoy` es el "YYYY-MM-DD" de Venezuela que calcula el servidor: así el
+ * servidor y el navegador escriben lo mismo y no depende del reloj del
+ * teléfono (Anita, 17 oct: "necesito saber si estos pagos son de hoy").
+ */
+export function cuandoCaracas(iso: string, hoy: string): string {
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) return "";
+  const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Caracas", year: "numeric", month: "2-digit", day: "2-digit" }).format(fecha);
+  // La hora se arma a mano con números: cada motor (Node en el servidor,
+  // Safari o Chrome en el teléfono) escribe "p. m." con espacios distintos, y
+  // un texto que no coincide entre servidor y navegador rompe la hidratación.
+  const partes = new Intl.DateTimeFormat("en-US", { timeZone: "America/Caracas", hour: "numeric", minute: "2-digit", hourCycle: "h23" }).formatToParts(fecha);
+  const h24 = Number(partes.find((x) => x.type === "hour")?.value ?? "0") % 24;
+  const min = partes.find((x) => x.type === "minute")?.value ?? "00";
+  const hora = `${h24 % 12 === 0 ? 12 : h24 % 12}:${min} ${h24 < 12 ? "a. m." : "p. m."}`;
+  if (dia === hoy) return `hoy ${hora}`;
+  const [a, m, d] = hoy.split("-").map(Number);
+  const ayer = new Date(Date.UTC(a, m - 1, d - 1)).toISOString().slice(0, 10);
+  if (dia === ayer) return `ayer ${hora}`;
+  const [, mm, dd] = dia.split("-").map(Number);
+  return `${dd} ${MESES_CORTOS[mm - 1]} · ${hora}`;
+}
+
 export const ETIQUETA_METODO: Record<string, string> = {
   pago_movil: "Pago móvil",
   transferencia: "Transferencia",

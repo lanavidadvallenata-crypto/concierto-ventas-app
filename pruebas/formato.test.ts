@@ -26,3 +26,18 @@ test("los bolívares se leen como se escriben en Venezuela", () => {
   assert.equal(parsearMontoBs("0"), null);
   assert.equal(parsearMontoBs("1,2,3"), 123, "dos comas: miles, aunque raras");
 });
+
+// Cobranza: cuándo se reportó un pago, en hora de Venezuela (17 oct).
+import { cuandoCaracas } from "../src/lib/formato.ts";
+
+test("cuándo se reportó un pago: hoy, ayer o fecha, en hora de Venezuela", () => {
+  // 19:42 UTC = 3:42 p. m. en Caracas (UTC-4).
+  assert.equal(cuandoCaracas("2026-10-17T19:42:00Z", "2026-10-17"), "hoy 3:42 p. m.");
+  assert.equal(cuandoCaracas("2026-10-16T14:05:00Z", "2026-10-17"), "ayer 10:05 a. m.");
+  assert.equal(cuandoCaracas("2026-10-15T19:42:00Z", "2026-10-17"), "15 oct · 3:42 p. m.");
+  // 02:30 UTC del 18 todavía es el 17 a las 10:30 p. m. en Venezuela.
+  assert.equal(cuandoCaracas("2026-10-18T02:30:00Z", "2026-10-17"), "hoy 10:30 p. m.");
+  // Ayer cruzando de mes.
+  assert.equal(cuandoCaracas("2026-10-31T15:00:00Z", "2026-11-01"), "ayer 11:00 a. m.");
+  assert.equal(cuandoCaracas("no-es-fecha", "2026-10-17"), "");
+});

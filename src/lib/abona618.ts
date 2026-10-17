@@ -1127,3 +1127,81 @@ export async function resumenPlanes(
 
   return r;
 }
+
+// ---------------------------------------------------------------------------
+// Planes caídos, uno por uno (Anita, 17 oct: "en el dashboard, donde dice
+// caídos, necesito ver los detalles"). El resumen solo da cuántos y cuánto
+// quedó abonado; aquí va quién, qué compró, cuánto pagó, cuándo se cayó,
+// quién lo anuló y por qué. Solo lectura.
+// ---------------------------------------------------------------------------
+export type PlanCaido = {
+  grupoId: string;
+  estado: "vencido" | "anulado";
+  tipo: string;
+  cantidad: number;
+  totalUsd: number;
+  abonadoUsd: number;
+  creadoEn: string | null;
+  anuladoEn: string | null;
+  anuladoPor: string | null;
+  notas: string | null;
+  compradorNombre: string | null;
+  compradorEmail: string | null;
+  compradorTelefono: string | null;
+};
+
+export async function listarCaidos(service: SupabaseClient): Promise<{ caidos: PlanCaido[]; error: string | null }> {
+  const planes = await seleccionarTodo<Record<string, unknown>>(
+    service,
+    "planes_pago",
+    "id, grupo_id, estado, tipo, cantidad, total_usd, creado_en, anulado_en, anulado_por, notas",
+    (q) => q.in("estado", ["vencido", "anulado"])
+  );
+  if (planes.error) return { caidos: [], error: planes.error };
+  if (planes.data.length === 0) return { caidos: [], error: null };
+
+  const planIds = planes.data.map((p) => String(p.id));
+  const grupoIds = planes.data.map((p) => String(p.grupo_id));
+  const [cuotas, tickets] = await Promise.all([
+    seleccionarTodo<Record<string, unknown>>(service, "cuotas", "plan_id, monto_usd, verificado_en", (q) => q.in("plan_id", planIds)),
+    seleccionarTodo<Record<string, unknown>>(
+      service,
+      "tickets",
+      "grupo_id, comprador_nombre, comprador_email, comprador_telefono",
+      (q) => q.in("grupo_id", grupoIds)
+    ),
+  ]);
+  if (cuotas.error || tickets.error) return { caidos: [], error: cuotas.error ?? tickets.error };
+
+  const abonado = new Map<string, number>();
+  for (const c of cuotas.data) {
+    if (!c.verificado_en) continue;
+    const monto = Number(c.monto_usd);
+    if (!Number.isFinite(monto)) continue;
+    abonado.set(String(c.plan_id), (abonado.get(String(c.plan_id)) ?? 0) + monto);
+  }
+  const comprador = new Map<string, Record<string, unknown>>();
+  for (const t of tickets.data) if (!comprador.has(String(t.grupo_id))) comprador.set(String(t.grupo_id), t);
+
+  const caidos: PlanCaido[] = planes.data.map((p) => {
+    const t = comprador.get(String(p.grupo_id));
+    return {
+      grupoId: String(p.grupo_id),
+      estado: p.estado === "vencido" ? "vencido" : "anulado",
+      tipo: String(p.tipo),
+      cantidad: Number(p.cantidad) || 0,
+      totalUsd: centavos(Number(p.total_usd) || 0),
+      abonadoUsd: centavos(abonado.get(String(p.id)) ?? 0),
+      creadoEn: (p.creado_en as string | null) ?? null,
+      anuladoEn: (p.anulado_en as string | null) ?? null,
+      anuladoPor: (p.anulado_por as string | null) ?? null,
+      notas: (p.notas as string | null) ?? null,
+      compradorNombre: (t?.comprador_nombre as string | null) ?? null,
+      compradorEmail: (t?.comprador_email as string | null) ?? null,
+      compradorTelefono: (t?.comprador_telefono as string | null) ?? null,
+    };
+  });
+  // Lo más reciente primero.
+  caidos.sort((a, b) => (b.anuladoEn ?? b.creadoEn ?? "").localeCompare(a.anuladoEn ?? a.creadoEn ?? ""));
+  return { caidos, error: null };
+}

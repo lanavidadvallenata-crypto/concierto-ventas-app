@@ -181,6 +181,14 @@ export default function PanelPlanes({
               <p className="text-[11px] text-neutral-400">
                 {resumen.caidos.vencidos} por falta de pago · {resumen.caidos.anulados} anulados a mano
               </p>
+              {resumen.caidos.vencidos + resumen.caidos.anulados > 0 && (
+                <Link
+                  href="/cobranza/caidos"
+                  className="mt-2 h-9 px-3 inline-flex items-center rounded-lg border border-neutral-300 bg-white text-xs font-semibold text-neutral-800"
+                >
+                  Ver detalle →
+                </Link>
+              )}
             </div>
           </div>
         </>

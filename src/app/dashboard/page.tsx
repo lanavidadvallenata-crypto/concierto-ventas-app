@@ -139,6 +139,25 @@ export default async function DashboardPage() {
   }
   const dias = [...porDia.values()].sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-14);
 
+  // Ocupación por zona (Anita, 17 oct: "dice 3 Preferencial vendidos y van
+  // muchas más"). "Vendidos" contaba solo lo pagado al 100 %; las compras en
+  // cuotas siguen en `pendiente` hasta el último pago y no aparecían, aunque
+  // sus sillas ya están tomadas. Ahora el número grande es lo OCUPADO y abajo
+  // se separa qué está pagado, qué va en cuotas y qué espera a Finanzas.
+  const ocupacion = (tipo: string) => {
+    const pagadas = verificados.filter((t) => t.tipo === tipo).length;
+    const enCuotas = pendientes.filter((t) => t.tipo === tipo && t.grupo_id && gruposConPlan.has(String(t.grupo_id))).length;
+    const porVerificar = pendientesSueltos.filter((t) => t.tipo === tipo).length;
+    return { pagadas, enCuotas, porVerificar, ocupadas: pagadas + enCuotas + porVerificar };
+  };
+  const ocVip = ocupacion("vip");
+  const ocPreferencial = ocupacion("preferencial");
+  const ocGeneral = ocupacion("general");
+  const desglose = (o: { pagadas: number; enCuotas: number; porVerificar: number }) =>
+    [`${o.pagadas} pagada${o.pagadas === 1 ? "" : "s"}`, o.enCuotas ? `${o.enCuotas} en cuotas` : "", o.porVerificar ? `${o.porVerificar} por verificar` : ""]
+      .filter(Boolean)
+      .join(" · ");
+
   const vendidosTotal = verificados.length;
   const aforoTotalEntradas = aforoVip + aforoPreferencial + aforoGeneral;
   const pctVendido = aforoTotalEntradas > 0 ? Math.round((vendidosTotal / aforoTotalEntradas) * 1000) / 10 : 0;
@@ -174,8 +193,11 @@ export default async function DashboardPage() {
               )}
             </div>
             <div className="text-right">
-              <p className="text-xs text-neutral-500">{vendidosTotal} de {aforoTotalEntradas} entradas</p>
+              <p className="text-xs text-neutral-500">{vendidosTotal} pagadas de {aforoTotalEntradas} entradas</p>
               <p className="text-2xl font-semibold">{pctVendido}%</p>
+              <p className="text-[11px] text-neutral-400">
+                {ocVip.ocupadas + ocPreferencial.ocupadas + ocGeneral.ocupadas} ocupadas contando cuotas
+              </p>
             </div>
           </div>
           <div className="mt-3 h-2 rounded-full bg-neutral-100 overflow-hidden">
@@ -203,27 +225,30 @@ export default async function DashboardPage() {
 
         <div className={`grid gap-3 ${hayPreferencial ? "grid-cols-3" : "grid-cols-2"}`}>
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
-            <p className="text-xs text-neutral-500">VIP vendidos</p>
+            <p className="text-xs text-neutral-500">VIP ocupadas</p>
             <p className="text-2xl font-semibold">
-              {vipVerificados.length} <span className="text-sm font-normal text-neutral-400">/ {aforoVip}</span>
+              {ocVip.ocupadas} <span className="text-sm font-normal text-neutral-400">/ {aforoVip}</span>
             </p>
-            <p className="text-xs text-neutral-400 mt-1 tabular-nums">${fmt(ingresoVip)}{bsAprox(ingresoVip) ? ` · ${bsAprox(ingresoVip)}` : ""}</p>
+            <p className="text-xs text-neutral-600 mt-1">{desglose(ocVip)}</p>
+            <p className="text-xs text-neutral-400 mt-1 tabular-nums">Pagado ${fmt(ingresoVip)}{bsAprox(ingresoVip) ? ` · ${bsAprox(ingresoVip)}` : ""}</p>
           </div>
           {hayPreferencial && (
             <div className="bg-white border border-neutral-200 rounded-xl p-4">
-              <p className="text-xs text-neutral-500">Preferencial vendidos</p>
+              <p className="text-xs text-neutral-500">Preferencial ocupadas</p>
               <p className="text-2xl font-semibold">
-                {preferencialVerificados.length} <span className="text-sm font-normal text-neutral-400">/ {aforoPreferencial}</span>
+                {ocPreferencial.ocupadas} <span className="text-sm font-normal text-neutral-400">/ {aforoPreferencial}</span>
               </p>
-              <p className="text-xs text-neutral-400 mt-1 tabular-nums">${fmt(ingresoPreferencial)}{bsAprox(ingresoPreferencial) ? ` · ${bsAprox(ingresoPreferencial)}` : ""}</p>
+              <p className="text-xs text-neutral-600 mt-1">{desglose(ocPreferencial)}</p>
+              <p className="text-xs text-neutral-400 mt-1 tabular-nums">Pagado ${fmt(ingresoPreferencial)}{bsAprox(ingresoPreferencial) ? ` · ${bsAprox(ingresoPreferencial)}` : ""}</p>
             </div>
           )}
           <div className="bg-white border border-neutral-200 rounded-xl p-4">
-            <p className="text-xs text-neutral-500">General vendidos</p>
+            <p className="text-xs text-neutral-500">General ocupadas</p>
             <p className="text-2xl font-semibold">
-              {generalVerificados.length} <span className="text-sm font-normal text-neutral-400">/ {aforoGeneral}</span>
+              {ocGeneral.ocupadas} <span className="text-sm font-normal text-neutral-400">/ {aforoGeneral}</span>
             </p>
-            <p className="text-xs text-neutral-400 mt-1 tabular-nums">${fmt(ingresoGeneral)}{bsAprox(ingresoGeneral) ? ` · ${bsAprox(ingresoGeneral)}` : ""}</p>
+            <p className="text-xs text-neutral-600 mt-1">{desglose(ocGeneral)}</p>
+            <p className="text-xs text-neutral-400 mt-1 tabular-nums">Pagado ${fmt(ingresoGeneral)}{bsAprox(ingresoGeneral) ? ` · ${bsAprox(ingresoGeneral)}` : ""}</p>
           </div>
         </div>
 

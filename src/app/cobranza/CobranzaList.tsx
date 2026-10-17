@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
 import { registrarPagoDeCuotas, aprobarCuotas, anularPorFaltaDePago, rechazarPagoAnotado, anularCompraEnPlan } from "./actions";
-import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox, formatoUsd, parsearMontoBs } from "@/lib/formato";
+import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, cuandoCaracas, formatoBs, formatoBsAprox, formatoUsd, parsearMontoBs } from "@/lib/formato";
 import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
 import { codigoCompra } from "@/lib/compra";
@@ -463,6 +463,8 @@ export default function CobranzaList({
                               {c.reportadoPor
                                 ? `anotado por ${nombrePorId[c.reportadoPor] ?? "alguien del equipo"}`
                                 : "lo reportó el comprador"}
+                              {" · "}
+                              <span className="font-semibold text-neutral-700">{cuandoCaracas(c.reportadoEn, hoy)}</span>
                             </span>
                             {puedeAprobar && (
                               rechazando === c.cuotaId ? (
