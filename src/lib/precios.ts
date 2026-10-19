@@ -60,7 +60,10 @@ export const ETAPAS: {
   // se vuelve a vender. Un grupo pasa 9 entradas de preventa a Preferencial;
   // al anularlas el conteo baja 9 y, con 50, la web habría reabierto 9
   // entradas a $22 sola. Con 41 queda cerrada.
-  { id: "preventa", nombre: "Preventa", base: { vip: 100, preferencial: 70, general: 20 }, fee: 0.1, cupo: { vip: 30, preferencial: 0, general: 41 } },
+  // 41 -> 40 (Anita, 19 oct): Orianyelis Mercado pasa 1 General de preventa
+  // (ref. 602268) a Preferencial en cuotas. Misma lógica: el cupo baja ANTES
+  // de anular, para que la web no reabra 1 entrada a $22.
+  { id: "preventa", nombre: "Preventa", base: { vip: 100, preferencial: 70, general: 20 }, fee: 0.1, cupo: { vip: 30, preferencial: 0, general: 40 } },
   { id: "regular", nombre: "Precio regular", base: { vip: 140, preferencial: 70, general: 30 }, fee: 0, cupo: null },
 ];
 
