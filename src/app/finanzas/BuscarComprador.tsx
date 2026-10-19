@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, type TicketBuscado } from "./actions";
+import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, reenviarCorreoCompra, type TicketBuscado } from "./actions";
+import { codigoCompra } from "@/lib/compra";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
 import { etiquetaTipo } from "@/lib/precios";
 
@@ -72,9 +74,9 @@ export default function BuscarComprador() {
     setResultados(res.tickets);
   }
 
-  async function accion(t: TicketBuscado, tipo: "reenviar" | "reabrir") {
+  async function accion(t: TicketBuscado, tipo: "reenviar" | "reabrir" | "correo1") {
     setAccionando(t.grupoId);
-    const res = tipo === "reenviar" ? await reenviarQR(t.id) : await reabrirPago(t.id);
+    const res = tipo === "reenviar" ? await reenviarQR(t.id) : tipo === "correo1" ? await reenviarCorreoCompra(t.id) : await reabrirPago(t.id);
     setAccionando(null);
     setAvisos((prev) => ({
       ...prev,
@@ -99,7 +101,7 @@ export default function BuscarComprador() {
           value={consulta}
           onChange={(e) => setConsulta(e.target.value)}
           placeholder="Nombre, correo, teléfono o referencia"
-          className="flex-1 h-11 border border-neutral-300 rounded-lg px-3 text-sm"
+          className="flex-1 min-w-0 h-11 border border-neutral-300 rounded-lg px-3 text-sm"
         />
         <button
           type="submit"
@@ -149,9 +151,7 @@ export default function BuscarComprador() {
                       : "QR generado pero el correo no se registró como enviado."}
                   </p>
                 )}
-                {t.estadoPago === "pendiente" && (
-                  <p className="text-xs text-amber-700">Está arriba en la lista de pendientes — verifícalo desde ahí.</p>
-                )}
+                {t.estadoPago === "pendiente" && <DondeEsta t={t} />}
                 <div className="flex gap-2 flex-wrap">
                   {t.estadoPago === "verificado" && t.qrUsados < t.cantidad && t.canal !== "taquilla" && (
                     <button
@@ -171,6 +171,16 @@ export default function BuscarComprador() {
                       className="mt-1 h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
                     >
                       Corregir correo / teléfono
+                    </button>
+                  )}
+                  {t.estadoPago === "pendiente" && t.canal !== "taquilla" && (
+                    <button
+                      type="button"
+                      onClick={() => accion(t, "correo1")}
+                      disabled={ocupado || !t.compradorEmail}
+                      className="mt-1 h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+                    >
+                      {ocupado ? "Enviando…" : "Reenviar correo de compra"}
                     </button>
                   )}
                   {t.estadoPago === "rechazado" && (
@@ -238,5 +248,44 @@ export default function BuscarComprador() {
         </div>
       )}
     </section>
+  );
+}
+
+// Dónde se aprueba una compra pendiente. Antes decía siempre "está arriba en
+// la lista de pendientes", y las compras en cuotas NO están ahí: están en
+// Cobranza. Con 6 Preferenciales de Edimar Salas eso costó media mañana
+// (Anita, 19 oct).
+function DondeEsta({ t }: { t: TicketBuscado }) {
+  const usd = (n: number) => `$${n.toFixed(2)}`;
+  const enCobranza = `/cobranza?q=${encodeURIComponent(codigoCompra(t.grupoId))}`;
+
+  if (t.plan === undefined) {
+    return (
+      <p className="text-xs text-amber-700">
+        No se pudo saber si es en cuotas. Si es de contado, está arriba en la lista de pendientes; si es en cuotas, está en{" "}
+        <Link href={enCobranza} className="underline font-semibold">Cobranza</Link>.
+      </p>
+    );
+  }
+  if (t.plan === null) {
+    return <p className="text-xs text-amber-700">Compra de contado: está arriba en la lista de pendientes — verifícala desde ahí.</p>;
+  }
+  if (t.plan.estado === "anulado" || t.plan.estado === "vencido") {
+    return (
+      <p className="text-xs rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-red-800">
+        Compra en cuotas con el plan <strong>{t.plan.estado === "anulado" ? "anulado" : "caído por falta de pago"}</strong>. Pagó{" "}
+        {usd(t.plan.pagadoUsd)} de {usd(t.plan.totalUsd)}. No se aprueba desde aquí: consúltalo con Anita.
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-sky-900">
+      <strong>Compra en cuotas</strong> · confirmado {usd(t.plan.pagadoUsd)} de {usd(t.plan.totalUsd)}
+      {t.plan.porConfirmarUsd > 0 ? <> · <strong>{usd(t.plan.porConfirmarUsd)} por confirmar en el banco</strong></> : null}. No está
+      en la lista de arriba: sus pagos se confirman en{" "}
+      <Link href={enCobranza} className="underline font-semibold">
+        Cobranza →
+      </Link>
+    </p>
   );
 }

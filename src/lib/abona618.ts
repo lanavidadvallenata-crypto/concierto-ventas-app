@@ -781,7 +781,7 @@ export type ListaCobranza = {
   /** Las cuotas YA COBRADAS de cada compra, por grupo_id. La pantalla las
    *  muestra dentro de la tarjeta de cada persona: sin ellas, el equipo ve lo
    *  que falta pero no lo que ya pagó, y no puede saber si le escribe o no. */
-  pagadasPorGrupo: Record<string, { etiqueta: string; montoUsd: number }[]>;
+  pagadasPorGrupo: Record<string, { etiqueta: string; montoUsd: number; referencia?: string | null }[]>;
   /** true = no se pudo leer la base. La pantalla y el cron tienen que
    *  distinguirlo de "no hay nada que cobrar": un cero que parece
    *  tranquilizador es peor que un error visible. */
@@ -903,7 +903,9 @@ export async function listaDeCobranza(
 
     const pagadas = plan.cuotas
       .filter((c) => c.verificadoEn)
-      .map((c) => ({ etiqueta: c.etiqueta, montoUsd: c.montoUsd }));
+      // La referencia va para que el buscador de Cobranza encuentre a alguien
+      // por la referencia de un pago ya confirmado (la de la inicial, casi siempre).
+      .map((c) => ({ etiqueta: c.etiqueta, montoUsd: c.montoUsd, referencia: c.referenciaPago }));
     if (pagadas.length > 0) lista.pagadasPorGrupo[plan.grupoId] = pagadas;
 
     for (const c of plan.cuotas) {

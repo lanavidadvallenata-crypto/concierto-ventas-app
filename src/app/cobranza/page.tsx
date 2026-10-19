@@ -9,8 +9,9 @@ import CobranzaList from "./CobranzaList";
 
 export const dynamic = "force-dynamic";
 
-export default async function CobranzaPage() {
+export default async function CobranzaPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const perfil = await requerirPerfil();
+  const { q } = await searchParams;
 
   if (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin") {
     return (
@@ -55,6 +56,7 @@ export default async function CobranzaPage() {
           configError={Boolean(config.error)}
           topeVip={config.topeVip}
           tasaEurVes={tasaEurVes}
+          busquedaInicial={typeof q === "string" ? q.slice(0, 80) : ""}
         />
       </main>
     </>

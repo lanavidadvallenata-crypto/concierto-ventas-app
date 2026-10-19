@@ -9,6 +9,7 @@ import { fechaCorta } from "@/lib/cuotas";
 import { codigoCompra } from "@/lib/compra";
 import { DOMINIO_RAIZ } from "@/lib/dominios";
 import { etiquetaTipo, type Tipo } from "@/lib/precios";
+import { coincide } from "@/lib/busqueda";
 
 // Esta pantalla está armada POR PERSONA, no por cuota (Anita, 12 oct).
 //
@@ -104,7 +105,7 @@ type Persona = {
   /** Las cuotas sin cobrar, de la más urgente a la menos. */
   pendientes: CuotaConUrgencia[];
   /** Las que ya están cobradas, para que se vea lo que la persona YA pagó. */
-  pagadas: { etiqueta: string; montoUsd: number }[];
+  pagadas: { etiqueta: string; montoUsd: number; referencia?: string | null }[];
   /** Las que ya reportó y están esperando al banco: el trabajo de Finanzas. */
   anotadas: CuotaConUrgencia[];
   /** La cuota que manda en su tarjeta. */
@@ -206,6 +207,7 @@ export default function CobranzaList({
   configError,
   topeVip,
   tasaEurVes,
+  busquedaInicial = "",
 }: {
   lista: ListaCobranza;
   hoy: string;
@@ -218,7 +220,10 @@ export default function CobranzaList({
   /** Tasa BCV del euro de hoy, para estimar los bolívares de lo que falta por
    *  cobrar. null = no se pudo leer; entonces no se estima nada. */
   tasaEurVes: number | null;
+  /** Lo que viene en ?q= — p. ej. desde "Ver en Cobranza" en Finanzas → Buscar. */
+  busquedaInicial?: string;
 }) {
+  const [busqueda, setBusqueda] = useState(busquedaInicial);
   const [, startTransition] = useTransition();
   const [procesando, setProcesando] = useState<string | null>(null);
   const [avisos, setAvisos] = useState<Record<string, Aviso>>({});
@@ -270,6 +275,30 @@ export default function CobranzaList({
     }
     return [...porGrupo.values()];
   }, [lista]);
+
+  // Buscador (Anita, 19 oct: "me perdí, no la conseguía"). Filtra las
+  // tarjetas sin cambiar de caja: cada persona sigue en su sección, así se ve
+  // de una vez qué hay que hacer con ella.
+  const visibles = useMemo(() => {
+    const q = busqueda.trim();
+    if (!q) return personas;
+    return personas.filter((p) =>
+      coincide(
+        {
+          textos: [
+            p.nombre,
+            p.email,
+            codigoCompra(p.grupoId),
+            ...p.pendientes.map((c) => c.referenciaPago),
+            ...p.pagadas.map((c) => c.referencia),
+          ],
+          telefonos: [p.telefono],
+        },
+        q
+      )
+    );
+  }, [personas, busqueda]);
+  const buscando = busqueda.trim().length > 0;
 
   function poner(id: string, aviso: Aviso) {
     setAvisos((prev) => ({ ...prev, [id]: aviso }));
@@ -346,6 +375,37 @@ export default function CobranzaList({
         </p>
       </header>
 
+      {personas.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex gap-2">
+            <input
+              type="search"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Nombre, teléfono, correo o referencia"
+              aria-label="Buscar en cobranza"
+              className="flex-1 h-11 border border-neutral-300 rounded-lg px-3 text-sm bg-white"
+            />
+            {buscando && (
+              <button
+                type="button"
+                onClick={() => setBusqueda("")}
+                className="h-11 px-3 border border-neutral-300 rounded-lg text-xs font-semibold"
+              >
+                Ver todos
+              </button>
+            )}
+          </div>
+          {buscando && (
+            <p className="text-xs text-neutral-500">
+              {visibles.length === 0
+                ? `Nadie en cuotas coincide con “${busqueda.trim()}”. Si compró de contado, búscalo en Finanzas → Buscar comprador.`
+                : `${visibles.length} ${visibles.length === 1 ? "persona coincide" : "personas coinciden"} de ${personas.length} en cuotas.`}
+            </p>
+          )}
+        </div>
+      )}
+
       {personas.length === 0 && !lista.error && (
         <p className="text-sm text-neutral-500 py-6 text-center">
           No hay nada por cobrar ahora mismo. Nadie debe nada.
@@ -369,7 +429,7 @@ export default function CobranzaList({
 
       {URGENCIAS.map((urgencia) => {
         const sec = SECCIONES[urgencia];
-        const gente = personas.filter((p) => p.urgencia === urgencia);
+        const gente = visibles.filter((p) => p.urgencia === urgencia);
         if (gente.length === 0) return null;
 
         return (

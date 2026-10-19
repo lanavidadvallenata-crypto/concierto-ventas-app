@@ -5,8 +5,8 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generarTokenQR } from "@/lib/qr";
-import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, enviarCorreoPlanAnulado, type EntradaQR } from "@/lib/enviar-qr";
-import { anularPlan, leerPlanPorGrupo, planConSaldo, verificarCuota } from "@/lib/abona618";
+import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, enviarCorreoPlanAnulado, enviarCorreoPendiente, type EntradaQR } from "@/lib/enviar-qr";
+import { anularPlan, leerPlanPorGrupo, leerPlanPorGrupoEstricto, planConSaldo, verificarCuota } from "@/lib/abona618";
 import { fechaCorta, usd } from "@/lib/cuotas";
 import { guardarTasaManual } from "@/lib/tasa";
 import { lineasDeAsientos, obtenerAsiento } from "@/lib/asiento";
@@ -540,6 +540,17 @@ export type TicketBuscado = {
   creadoEn: string;
   qrEnviadoEn: string | null;
   qrUsados: number;
+  /** Plan de cuotas de la compra. null = es de contado. undefined = no se
+   *  pudo leer (la pantalla lo dice en vez de suponer). */
+  plan?: PlanBuscado | null;
+};
+
+export type PlanBuscado = {
+  estado: "al_dia" | "en_mora" | "vencido" | "completado" | "anulado";
+  totalUsd: number;
+  pagadoUsd: number;
+  /** Reportado (por el comprador o anotado por Ventas) y aún sin confirmar en el banco. */
+  porConfirmarUsd: number;
 };
 
 // Búsqueda para atender al comprador que escribe "pagué y no me llegó nada":
@@ -608,7 +619,145 @@ export async function buscarTickets(consulta: string): Promise<{ ok: true; ticke
     });
   }
 
-  return { ok: true, tickets: [...grupos.values()].slice(0, 20) };
+  const encontrados = [...grupos.values()].slice(0, 20);
+
+  // ¿Alguna es en cuotas? Sin esto, una compra en plan salía "Pendiente ·
+  // está arriba en la lista de pendientes", y en esa lista NO está: las
+  // compras en plan viven en Cobranza (caso Edimar Salas, 19 oct). Si la
+  // lectura falla, `plan` queda undefined y la pantalla avisa que no se sabe.
+  const ids = encontrados.map((t) => t.grupoId);
+  if (ids.length > 0) {
+    const { data: planes, error: errorPlanes } = await service
+      .from("planes_pago")
+      .select("id, grupo_id, estado, total_usd")
+      .in("grupo_id", ids);
+    const { data: cuotas, error: errorCuotas } =
+      !errorPlanes && (planes ?? []).length > 0
+        ? await service
+            .from("cuotas")
+            .select("plan_id, monto_usd, verificado_en, reportado_en")
+            .in("plan_id", (planes ?? []).map((p) => p.id as string))
+        : { data: [] as { plan_id: string; monto_usd: number | string; verificado_en: string | null; reportado_en: string | null }[], error: null };
+
+    if (errorPlanes || errorCuotas) {
+      console.error("Buscar: no se pudo saber qué compras son en cuotas —", (errorPlanes ?? errorCuotas)?.message);
+    } else {
+      const pagadoPorPlan = new Map<string, number>();
+      const porConfirmarPorPlan = new Map<string, number>();
+      const sumar = (m: Map<string, number>, k: string, n: number) => m.set(k, Math.round(((m.get(k) ?? 0) + n) * 100) / 100);
+      for (const c of cuotas ?? []) {
+        const k = String(c.plan_id);
+        if (c.verificado_en) sumar(pagadoPorPlan, k, Number(c.monto_usd));
+        else if (c.reportado_en) sumar(porConfirmarPorPlan, k, Number(c.monto_usd));
+      }
+      const planPorGrupo = new Map<string, PlanBuscado>();
+      for (const p of planes ?? []) {
+        planPorGrupo.set(String(p.grupo_id), {
+          estado: p.estado as PlanBuscado["estado"],
+          totalUsd: Number(p.total_usd),
+          pagadoUsd: pagadoPorPlan.get(String(p.id)) ?? 0,
+          porConfirmarUsd: porConfirmarPorPlan.get(String(p.id)) ?? 0,
+        });
+      }
+      for (const t of encontrados) t.plan = planPorGrupo.get(t.grupoId) ?? null;
+    }
+  }
+
+  return { ok: true, tickets: encontrados };
+}
+
+// Reenviar el correo 1 ("Recibimos tu compra") de una compra que sigue
+// pendiente. Caso real (Anita, 19 oct): el comprador escribió mal su correo,
+// Finanzas lo corrigió, y no había forma de mandarle de nuevo la confirmación
+// de su compra: "Reenviar QR" solo existe para compras ya pagadas.
+//
+// Sale el mismo correo que al comprar, con los datos que hay HOY en la base
+// (el correo ya corregido). Si es una compra en cuotas, habla de la inicial,
+// igual que el original. No cambia nada de la compra.
+export async function reenviarCorreoCompra(ticketId: string): Promise<Resultado> {
+  const { user, error } = await requiereFinanzas();
+  if (!user) return { ok: false, error: error! };
+
+  const grupo = await obtenerGrupo(ticketId);
+  if ("error" in grupo) return { ok: false, error: grupo.error };
+
+  const pendientes = grupo.tickets.filter((t) => t.estado_pago === "pendiente");
+  if (pendientes.length === 0) {
+    return { ok: false, error: "Esta compra ya no está pendiente. Si ya se verificó, usa “Reenviar QR”." };
+  }
+  const primero = pendientes[0];
+  if (!primero.comprador_email) return { ok: false, error: "Esta compra no tiene correo. Corrígelo primero." };
+
+  const grupoId = primero.grupo_id ?? primero.id;
+  const service = createServiceClient();
+  const lectura = await leerPlanPorGrupoEstricto(service, grupoId);
+  if (!lectura.ok) {
+    // Sin saber si es en cuotas no se manda: el correo de contado le diría
+    // al de cuotas que pagó el total.
+    return { ok: false, error: "No se pudo leer si la compra es en cuotas. Intenta de nuevo en un minuto." };
+  }
+  const plan = lectura.plan;
+  if (plan && (plan.estado === "anulado" || plan.estado === "vencido")) {
+    return { ok: false, error: "Su plan de cuotas está anulado: no se le reenvía nada. Consúltalo con Anita." };
+  }
+  const cuotasEnOrden = plan ? [...plan.cuotas].sort((a, b) => a.orden - b.orden) : [];
+  const inicial = cuotasEnOrden[0] ?? null;
+
+  // Si ya se le confirmó algún pago del plan, el correo 1 ("estamos
+  // verificando tu inicial") sería falso. Se le manda el del estado de su
+  // plan: lo que pagó, lo que falta, cada fecha y el enlace a su página.
+  const verificadas = cuotasEnOrden.filter((c) => c.verificadoEn);
+  if (plan && verificadas.length > 0) {
+    const ultima = verificadas[verificadas.length - 1];
+    try {
+      await enviarCorreoCuotaVerificada({
+        destinatario: primero.comprador_email,
+        nombreComprador: primero.comprador_nombre,
+        grupoId,
+        etiquetaCuota: ultima.etiqueta,
+        montoVerificado: ultima.montoUsd,
+        totalUsd: plan.totalUsd,
+        pagado: plan.pagado,
+        saldo: plan.saldo,
+        pendientes: cuotasEnOrden
+          .filter((c) => !c.verificadoEn)
+          .map((c) => ({ etiqueta: c.etiqueta, monto: c.montoUsd, venceEl: fechaCorta(c.venceEl) })),
+        proximaFecha: plan.proxima ? fechaCorta(plan.proxima.venceEl) : null,
+      });
+    } catch (e) {
+      console.error("Error reenviando correo del plan:", (e as Error).message);
+      return { ok: false, error: "No se pudo enviar el correo. Revisa que esté bien escrito e intenta de nuevo en un minuto." };
+    }
+    console.log(`[reenviar-correo-plan] ${user.email ?? user.id} · compra ${grupoId} → ${primero.comprador_email}`);
+    return {
+      ok: true,
+      aviso: `Le reenviamos a ${primero.comprador_email} el estado de su plan: lleva ${usd(plan.pagado)} de ${usd(plan.totalUsd)}, con sus fechas y el enlace a su página.`,
+    };
+  }
+
+  const totalUsd = Math.round(pendientes.reduce((s, t) => s + Number(t.precio), 0) * 100) / 100;
+  const todosConBs = pendientes.every((t) => t.precio_bs != null);
+  const totalBs = todosConBs ? Math.round(pendientes.reduce((s, t) => s + Number(t.precio_bs), 0) * 100) / 100 : null;
+
+  try {
+    await enviarCorreoPendiente({
+      destinatario: primero.comprador_email,
+      nombreComprador: primero.comprador_nombre,
+      cantidad: pendientes.length,
+      tipo: primero.tipo,
+      totalUsd,
+      totalBs,
+      referencia: primero.referencia_pago,
+      grupoId,
+      plan: inicial ? { inicialUsd: inicial.montoUsd, inicialBs: inicial.montoBs } : undefined,
+    });
+  } catch (e) {
+    console.error("Error reenviando correo de compra:", (e as Error).message);
+    return { ok: false, error: "No se pudo enviar el correo. Revisa que esté bien escrito e intenta de nuevo en un minuto." };
+  }
+
+  console.log(`[reenviar-correo-1] ${user.email ?? user.id} · compra ${grupoId} → ${primero.comprador_email}`);
+  return { ok: true, aviso: `Correo de compra recibida reenviado a ${primero.comprador_email}.` };
 }
 
 export async function actualizarTasaManual(valorTexto: string): Promise<Resultado> {
