@@ -707,6 +707,9 @@ export async function reenviarCorreoCompra(ticketId: string): Promise<Resultado>
   // verificando tu inicial") sería falso. Se le manda el del estado de su
   // plan: lo que pagó, lo que falta, cada fecha y el enlace a su página.
   const verificadas = cuotasEnOrden.filter((c) => c.verificadoEn);
+  // Mesa y sillas apartadas: el comprador las tiene que ver también en el
+  // reenvío (nunca lanza: [] para General o si no se pueden leer).
+  const asientos = await lineasDeAsientos(service, primero.tipo, pendientes.map((t) => t.silla_id));
   if (plan && verificadas.length > 0) {
     const ultima = verificadas[verificadas.length - 1];
     try {
@@ -723,6 +726,8 @@ export async function reenviarCorreoCompra(ticketId: string): Promise<Resultado>
           .filter((c) => !c.verificadoEn)
           .map((c) => ({ etiqueta: c.etiqueta, monto: c.montoUsd, venceEl: fechaCorta(c.venceEl) })),
         proximaFecha: plan.proxima ? fechaCorta(plan.proxima.venceEl) : null,
+        asientos,
+        cantidad: pendientes.length,
       });
     } catch (e) {
       console.error("Error reenviando correo del plan:", (e as Error).message);
@@ -750,6 +755,7 @@ export async function reenviarCorreoCompra(ticketId: string): Promise<Resultado>
       referencia: primero.referencia_pago,
       grupoId,
       plan: inicial ? { inicialUsd: inicial.montoUsd, inicialBs: inicial.montoBs } : undefined,
+      asientos,
     });
   } catch (e) {
     console.error("Error reenviando correo de compra:", (e as Error).message);
