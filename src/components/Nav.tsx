@@ -12,6 +12,8 @@ const ETIQUETA_ROL: Record<string, string> = {
 export default function Nav({ perfil }: { perfil: PerfilActual }) {
   const links = [
     { href: "/ventas", label: "Ventas", roles: ["ventas", "finanzas", "admin"] },
+    // Cotizar cuotas para cualquier mezcla de entradas (Anita, 20 oct).
+    { href: "/cotizar", label: "Cotizar", roles: ["ventas", "finanzas", "admin"] },
     { href: "/taquilla", label: "Taquilla", roles: ["ventas", "finanzas", "admin"] },
     { href: "/finanzas", label: "Finanzas", roles: ["finanzas", "admin"] },
     // Cobranza la ve Ventas también: el cobro de cuotas lo acompaña quien
