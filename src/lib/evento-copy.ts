@@ -9,8 +9,8 @@ export const DESCRIPCION_EVENTO =
 export const LINEUP: string[] = ["Miguel Morales", "Diomedes Dionisio", "Iván Zuleta"];
 
 export const CONTACTO_WHATSAPP_TEXTO = "Escríbenos por WhatsApp";
-// Número de soporte del evento (Anita, 19 sep). El afiche impreso trae
-// 0414-6079247; si se prefiere volver a ese, cambiar aquí y en src/lib/contacto.ts.
+// Número de soporte del evento (Anita, 19 sep). Si cambia, cambiar aquí y en
+// src/lib/contacto.ts.
 export const CONTACTO_WHATSAPP_URL: string | null = "https://wa.me/584241250127";
 
 // Artes finales del evento (20 sep). Cada formato tiene su sitio:
