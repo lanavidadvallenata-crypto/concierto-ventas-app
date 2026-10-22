@@ -158,6 +158,12 @@ export type DatosNuevoPlan = {
   referenciaPago: string | null;
   montoBsInicial: number | null;
   tasaAplicada: number | null;
+  /** Venta en cuotas registrada por el equipo (Ventas, 22 oct): la inicial
+   *  queda anotada por esa persona, así el control cruzado de Cobranza no la
+   *  deja aprobar su propia venta. Sin esto, la reportó el comprador (web). */
+  reportadoPor?: string | null;
+  canalReporte?: CanalReporte | null;
+  notaInicial?: string | null;
 };
 
 /**
@@ -213,6 +219,8 @@ export async function crearPlan(
           referencia_pago: d.referenciaPago,
           monto_bs: d.montoBsInicial,
           tasa_aplicada: d.tasaAplicada,
+          ...(d.reportadoPor ? { reportado_por: d.reportadoPor, canal_reporte: d.canalReporte ?? "otro" } : {}),
+          ...(d.notaInicial ? { nota: d.notaInicial } : {}),
         }
       : {}),
   }));
@@ -247,6 +255,8 @@ export type CuotaGuardada = {
   metodoPago: string | null;
   referenciaPago: string | null;
   montoBs: number | null;
+  /** Bs por $ con que se calculó `montoBs`. */
+  tasaAplicada: number | null;
 };
 
 export type PlanGuardado = {
@@ -266,7 +276,7 @@ export type PlanGuardado = {
 };
 
 const SELECT_CUOTAS =
-  "id, orden, etiqueta, monto_usd, vence_el, reportado_en, reportado_por, canal_reporte, nota, verificado_en, verificado_por, metodo_pago, referencia_pago, monto_bs";
+  "id, orden, etiqueta, monto_usd, vence_el, reportado_en, reportado_por, canal_reporte, nota, verificado_en, verificado_por, metodo_pago, referencia_pago, monto_bs, tasa_aplicada";
 
 function armarPlan(fila: Record<string, unknown>, filasCuotas: Record<string, unknown>[]): PlanGuardado {
   const cuotas: CuotaGuardada[] = filasCuotas
@@ -285,6 +295,7 @@ function armarPlan(fila: Record<string, unknown>, filasCuotas: Record<string, un
       metodoPago: (c.metodo_pago as string | null) ?? null,
       referenciaPago: (c.referencia_pago as string | null) ?? null,
       montoBs: c.monto_bs == null ? null : Number(c.monto_bs),
+      tasaAplicada: c.tasa_aplicada == null ? null : Number(c.tasa_aplicada),
     }))
     .sort((a, b) => a.orden - b.orden);
 
@@ -930,6 +941,8 @@ export type CuotaPorCobrar = {
   etiqueta: string;
   montoUsd: number;
   montoBs: number | null;
+  /** Bs por $ con que se pidió ese pago: la usa "Llegó más dinero". */
+  tasaAplicada: number | null;
   venceEl: string;
   diasParaVencer: number;
   reportadoEn: string | null;
@@ -1103,6 +1116,7 @@ export async function listaDeCobranza(
         etiqueta: c.etiqueta,
         montoUsd: c.montoUsd,
         montoBs: c.montoBs,
+        tasaAplicada: c.tasaAplicada,
         venceEl: c.venceEl,
         diasParaVencer: dias,
         reportadoEn: c.reportadoEn,

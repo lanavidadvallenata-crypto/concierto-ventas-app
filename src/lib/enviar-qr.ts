@@ -6,6 +6,7 @@ import { codigoCompra } from "@/lib/compra";
 import { codigoEntrada } from "@/lib/qr";
 import { TEXTO_HORARIO, avisoFueraDeHorario } from "@/lib/horario";
 import { conAsiento, etiquetaTipo, nombreEntrada, type Tipo } from "@/lib/precios";
+import { fechaCorta } from "@/lib/cuotas";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://lanavidadvallenata.com";
 const LOGO_URL = `${SITE_URL}/logo-618-white.png`;
@@ -162,7 +163,15 @@ export async function enviarCorreoPendiente(params: {
   // que buscar 56 en el banco, no 140 (decisión de Anita, 12 oct — "recibimos
   // tu pago inicial es lo que debe decir"). Sin este parámetro el correo sale
   // exactamente igual que siempre, que es como se queda para el contado.
-  plan?: { inicialUsd: number; inicialBs?: number | null };
+  plan?: {
+    inicialUsd: number;
+    inicialBs?: number | null;
+    /** Venta en cuotas hecha por el equipo (Ventas, 22 oct): el comprador no
+     *  marcó él la casilla, así que el correo le deja por escrito su
+     *  calendario y las condiciones que aceptó con la asesora. */
+    calendario?: { etiqueta: string; montoUsd: number; venceEl: string; esInicial: boolean }[];
+    condiciones?: string[];
+  };
   /** Mesa y sillas elegidas, ya redactadas (lineasDeAsientos). Vacío o
    *  ausente = no se muestra el bloque. */
   asientos?: string[];
@@ -277,6 +286,32 @@ export async function enviarCorreoPendiente(params: {
           </tr>
         </table>
         <p style="margin:8px 0 0;font-size:12px;color:#8A8782;text-align:center;">Guarda este enlace: es tu página de compra.</p>
+      </td>
+    </tr>`
+        : ""
+    }${
+      plan?.calendario?.length || plan?.condiciones?.length
+        ? `<tr>
+      <td style="padding:16px 28px 4px;">
+        ${
+          plan.calendario?.length
+            ? `<p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#3D0507;">Tu plan de pagos</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F1ECE2;border-radius:8px;padding:8px 14px;">
+          ${plan.calendario
+            .map((c) => filaMonto(`${escapeHtml(c.etiqueta)} · ${c.esInicial ? "hoy" : fechaCorta(c.venceEl)}`, fmtUsd(c.montoUsd), c.esInicial))
+            .join("")}
+        </table>`
+            : ""
+        }
+        ${
+          plan.condiciones?.length
+            ? `<p style="margin:14px 0 6px;font-size:13px;font-weight:700;color:#3D0507;">Las condiciones que aceptaste con nuestra asesora</p>
+        <ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.55;color:#5A5650;">
+          ${plan.condiciones.map((c) => `<li style="margin:0 0 4px;">${escapeHtml(c)}</li>`).join("")}
+        </ul>
+        <p style="margin:8px 0 0;font-size:12px;line-height:1.5;color:#8A8782;">Si algo de esto no es lo que hablaste con nosotros, responde este correo o escríbenos por WhatsApp antes de tu próximo pago.</p>`
+            : ""
+        }
       </td>
     </tr>`
         : ""

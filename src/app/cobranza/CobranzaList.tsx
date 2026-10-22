@@ -641,7 +641,12 @@ export default function CobranzaList({
                         disabled={esteProcesando}
                         onClick={() => {
                           setPagoDeMas(p.grupoId);
-                          setMontoRecibido("");
+                          // Si lo anotado en Bs ya es más que la cuota (venta en
+                          // cuotas desde Ventas con pago de más), se precarga.
+                          const a = p.anotadas[0];
+                          const pagoMayor =
+                            a.montoBs != null && a.tasaAplicada && a.montoBs / a.tasaAplicada > a.montoUsd + 0.01;
+                          setMontoRecibido(pagoMayor ? (a.montoBs as number).toLocaleString("es-VE", { minimumFractionDigits: 2 }) : "");
                         }}
                         className="h-11 px-3 rounded-lg border border-neutral-300 bg-white text-sm font-semibold disabled:opacity-50"
                       >
@@ -942,10 +947,11 @@ function PagoDeMas({
   onCancelar: () => void;
 }) {
   const x = persona.anotadas[0];
-  const enBs = METODOS_EN_BS.has(x.metodoPago ?? "") && x.montoBs != null && x.montoBs > 0;
-  // La tasa con que se le pidió el monto en Bs: la pantalla la deduce de lo
-  // anotado; el servidor usa la tasa guardada en la cuota.
-  const tasa = enBs ? (x.montoBs as number) / x.montoUsd : null;
+  // La tasa con que se le pidió el monto en Bs, la misma que usa el servidor.
+  // No se deduce de lo anotado: en una venta en cuotas de Ventas los Bs
+  // anotados ya son los que pagó de más, y la cuenta daría siempre la cuota.
+  const tasa = x.tasaAplicada && x.tasaAplicada > 0 ? x.tasaAplicada : null;
+  const enBs = METODOS_EN_BS.has(x.metodoPago ?? "") && tasa != null;
   const leido = parsearMontoBs(monto);
   const recibidoUsd = leido == null ? null : tasa ? Math.round((leido / tasa) * 100) / 100 : leido;
   const excedente = recibidoUsd == null ? null : Math.round((recibidoUsd - x.montoUsd) * 100) / 100;
