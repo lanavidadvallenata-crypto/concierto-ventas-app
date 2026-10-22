@@ -442,6 +442,10 @@ export async function enviarCorreoQR(params: {
 // pasó, con el monto y la referencia que reportó, y un botón de WhatsApp con
 // el mensaje ya escrito para que mande el comprobante y Finanzas pueda
 // reabrir la compra.
+// `anulacion`: la compra ya estaba aprobada y tenía QR (se aprobó por error
+// sin el dinero en el banco). Anita, 22 oct: el correo dice "no pudimos
+// verificar tu pago", que su entrada está en pausa y que se comunique por
+// WhatsApp.
 export async function enviarCorreoRechazo(params: {
   destinatario: string;
   nombreComprador: string;
@@ -452,7 +456,9 @@ export async function enviarCorreoRechazo(params: {
   referencia: string | null;
   metodoEtiqueta: string;
   grupoId?: string;
+  motivo?: "rechazo" | "anulacion";
 }) {
+  if (params.motivo === "anulacion") return enviarCorreoEntradaEnPausa(params);
   const resend = clienteResend("el correo de pago rechazado");
   const codigo = params.grupoId ? codigoCompra(params.grupoId) : null;
   const nombre = escapeHtml(params.nombreComprador);
@@ -504,6 +510,82 @@ export async function enviarCorreoRechazo(params: {
     replyTo: respuestasA(),
     to: params.destinatario,
     subject: codigo ? `No pudimos confirmar tu pago · compra ${codigo} — La Navidad Vallenata` : "No pudimos confirmar tu pago — La Navidad Vallenata",
+    html,
+    ...(params.grupoId ? { headers: { "X-Entity-Ref-ID": params.grupoId } } : {}),
+  });
+  if (error) throw new Error(`Resend: ${error.name ?? "error"} — ${error.message}`);
+}
+
+async function enviarCorreoEntradaEnPausa(params: {
+  destinatario: string;
+  nombreComprador: string;
+  cantidad: number;
+  tipo: Tipo;
+  totalUsd: number;
+  totalBs: number | null;
+  referencia: string | null;
+  metodoEtiqueta: string;
+  grupoId?: string;
+}) {
+  const resend = clienteResend("el correo de entrada en pausa");
+  const codigo = params.grupoId ? codigoCompra(params.grupoId) : null;
+  const nombre = escapeHtml(params.nombreComprador);
+  const ref = params.referencia ? escapeHtml(params.referencia) : "sin referencia";
+  const varias = params.cantidad > 1;
+  const mensajeWa = `Hola, soy ${params.nombreComprador}. Me llegó el correo de que ${varias ? "mis entradas están" : "mi entrada está"} en pausa${
+    codigo ? ` (compra ${codigo})` : ""
+  }. Mi pago fue de ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` (${fmtBs(params.totalBs)})` : ""} por ${params.metodoEtiqueta}, referencia ${
+    params.referencia ?? "—"
+  }. Les envío el comprobante.`;
+  const urlWa = urlWhatsAppSoporte(mensajeWa);
+
+  const html = envolverCorreo(`
+    <tr>
+      <td style="padding:32px 28px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td align="center" style="padding-bottom:14px;">
+              <div style="display:inline-block;background-color:#FBE9E7;color:#B00020;font-weight:700;font-size:12px;letter-spacing:0.5px;text-transform:uppercase;border-radius:999px;padding:7px 16px;">No pudimos verificar tu pago</div>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, revisamos tu compra y <strong>no pudimos verificar el pago</strong> con estos datos:</p>
+        <p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
+          <strong>${params.cantidad} entrada${varias ? "s" : ""} ${etiquetaTipo(params.tipo, params.cantidad)}</strong>${codigo ? ` · compra ${codigo}` : ""}<br>
+          Monto: ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}<br>
+          Método: ${escapeHtml(params.metodoEtiqueta)}<br>
+          Referencia: <strong>${ref}</strong>
+        </p>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;"><strong>${
+          varias ? "Tus entradas están en pausa" : "Tu entrada está en pausa"
+        }</strong>: ${varias ? "los códigos QR que te enviamos no sirven" : "el código QR que te enviamos no sirve"} por ahora.</p>
+        <p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:#303030;">Comunícate con nosotros por WhatsApp y envíanos el comprobante del pago (captura o foto) para revisarlo de nuevo. Con el botón de abajo el mensaje ya sale escrito con tus datos:</p>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" style="padding:6px 28px 20px;">
+        <a href="${urlWa}" style="display:inline-block;background-color:#25D366;color:#FFFFFF;font-family:'Poppins',Helvetica,Arial,sans-serif;font-weight:700;font-size:15px;text-decoration:none;border-radius:999px;padding:14px 28px;">Escríbenos por WhatsApp</a>
+        <div style="font-family:'Poppins',Helvetica,Arial,sans-serif;font-size:12px;color:#8A8782;margin-top:10px;">${WHATSAPP_SOPORTE_VISIBLE}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:4px 28px 32px;">
+        <p style="margin:0;font-size:12.5px;line-height:1.6;color:#8A8782;border-top:1px solid #F1ECE2;padding-top:16px;">${
+          conAsiento(params.tipo)
+            ? `Cuando confirmemos el pago ${varias ? "te llegan de nuevo tus entradas" : "te llega de nuevo tu entrada"} al correo. Mientras tanto ${varias ? "las sillas quedan liberadas" : "la silla queda liberada"}: intentaremos asignarte ${varias ? "las mismas" : "la misma"}, y si alguien ${varias ? "las tomó" : "la tomó"}, te ayudamos a elegir otra${varias ? "s" : ""}.`
+            : `Cuando confirmemos el pago ${varias ? "te llegan de nuevo tus entradas" : "te llega de nuevo tu entrada"} al correo.`
+        }</p>
+      </td>
+    </tr>
+  `);
+
+  const { error } = await resend.emails.send({
+    from: remitente(),
+    replyTo: respuestasA(),
+    to: params.destinatario,
+    subject: codigo
+      ? `${varias ? "Tus entradas están" : "Tu entrada está"} en pausa · compra ${codigo} — Navidad Vallenata`
+      : `${varias ? "Tus entradas están" : "Tu entrada está"} en pausa — Navidad Vallenata`,
     html,
     ...(params.grupoId ? { headers: { "X-Entity-Ref-ID": params.grupoId } } : {}),
   });

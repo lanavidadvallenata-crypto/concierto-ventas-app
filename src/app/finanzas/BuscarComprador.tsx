@@ -3,10 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, reenviarCorreoCompra, type TicketBuscado } from "./actions";
+import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, reenviarCorreoCompra, anularCompraVerificada, type TicketBuscado } from "./actions";
 import { codigoCompra } from "@/lib/compra";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
-import { etiquetaTipo } from "@/lib/precios";
+import { conAsiento, etiquetaTipo } from "@/lib/precios";
 
 const ESTADO: Record<TicketBuscado["estadoPago"], { texto: string; clase: string }> = {
   pendiente: { texto: "Pendiente", clase: "bg-amber-100 text-amber-800" },
@@ -17,7 +17,10 @@ const ESTADO: Record<TicketBuscado["estadoPago"], { texto: string; clase: string
 // Para atender al comprador que escribe "pagué y no me llegó nada" o "me
 // rechazaron el pago pero aquí está el comprobante": buscar por nombre,
 // correo, teléfono o referencia, ver el estado, reenviar QR o reabrir.
-export default function BuscarComprador() {
+// Un admin también anula desde aquí una compra aprobada (Anita, 22 oct: con
+// miles de compras, "Aprobadas recientemente" solo muestra las últimas 40 y
+// una aprobada por error sin dinero en el banco no se encontraba).
+export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean }) {
   const router = useRouter();
   const [consulta, setConsulta] = useState("");
   const [cargando, setCargando] = useState(false);
@@ -30,8 +33,26 @@ export default function BuscarComprador() {
   const [nuevoEmail, setNuevoEmail] = useState("");
   const [nuevoTelefono, setNuevoTelefono] = useState("");
   const [identidadConfirmada, setIdentidadConfirmada] = useState(false);
+  // Confirmación de "Anular compra": una compra a la vez.
+  const [anulando, setAnulando] = useState<string | null>(null);
+
+  async function anular(t: TicketBuscado) {
+    setAccionando(t.grupoId);
+    const res = await anularCompraVerificada(t.id);
+    setAccionando(null);
+    setAvisos((prev) => ({
+      ...prev,
+      [t.grupoId]: res.ok ? { tipo: "ok", texto: res.aviso ?? "Compra anulada." } : { tipo: "error", texto: res.error },
+    }));
+    if (res.ok) {
+      setAnulando(null);
+      setResultados((prev) => prev?.map((x) => (x.grupoId === t.grupoId ? { ...x, estadoPago: "rechazado" } : x)) ?? null);
+      router.refresh();
+    }
+  }
 
   function abrirEdicion(t: TicketBuscado) {
+    setAnulando(null);
     setEditando(t.grupoId);
     setNuevoEmail(t.compradorEmail ?? "");
     setNuevoTelefono(t.compradorTelefono ?? "");
@@ -183,6 +204,19 @@ export default function BuscarComprador() {
                       {ocupado ? "Enviando…" : "Reenviar correo de compra"}
                     </button>
                   )}
+                  {esAdmin && t.estadoPago === "verificado" && t.qrUsados === 0 && anulando !== t.grupoId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditando(null);
+                        setAnulando(t.grupoId);
+                      }}
+                      disabled={ocupado}
+                      className="mt-1 h-9 px-3 border border-red-300 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Anular compra
+                    </button>
+                  )}
                   {t.estadoPago === "rechazado" && (
                     <button
                       type="button"
@@ -194,6 +228,9 @@ export default function BuscarComprador() {
                     </button>
                   )}
                 </div>
+                {anulando === t.grupoId && (
+                  <ConfirmarAnulacion t={t} ocupado={ocupado} onAnular={() => anular(t)} onCancelar={() => setAnulando(null)} />
+                )}
                 {editando === t.grupoId && (
                   <div className="mt-1 border border-amber-300 bg-amber-50 rounded-lg p-3 flex flex-col gap-2">
                     <p className="text-xs text-amber-900">
@@ -248,6 +285,64 @@ export default function BuscarComprador() {
         </div>
       )}
     </section>
+  );
+}
+
+// Qué pasa al anular, dicho antes de tocar el botón. Anular SIEMPRE le avisa
+// al comprador (Anita, 22 oct): "no pudimos verificar tu pago, tu entrada está
+// en pausa, comunícate con nosotros" + WhatsApp. Cortesías y patrocinios no
+// tuvieron pago: a esos no les llega ese correo.
+function ConfirmarAnulacion({
+  t,
+  ocupado,
+  onAnular,
+  onCancelar,
+}: {
+  t: TicketBuscado;
+  ocupado: boolean;
+  onAnular: () => void;
+  onCancelar: () => void;
+}) {
+  const sinPago = t.canal === "cortesia" || t.canal === "patrocinio";
+  const leAvisa = !sinPago && !!t.compradorEmail;
+  const varias = t.cantidad > 1;
+  return (
+    <div className="mt-1 border border-red-300 bg-red-50 rounded-lg p-3 flex flex-col gap-2">
+      <p className="text-xs font-semibold text-red-900">
+        Anular la compra de {t.compradorNombre}: {t.cantidad} × {etiquetaTipo(t.tipo, t.cantidad)} · {formatoUsd(t.precio)}
+      </p>
+      <ul className="text-xs text-red-900 list-disc pl-4 flex flex-col gap-0.5">
+        <li>
+          {t.canal === "taquilla"
+            ? varias ? "Las entradas quedan sin efecto." : "La entrada queda sin efecto."
+            : varias ? `Sus ${t.cantidad} QR dejan de servir: en la puerta salen “no válido”.` : "Su QR deja de servir: en la puerta sale “no válido”."}
+        </li>
+        <li>{conAsiento(t.tipo) ? (varias ? "Las sillas vuelven a la venta." : "La silla vuelve a la venta.") : "El cupo vuelve a la venta."}</li>
+        {t.plan && <li>El plan de cuotas se anula con ella.</li>}
+        <li>
+          {leAvisa
+            ? `Le llega un correo a ${t.compradorEmail}: “No pudimos verificar tu pago”, ${varias ? "sus entradas están" : "su entrada está"} en pausa y que se comunique con ustedes, con un botón de WhatsApp.`
+            : sinPago
+            ? "Es una entrada sin pago: no le llega correo. Avísale por WhatsApp."
+            : "No tiene correo: avísale por WhatsApp."}
+        </li>
+        <li>Si después aparece el pago: búscala aquí y toca “Reabrir”.</li>
+      </ul>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onAnular}
+          disabled={ocupado}
+          className="h-9 px-3 bg-red-600 text-white rounded-lg text-xs font-semibold disabled:opacity-50"
+        >
+          {ocupado ? "Anulando…" : leAvisa ? "Sí, anular y avisarle" : "Sí, anular"}
+        </button>
+        <button type="button" onClick={onCancelar} disabled={ocupado} className="h-9 px-3 border border-neutral-300 bg-white rounded-lg text-xs font-semibold">
+          Cancelar
+        </button>
+      </div>
+      <p className="text-[11px] text-red-800">No lo uses para cambios de zona: le llegaría ese correo. Los cambios de zona se hacen como dice el SOP.</p>
+    </div>
   );
 }
 

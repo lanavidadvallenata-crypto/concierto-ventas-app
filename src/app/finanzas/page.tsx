@@ -252,7 +252,7 @@ export default async function FinanzasPage() {
           <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
         )}
 
-        <BuscarComprador />
+        <BuscarComprador esAdmin={perfil.rol === "admin"} />
 
         {perfil.rol === "admin" && <AprobadasList filas={aprobadas} />}
 

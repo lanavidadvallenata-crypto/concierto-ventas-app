@@ -43,10 +43,13 @@ type TicketGrupo = {
   referencia_pago: string | null;
   qr_token: string | null;
   qr_usado: boolean;
+  canal: string | null;
 };
 
 const CAMPOS_GRUPO =
-  "id, grupo_id, vendido_por, tipo, silla_id, comprador_nombre, comprador_email, estado_pago, precio, precio_bs, metodo_pago, referencia_pago, qr_token, qr_usado";
+  "id, grupo_id, vendido_por, tipo, silla_id, comprador_nombre, comprador_email, estado_pago, precio, precio_bs, metodo_pago, referencia_pago, qr_token, qr_usado, canal";
+
+const ETIQUETA_CANAL_ANULADA: Record<string, string> = { cortesia: "Cortesía", patrocinio: "Entrada de patrocinio" };
 
 // Trae todos los tickets de la misma compra que el ticket dado. Los tickets
 // viejos (antes de la compra múltiple) tienen grupo_id = su propio id, así
@@ -795,6 +798,11 @@ export async function actualizarTasaManual(valorTexto: string): Promise<Resultad
 //
 // Es decisión de dueña, no de operación: el rol finanzas no puede.
 // ===========================================================================
+// Anular SIEMPRE avisa al comprador (Anita, 22 oct): "no pudimos verificar tu
+// pago, tu entrada está en pausa, comunícate con nosotros" + botón de
+// WhatsApp. Cortesías y patrocinios no tuvieron un pago que verificar: a esos
+// no se les manda ese correo. Los cambios de zona no pasan por aquí (se
+// anulan por SQL, sin correo: ver el SOP de upgrade de zona).
 export async function anularCompraVerificada(ticketId: string): Promise<Resultado> {
   const { user, rol, error } = await requiereFinanzas();
   if (!user) return { ok: false, error: error! };
@@ -851,6 +859,12 @@ export async function anularCompraVerificada(ticketId: string): Promise<Resultad
   if (anulados.length === 0) return { ok: false, error: "Esa compra ya fue procesada por otra persona." };
 
   const primero = anulados[0];
+  if (primero.canal === "cortesia" || primero.canal === "patrocinio") {
+    return {
+      ok: true,
+      aviso: `${ETIQUETA_CANAL_ANULADA[primero.canal]} de ${primero.comprador_nombre} anulada: ${anulados.length} entrada${anulados.length === 1 ? "" : "s"} sin efecto y cupo liberado. No se le mandó el correo de pago (no hubo pago): avísale por WhatsApp.`,
+    };
+  }
   if (!primero.comprador_email) {
     return { ok: true, aviso: `Compra anulada: ${anulados.length} entrada${anulados.length === 1 ? "" : "s"} sin efecto y cupo liberado. No tiene correo, avísale por WhatsApp.` };
   }
@@ -868,6 +882,7 @@ export async function anularCompraVerificada(ticketId: string): Promise<Resultad
       referencia: primero.referencia_pago,
       metodoEtiqueta: ETIQUETA_METODO[primero.metodo_pago] ?? primero.metodo_pago,
       grupoId: primero.grupo_id ?? primero.id,
+      motivo: "anulacion",
     });
   } catch (e) {
     console.error("Error enviando correo de anulación:", (e as Error).message);
@@ -879,6 +894,6 @@ export async function anularCompraVerificada(ticketId: string): Promise<Resultad
 
   return {
     ok: true,
-    aviso: `Compra de ${primero.comprador_nombre} anulada. ${anulados.length} entrada${anulados.length === 1 ? "" : "s"} sin efecto, cupo liberado y correo enviado.`,
+    aviso: `Compra de ${primero.comprador_nombre} anulada. ${anulados.length} entrada${anulados.length === 1 ? "" : "s"} sin efecto y cupo liberado. Le llegó a ${primero.comprador_email} el correo de "${anulados.length === 1 ? "tu entrada está" : "tus entradas están"} en pausa" con el botón de WhatsApp.`,
   };
 }
