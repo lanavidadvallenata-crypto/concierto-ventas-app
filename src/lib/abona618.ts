@@ -611,6 +611,192 @@ export async function verificarCuota(
 }
 
 /**
+ * Pagó de más en una cuota (Anita, 22 oct: llegaron $60 por una inicial de
+ * $56). El sistema no guarda saldos a favor, y llevar la diferencia a mano es
+ * justo lo que se quiere evitar. Lo que se hace es MOVERLA: la cuota que pagó
+ * sube a lo que llegó y la siguiente baja lo mismo. El total del plan no
+ * cambia, y todo lo que lee las cuotas — recordatorios del cron, correos, la
+ * página del comprador, Cobranza — dice el monto nuevo sin que nadie se acuerde.
+ *
+ * Se mueve ANTES de aprobar, a propósito: si la aprobación falla después, las
+ * cuotas siguen sumando el total y la cuota se aprueba con el botón de siempre.
+ *
+ * Solo cubre lo que pidió Anita: pagos de más que NO alcanzan para la cuota
+ * siguiente entera. Pagar de menos, o tanto de más que cubre otra cuota, no se
+ * mueve solo: se rechaza con la explicación y se resuelve a mano.
+ */
+export async function moverExcedente(
+  service: SupabaseClient,
+  d: {
+    cuotaId: string;
+    /** Lo que llegó al banco. Si vino en bolívares, `recibidoBs` y se convierte
+     *  con la tasa que se le fijó a esa cuota; si no, `recibidoUsd`. */
+    recibidoUsd?: number | null;
+    recibidoBs?: number | null;
+    hoy: string;
+  }
+): Promise<
+  | { ok: true; excedente: number; desde: { etiqueta: string; antes: number; despues: number }; hacia: { etiqueta: string; antes: number; despues: number } }
+  | { ok: false; error: string }
+> {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const usd = (n: number) => `$${n.toFixed(2)}`;
+
+  const { data: fila, error: errorCuota } = await service
+    .from("cuotas")
+    .select("id, plan_id, orden, etiqueta, monto_usd, porcentaje, reportado_en, verificado_en, nota, monto_bs, tasa_aplicada")
+    .eq("id", d.cuotaId)
+    .maybeSingle();
+  if (errorCuota) {
+    console.error("Abona618: no se pudo leer la cuota para mover el excedente —", errorCuota.message);
+    return { ok: false, error: "No se pudo leer la cuota. Intenta de nuevo." };
+  }
+  if (!fila) return { ok: false, error: "No encontramos esa cuota." };
+  if (fila.verificado_en) return { ok: false, error: "Esa cuota ya está aprobada: lo que pagó de más ya no se puede mover desde aquí." };
+  if (!fila.reportado_en) return { ok: false, error: "Esa cuota no tiene un pago anotado. Anótalo primero con su referencia." };
+
+  const { data: planFila, error: errorPlan } = await service.from("planes_pago").select("grupo_id").eq("id", fila.plan_id).maybeSingle();
+  if (errorPlan || !planFila) return { ok: false, error: "No se pudo leer el plan de esa compra. Intenta de nuevo." };
+  const leido = await leerPlanPorGrupoEstricto(service, String(planFila.grupo_id));
+  if (!leido.ok || !leido.plan) return { ok: false, error: "No se pudo leer el plan de esa compra. Intenta de nuevo." };
+  const plan = leido.plan;
+  if (plan.estado !== "al_dia" && plan.estado !== "en_mora") {
+    return { ok: false, error: "Esa compra ya no tiene un plan activo." };
+  }
+
+  // Copias de lo leído: si hay que devolver la cuota a como estaba, se usa
+  // esto y no la fila, que puede ser la misma referencia que se actualiza.
+  const montoX = Number(fila.monto_usd);
+  const ordenX = Number(fila.orden);
+  const etiquetaX = String(fila.etiqueta);
+  const original = {
+    porcentaje: Number(fila.porcentaje),
+    nota: (fila.nota as string | null) ?? null,
+    montoBs: fila.monto_bs == null ? null : Number(fila.monto_bs),
+  };
+
+  let recibido: number | null = null;
+  let recibidoBs: number | null = null;
+  if (d.recibidoBs != null) {
+    const tasa = fila.tasa_aplicada == null ? null : Number(fila.tasa_aplicada);
+    if (!tasa || !(tasa > 0)) {
+      return { ok: false, error: "Ese pago no tiene tasa guardada: escribe lo que llegó en dólares." };
+    }
+    if (!(d.recibidoBs > 0)) return { ok: false, error: "Escribe cuántos bolívares llegaron." };
+    recibidoBs = r2(d.recibidoBs);
+    recibido = r2(recibidoBs / tasa);
+  } else if (d.recibidoUsd != null) {
+    recibido = r2(d.recibidoUsd);
+  }
+  if (recibido == null || !Number.isFinite(recibido) || recibido <= 0) {
+    return { ok: false, error: "Escribe cuánto llegó al banco." };
+  }
+
+  const excedente = r2(recibido - montoX);
+  if (excedente < 0.01) {
+    return {
+      ok: false,
+      error:
+        excedente <= -0.01
+          ? `Llegaron ${usd(recibido)}, menos que los ${usd(montoX)} de ${etiquetaX}. Pagos de menos no se mueven solos: cóbrale la diferencia antes de aprobar.`
+          : `Llegaron ${usd(recibido)}, lo mismo que ${etiquetaX}: apruébala con "Confirmé el dinero en el banco".`,
+    };
+  }
+
+  const siguiente = plan.cuotas.find((c) => c.orden > ordenX && !c.verificadoEn) ?? null;
+  if (!siguiente) {
+    return {
+      ok: false,
+      error: `${etiquetaX} es su último pago: no hay otra cuota de donde descontar los ${usd(excedente)} de más. Aprueba la cuota y devuélvele la diferencia.`,
+    };
+  }
+  if (siguiente.reportadoEn) {
+    return {
+      ok: false,
+      error: `${siguiente.etiqueta} ya tiene un pago anotado. Confirma o rechaza ese pago primero, y después vuelve a intentar con este.`,
+    };
+  }
+  if (r2(siguiente.montoUsd - excedente) < 0.01) {
+    return {
+      ok: false,
+      error: `Los ${usd(excedente)} de más alcanzan para ${siguiente.etiqueta} completa (${usd(siguiente.montoUsd)}). Ese caso no lo mueve el sistema: aprueba esta cuota y anota el pago de ${siguiente.etiqueta} con la misma referencia.`,
+    };
+  }
+
+  const nuevoX = r2(montoX + excedente);
+  const nuevoN = r2(siguiente.montoUsd - excedente);
+  const porcentajeDe = (monto: number) => Math.min(1, Math.max(0.0001, Math.round((monto / plan.totalUsd) * 10000) / 10000));
+  const notaX = [original.nota, `Llegaron ${usd(recibido)}: ${usd(excedente)} de más que se descontaron de ${siguiente.etiqueta} (${d.hoy}).`]
+    .filter(Boolean)
+    .join(" ");
+  const notaN = [siguiente.nota, `Bajó de ${usd(siguiente.montoUsd)} a ${usd(nuevoN)}: ${usd(excedente)} pagados de más en ${etiquetaX} (${d.hoy}).`]
+    .filter(Boolean)
+    .join(" ");
+
+  // Primero la que pagó: si lo segundo falla, se devuelve. Cada UPDATE va
+  // condicionado al monto que se leyó, así dos personas no mueven lo mismo dos veces.
+  const { data: subio, error: errorSubir } = await service
+    .from("cuotas")
+    .update({
+      monto_usd: nuevoX,
+      porcentaje: porcentajeDe(nuevoX),
+      nota: notaX,
+      ...(recibidoBs != null ? { monto_bs: recibidoBs } : {}),
+    })
+    .eq("id", d.cuotaId)
+    .eq("monto_usd", montoX)
+    .is("verificado_en", null)
+    .select("id")
+    .maybeSingle();
+  if (errorSubir) {
+    console.error("Abona618: no se pudo subir la cuota que pagó de más —", errorSubir.message);
+    return { ok: false, error: "No se pudo guardar. Intenta de nuevo." };
+  }
+  if (!subio) return { ok: false, error: "Esa cuota cambió mientras la revisabas. Recarga la pantalla." };
+
+  const { data: bajo, error: errorBajar } = await service
+    .from("cuotas")
+    .update({ monto_usd: nuevoN, porcentaje: porcentajeDe(nuevoN), nota: notaN })
+    .eq("id", siguiente.id)
+    .eq("monto_usd", siguiente.montoUsd)
+    .is("verificado_en", null)
+    .is("reportado_en", null)
+    .select("id")
+    .maybeSingle();
+  if (errorBajar || !bajo) {
+    const { error: errorDevolver } = await service
+      .from("cuotas")
+      .update({
+        monto_usd: montoX,
+        porcentaje: original.porcentaje,
+        nota: original.nota,
+        ...(recibidoBs != null ? { monto_bs: original.montoBs } : {}),
+      })
+      .eq("id", d.cuotaId)
+      .eq("monto_usd", nuevoX)
+      .is("verificado_en", null);
+    if (errorDevolver) {
+      console.error(
+        `Abona618: ${etiquetaX} (${d.cuotaId}) quedó en ${usd(nuevoX)} y ${siguiente.etiqueta} no bajó. REVISAR A MANO: el plan suma ${usd(excedente)} de más.`
+      );
+      return {
+        ok: false,
+        error: `No se pudo terminar: ${etiquetaX} quedó en ${usd(nuevoX)} pero ${siguiente.etiqueta} no bajó. No apruebes nada y avísale a Anita.`,
+      };
+    }
+    console.error("Abona618: no se pudo bajar la cuota siguiente —", errorBajar?.message ?? "cambió mientras tanto");
+    return { ok: false, error: `${siguiente.etiqueta} cambió mientras la revisabas. No se movió nada: recarga la pantalla.` };
+  }
+
+  return {
+    ok: true,
+    excedente,
+    desde: { etiqueta: etiquetaX, antes: montoX, despues: nuevoX },
+    hacia: { etiqueta: siguiente.etiqueta, antes: siguiente.montoUsd, despues: nuevoN },
+  };
+}
+
+/**
  * Finanzas no encontró en el banco un pago que alguien anotó. La cuota vuelve
  * a estar "sin reportar": recupera su fecha, vuelve a su caja de cobranza y
  * el cron le vuelve a escribir.

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
-import { registrarPagoDeCuotas, aprobarCuotas, anularPorFaltaDePago, rechazarPagoAnotado, anularCompraEnPlan } from "./actions";
+import { registrarPagoDeCuotas, aprobarCuotas, aprobarConPagoDeMas, anularPorFaltaDePago, rechazarPagoAnotado, anularCompraEnPlan } from "./actions";
 import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, cuandoCaracas, formatoBs, formatoBsAprox, formatoUsd, parsearMontoBs } from "@/lib/formato";
 import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
@@ -234,6 +234,9 @@ export default function CobranzaList({
   // "Anular compra" (solo admin): compra duplicada, arrepentido, prueba.
   const [anulando, setAnulando] = useState<string | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
+  // "Llegó más dinero": una persona a la vez.
+  const [pagoDeMas, setPagoDeMas] = useState<string | null>(null);
+  const [montoRecibido, setMontoRecibido] = useState("");
 
   const puedeAprobar = miRol === "finanzas" || miRol === "admin";
   const esAdmin = miRol === "admin";
@@ -578,6 +581,21 @@ export default function CobranzaList({
                     </p>
                   )}
 
+                  {pagoDeMas === p.grupoId && p.anotadas.length === 1 && (
+                    <PagoDeMas
+                      persona={p}
+                      monto={montoRecibido}
+                      onMonto={setMontoRecibido}
+                      ocupado={esteProcesando}
+                      onAprobar={(datos) => correr(p.grupoId, async () => {
+                        const r = await aprobarConPagoDeMas(datos);
+                        if (r.ok) setPagoDeMas(null);
+                        return r;
+                      })}
+                      onCancelar={() => setPagoDeMas(null)}
+                    />
+                  )}
+
                   <div className="flex flex-wrap gap-2 pt-0.5">
                     {wa ? (
                       <a
@@ -615,6 +633,19 @@ export default function CobranzaList({
                         {esteProcesando
                           ? "Confirmando…"
                           : `Confirmé ${p.anotadas.length > 1 ? "los pagos" : "el dinero"} en el banco`}
+                      </button>
+                    )}
+                    {p.anotadas.length === 1 && puedeAprobar && pagoDeMas !== p.grupoId && (
+                      <button
+                        type="button"
+                        disabled={esteProcesando}
+                        onClick={() => {
+                          setPagoDeMas(p.grupoId);
+                          setMontoRecibido("");
+                        }}
+                        className="h-11 px-3 rounded-lg border border-neutral-300 bg-white text-sm font-semibold disabled:opacity-50"
+                      >
+                        Llegó más dinero
                       </button>
                     )}
                     {p.anotadas.length > 0 && !puedeAprobar && (
@@ -887,5 +918,97 @@ function FormularioPago({
         {procesando ? "Anotando…" : elegidas.length === 0 ? "Marca al menos una cuota" : `Anotar ${formatoUsd(total)}`}
       </button>
     </form>
+  );
+}
+
+// "Llegó más dinero" (Anita, 22 oct): llegaron $60 por una inicial de $56. La
+// diferencia se descuenta de la cuota siguiente y queda en el sistema: su
+// recordatorio, su página y Cobranza dicen el monto nuevo. La pantalla dice
+// el resultado ANTES de confirmar; el servidor lo vuelve a calcular con los
+// datos de la base y es el que manda.
+function PagoDeMas({
+  persona,
+  monto,
+  onMonto,
+  ocupado,
+  onAprobar,
+  onCancelar,
+}: {
+  persona: Persona;
+  monto: string;
+  onMonto: (v: string) => void;
+  ocupado: boolean;
+  onAprobar: (datos: { cuotaId: string; recibidoUsd: number | null; recibidoBs: number | null }) => void;
+  onCancelar: () => void;
+}) {
+  const x = persona.anotadas[0];
+  const enBs = METODOS_EN_BS.has(x.metodoPago ?? "") && x.montoBs != null && x.montoBs > 0;
+  // La tasa con que se le pidió el monto en Bs: la pantalla la deduce de lo
+  // anotado; el servidor usa la tasa guardada en la cuota.
+  const tasa = enBs ? (x.montoBs as number) / x.montoUsd : null;
+  const leido = parsearMontoBs(monto);
+  const recibidoUsd = leido == null ? null : tasa ? Math.round((leido / tasa) * 100) / 100 : leido;
+  const excedente = recibidoUsd == null ? null : Math.round((recibidoUsd - x.montoUsd) * 100) / 100;
+  const siguiente =
+    persona.pendientes
+      .filter((c) => c.cuotaId !== x.cuotaId && !c.reportadoEn && c.venceEl > x.venceEl)
+      .sort((a, b) => a.venceEl.localeCompare(b.venceEl))[0] ?? null;
+
+  let problema: string | null = null;
+  if (excedente != null) {
+    if (excedente <= -0.01) problema = `Eso es menos que ${x.etiqueta} (${formatoUsd(x.montoUsd)}). Pagos de menos no se mueven solos: cóbrale la diferencia antes de aprobar.`;
+    else if (excedente < 0.01) problema = `Es lo mismo que ${x.etiqueta}: usa "Confirmé el dinero en el banco".`;
+    else if (!siguiente) problema = `${x.etiqueta} es su último pago: no hay de dónde descontar. Aprueba la cuota y devuélvele la diferencia.`;
+    else if (siguiente.montoUsd - excedente < 0.01)
+      problema = `Los ${formatoUsd(excedente)} de más alcanzan para ${siguiente.etiqueta} completa: ese caso se hace a mano.`;
+  }
+  const listo = excedente != null && excedente >= 0.01 && siguiente != null && !problema;
+
+  return (
+    <div className="rounded-lg border border-sky-300 bg-white px-3 py-2.5 space-y-2">
+      <p className="text-xs text-neutral-700">
+        Anotado: <strong>{x.etiqueta}</strong> por {formatoUsd(x.montoUsd)}
+        {enBs ? ` (${formatoBs(x.montoBs as number)})` : ""}. Si en el banco llegó más, escribe cuánto llegó: la diferencia se
+        descuenta de su próxima cuota.
+      </p>
+      <label className="block text-xs font-medium text-neutral-700">
+        {enBs ? "Bolívares que llegaron al banco" : "Dólares que llegaron"}
+        <input
+          inputMode="decimal"
+          value={monto}
+          onChange={(e) => onMonto(e.target.value)}
+          placeholder={enBs ? "Ej: 59.338,20" : "Ej: 60"}
+          className="mt-1 w-full h-11 rounded-md border border-neutral-300 px-3 text-sm"
+        />
+      </label>
+      {enBs && recibidoUsd != null && (
+        <p className="text-[11px] text-neutral-500 tabular-nums">
+          = {formatoUsd(recibidoUsd)} a la tasa con que se le cobró ({tasa!.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Bs por $)
+        </p>
+      )}
+      {problema && <p className="text-xs rounded-md bg-amber-50 border border-amber-200 text-amber-900 px-2 py-1.5">{problema}</p>}
+      {listo && siguiente && (
+        <p className="text-xs rounded-md bg-sky-50 border border-sky-200 text-sky-900 px-2 py-1.5">
+          Llegaron <strong>{formatoUsd(recibidoUsd!)}</strong>: {x.etiqueta} queda en {formatoUsd(recibidoUsd!)} y{" "}
+          <strong>
+            {siguiente.etiqueta} baja de {formatoUsd(siguiente.montoUsd)} a {formatoUsd(Math.round((siguiente.montoUsd - excedente!) * 100) / 100)}
+          </strong>{" "}
+          (vence {fechaCorta(siguiente.venceEl)}). Su recordatorio y su página van a decir el monto nuevo.
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={!listo || ocupado}
+          onClick={() => onAprobar({ cuotaId: x.cuotaId, recibidoUsd: enBs ? null : leido, recibidoBs: enBs ? leido : null })}
+          className="h-11 px-3 rounded-lg bg-marca-secundario text-white text-sm font-semibold disabled:opacity-50"
+        >
+          {ocupado ? "Confirmando…" : listo ? `Aprobar y descontar ${formatoUsd(excedente!)}` : "Aprobar y descontar"}
+        </button>
+        <button type="button" onClick={onCancelar} disabled={ocupado} className="h-11 px-3 rounded-lg border border-neutral-300 bg-white text-sm font-semibold">
+          Cancelar
+        </button>
+      </div>
+    </div>
   );
 }

@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { anularPlan, leerPlanPorGrupo, rechazarReporte, reportarCuota, verificarCuota, type CanalReporte } from "@/lib/abona618";
+import { anularPlan, leerPlanPorGrupo, moverExcedente, rechazarReporte, reportarCuota, verificarCuota, type CanalReporte } from "@/lib/abona618";
 import { enviarCorreoCuotaVerificada, enviarCorreoPlanAnulado } from "@/lib/enviar-qr";
-import { fechaCorta, usd } from "@/lib/cuotas";
+import { fechaCorta, hoyEnVenezuela, usd } from "@/lib/cuotas";
 import { metodoEsEnBs, normalizarReferencia, validarReferencia } from "@/lib/pagos";
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR } from "@/lib/enviar-qr";
@@ -186,6 +186,61 @@ export async function registrarPagoDeCuotas(input: unknown): Promise<Resultado> 
  * tickets a verificado, QR y correo. Si no, sale UN correo de cuota recibida
  * con el estado final y no se entrega nada.
  */
+const pagoDeMasSchema = z
+  .object({
+    cuotaId: z.string().uuid(),
+    recibidoUsd: z.number().positive().max(100000).nullable().optional(),
+    recibidoBs: z.number().positive().max(1_000_000_000).nullable().optional(),
+  })
+  .refine((v) => v.recibidoUsd != null || v.recibidoBs != null, { message: "Escribe cuánto llegó al banco." });
+
+/**
+ * Llegó más dinero que la cuota (Anita, 22 oct: $60 por una inicial de $56).
+ * Mueve la diferencia a la cuota siguiente y DESPUÉS aprueba con el mismo
+ * camino de siempre (`aprobarCuotas`): mismo control cruzado, mismo correo
+ * al comprador, mismo cierre del plan y mismos QR si con eso completa.
+ */
+export async function aprobarConPagoDeMas(input: unknown): Promise<Resultado> {
+  const { user, rol, error } = await requiereEquipo(["finanzas", "admin"]);
+  if (!user) return { ok: false, error: error! };
+  const parsed = pagoDeMasSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Revisa el monto." };
+  const v = parsed.data;
+
+  const service = createServiceClient();
+  // El control cruzado se mira ANTES de mover nada: si esta persona no puede
+  // aprobar, tampoco puede cambiar los montos de la cuota.
+  const { data: cuota } = await service.from("cuotas").select("reportado_por").eq("id", v.cuotaId).maybeSingle();
+  if (!cuota) return { ok: false, error: "No encontramos ese pago. Recarga la pantalla." };
+  if (rol !== "admin" && cuota.reportado_por === user.id) {
+    return { ok: false, error: "Este pago lo anotaste tú. Por control cruzado lo tiene que aprobar otra persona de Finanzas o un admin." };
+  }
+
+  const movido = await moverExcedente(service, {
+    cuotaId: v.cuotaId,
+    recibidoUsd: v.recibidoBs != null ? null : v.recibidoUsd ?? null,
+    recibidoBs: v.recibidoBs ?? null,
+    hoy: hoyEnVenezuela(),
+  });
+  if (!movido.ok) {
+    revalidar();
+    return { ok: false, error: movido.error };
+  }
+
+  const resumen =
+    `Llegaron ${usd(movido.desde.despues)}: ${movido.desde.etiqueta} quedó en ${usd(movido.desde.despues)} y ` +
+    `${movido.hacia.etiqueta} bajó de ${usd(movido.hacia.antes)} a ${usd(movido.hacia.despues)}.`;
+  const aprobado = await aprobarCuotas([v.cuotaId]);
+  revalidar();
+  if (!aprobado.ok) {
+    return {
+      ok: false,
+      error: `${resumen} Pero la aprobación falló: ${aprobado.error} Vuelve a tocar "Confirmé el dinero en el banco".`,
+    };
+  }
+  return { ok: true, aviso: `${resumen} ${aprobado.aviso ?? ""}`.trim() };
+}
+
 export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
   const { user, rol, error } = await requiereEquipo(["finanzas", "admin"]);
   if (!user) return { ok: false, error: error! };
