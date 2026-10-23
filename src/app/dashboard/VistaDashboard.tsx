@@ -202,11 +202,7 @@ export default function VistaDashboard(d: DatosDashboard) {
       </section>
 
       <section className={`${TARJETA} p-5`}>
-        <div className="flex items-baseline justify-between gap-3 mb-3">
-          <h2 className="text-[15px] font-semibold">Ritmo de ventas</h2>
-          <span className="text-xs text-noche-tenue">verificadas por día</span>
-        </div>
-        <VentasChart dias={d.dias} />
+        <VentasChart dias={d.dias} hoy={d.hoy} />
       </section>
 
       <div className="grid gap-5 sm:grid-cols-2">
