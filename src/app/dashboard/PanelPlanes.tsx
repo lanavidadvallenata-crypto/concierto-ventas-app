@@ -41,7 +41,7 @@ export default function PanelPlanes({
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-[15px] font-semibold text-noche-texto">Abona618 · pago en cuotas</h2>
         <span
-          className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full border ${
+          className={`text-xs font-medium px-2.5 py-0.5 rounded-full border ${
             config.activo
               ? "bg-violeta-hondo/30 border-lila/35 text-lila-claro"
               : "bg-white/5 border-white/10 text-noche-tenue"
@@ -166,9 +166,9 @@ export default function PanelPlanes({
                 {resumen.completados.compras} · ${fmt(resumen.completados.valorUsd)}
               </p>
               {resumen.completados.valorUsd > 0 && bs(resumen.completados.valorUsd, tasaEurVes) && (
-                <p className="text-[11px] text-noche-tenue tabular-nums">{bs(resumen.completados.valorUsd, tasaEurVes)}</p>
+                <p className="text-xs text-noche-tenue tabular-nums">{bs(resumen.completados.valorUsd, tasaEurVes)}</p>
               )}
-              <p className="text-[11px] text-noche-tenue">ya suman en el recaudado de arriba</p>
+              <p className="text-xs text-noche-tenue">ya suman en el recaudado de arriba</p>
             </div>
             <div className="pt-3">
               <p className="text-xs text-noche-suave">Caídos</p>
@@ -176,15 +176,15 @@ export default function PanelPlanes({
                 {resumen.caidos.vencidos + resumen.caidos.anulados} · ${fmt(resumen.caidos.abonadoUsd)}
               </p>
               {resumen.caidos.abonadoUsd > 0 && bs(resumen.caidos.abonadoUsd, tasaEurVes) && (
-                <p className="text-[11px] text-noche-tenue tabular-nums">{bs(resumen.caidos.abonadoUsd, tasaEurVes)}</p>
+                <p className="text-xs text-noche-tenue tabular-nums">{bs(resumen.caidos.abonadoUsd, tasaEurVes)}</p>
               )}
-              <p className="text-[11px] text-noche-tenue">
+              <p className="text-xs text-noche-tenue">
                 {resumen.caidos.vencidos} por falta de pago · {resumen.caidos.anulados} anulados a mano
               </p>
               {resumen.caidos.vencidos + resumen.caidos.anulados > 0 && (
                 <Link
                   href="/cobranza/caidos"
-                  className="mt-2 h-10 px-3 inline-flex items-center rounded-lg border border-white/15 bg-white/[0.06] text-xs font-semibold text-noche-texto hover:bg-white/10"
+                  className="mt-2 h-11 px-3 inline-flex items-center rounded-lg border border-white/15 bg-white/[0.06] text-xs font-semibold text-noche-texto hover:bg-white/10"
                 >
                   Ver detalle →
                 </Link>

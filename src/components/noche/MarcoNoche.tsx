@@ -33,25 +33,36 @@ export default function MarcoNoche({ perfil, children }: { perfil: PerfilActual;
 
 /** Encabezado de módulo: sección en mayúsculas espaciadas, título en
  *  Urbanist itálica y una línea de resumen. `derecha` suele ser el
- *  indicador "En vivo". */
+ *  indicador "En vivo".
+ *
+ *  `compacto` es para los módulos de trabajo (Finanzas, Cobranza): el título
+ *  en una sola línea y más chico, para que la primera compra salga arriba sin
+ *  tener que bajar. El título grande queda para el Dashboard, que se mira y no
+ *  se opera (auditoría del 23 oct). */
 export function EncabezadoNoche({
   seccion,
   titulo,
   derecha,
+  compacto = false,
   children,
 }: {
   seccion: string;
   titulo: string;
   derecha?: ReactNode;
+  compacto?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <header className="flex flex-col gap-2">
+    <header className={`flex flex-col ${compacto ? "gap-1" : "gap-2"}`}>
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] font-semibold tracking-[0.28em] uppercase text-noche-tenue">{seccion}</p>
         {derecha}
       </div>
-      <h1 className="font-titular italic font-extrabold text-[40px] leading-[1.02] tracking-[-0.01em] text-noche-texto [text-wrap:balance]">
+      <h1
+        className={`font-titular italic font-extrabold tracking-[-0.01em] text-noche-texto ${
+          compacto ? "text-[26px] leading-tight" : "text-[40px] leading-[1.02] [text-wrap:balance]"
+        }`}
+      >
         {titulo}
       </h1>
       {children && <p className="text-sm text-noche-suave">{children}</p>}

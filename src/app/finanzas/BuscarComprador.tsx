@@ -151,7 +151,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
               <div key={t.grupoId} className="py-3 flex flex-col gap-1.5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold truncate text-noche-texto">{t.compradorNombre}</p>
-                  <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 shrink-0 ${estado.clase}`}>{estado.texto}</span>
+                  <span className={`text-xs font-semibold rounded-full px-2 py-0.5 shrink-0 ${estado.clase}`}>{estado.texto}</span>
                 </div>
                 <p className="text-xs text-noche-suave">
                   {t.cantidad} × {etiquetaTipo(t.tipo, t.cantidad)} · {formatoUsd(t.precio)}
@@ -214,7 +214,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                         setAnulando(t.grupoId);
                       }}
                       disabled={ocupado}
-                      className="mt-1 h-10 px-3 rounded-xl border border-red-400/55 text-red-300 text-xs font-semibold hover:bg-red-500/10 disabled:opacity-50"
+                      className="mt-1 h-11 px-3 rounded-xl border border-red-400/55 text-red-300 text-xs font-semibold hover:bg-red-500/10 disabled:opacity-50"
                     >
                       Anular compra
                     </button>
@@ -224,7 +224,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                       type="button"
                       onClick={() => accion(t, "reabrir")}
                       disabled={ocupado}
-                      className="mt-1 h-10 px-3 rounded-xl border border-amber-300/50 text-amber-100 bg-amber-400/15 text-xs font-semibold hover:bg-amber-400/25 disabled:opacity-50"
+                      className="mt-1 h-11 px-3 rounded-xl border border-amber-300/50 text-amber-100 bg-amber-400/15 text-xs font-semibold hover:bg-amber-400/25 disabled:opacity-50"
                     >
                       {ocupado ? "Reabriendo…" : "Reabrir — mandó el comprobante"}
                     </button>
@@ -266,7 +266,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                         type="button"
                         onClick={() => guardarContacto(t)}
                         disabled={ocupado || !identidadConfirmada || !nuevoEmail.trim() || !nuevoTelefono.trim()}
-                        className="h-10 px-3 rounded-xl bg-violeta-hondo hover:bg-violeta text-white text-xs font-semibold disabled:opacity-50"
+                        className="h-11 px-3 rounded-xl bg-violeta-hondo hover:bg-violeta text-white text-xs font-semibold disabled:opacity-50"
                       >
                         {ocupado ? "Guardando…" : "Guardar datos"}
                       </button>
@@ -339,7 +339,7 @@ function ConfirmarAnulacion({
           type="button"
           onClick={onAnular}
           disabled={ocupado}
-          className="h-10 px-3 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50"
+          className="h-11 px-3 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50"
         >
           {ocupado ? "Anulando…" : leAvisa ? "Sí, anular y avisarle" : "Sí, anular"}
         </button>
@@ -347,7 +347,7 @@ function ConfirmarAnulacion({
           Cancelar
         </button>
       </div>
-      <p className="text-[11px] text-red-200/80">No lo uses para cambios de zona: le llegaría ese correo. Los cambios de zona se hacen como dice el SOP.</p>
+      <p className="text-xs text-red-200/80">No lo uses para cambios de zona: le llegaría ese correo. Los cambios de zona se hacen como dice el SOP.</p>
     </div>
   );
 }

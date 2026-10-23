@@ -154,16 +154,16 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
                       type="button"
                       disabled={enviando}
                       onClick={() => anular(f)}
-                      className="h-9 rounded-lg bg-red-600 hover:bg-red-500 text-white px-3 font-semibold disabled:opacity-60"
+                      className="h-11 rounded-lg bg-red-600 hover:bg-red-500 text-white px-3 font-semibold disabled:opacity-60"
                     >
                       {enviando ? "Anulando…" : "Sí, anular"}
                     </button>
-                    <button type="button" onClick={() => setConfirmando(null)} className="h-9 px-1 text-noche-suave underline">
+                    <button type="button" onClick={() => setConfirmando(null)} className="h-11 px-2 text-noche-suave underline">
                       Cancelar
                     </button>
                   </span>
                 ) : (
-                  <button type="button" onClick={() => setConfirmando(f.grupoId)} className="h-9 px-1 text-red-300 underline">
+                  <button type="button" onClick={() => setConfirmando(f.grupoId)} className="h-11 px-2 text-red-300 underline">
                     Anular compra
                   </button>
                 )}

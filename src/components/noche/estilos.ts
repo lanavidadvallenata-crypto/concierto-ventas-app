@@ -11,4 +11,4 @@ export const CAMPO =
 
 /** Botón secundario (acciones que no mueven dinero). */
 export const BOTON_SUAVE =
-  "h-10 px-3 rounded-xl border border-white/15 bg-white/[0.05] text-xs font-semibold text-noche-texto hover:bg-white/10 disabled:opacity-50";
+  "h-11 px-3 rounded-xl border border-white/15 bg-white/[0.05] text-xs font-semibold text-noche-texto hover:bg-white/10 disabled:opacity-50";

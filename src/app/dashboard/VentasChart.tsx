@@ -73,7 +73,6 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
                   height={h}
                   rx={4}
                   className={esActivo ? "fill-lila-claro" : "fill-violeta"}
-                  opacity={esActivo ? 1 : 0.6}
                 />
                 {/* Zona de toque ancha y de alto completo: en el teléfono una
                     barra de 2px de alto es imposible de acertar con el dedo. */}
@@ -93,7 +92,7 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
                   y={baseY + 14}
                   textAnchor="middle"
                   className={esActivo ? "fill-noche-texto" : "fill-noche-tenue"}
-                  fontSize={10}
+                  fontSize={11}
                   fontWeight={esActivo ? 700 : 400}
                 >
                   {dia}
@@ -113,7 +112,7 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
             {activo.general} General {" · "} {activo.preferencial > 0 && <>{activo.preferencial} Preferencial {" · "}</>}{activo.vip} VIP {" · "} {formatoUsd(activo.usd)}
           </span>
         </p>
-        <p className="text-[11px] text-noche-tenue mt-0.5">Toca cualquier barra para ver ese día.</p>
+        <p className="text-xs text-noche-tenue mt-0.5">Toca cualquier barra para ver ese día.</p>
       </div>
     </div>
   );

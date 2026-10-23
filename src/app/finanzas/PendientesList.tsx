@@ -156,19 +156,19 @@ export default function PendientesList({
                 <h2 className="font-semibold text-[17px] leading-tight truncate text-noche-texto">{c.compradorNombre}</h2>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span
-                    className={`text-[11px] font-semibold rounded-full px-2.5 py-0.5 ${
+                    className={`text-xs font-semibold rounded-full px-2.5 py-0.5 ${
                       conAsiento(c.tipo) ? "bg-violeta-hondo/40 text-lila-claro" : "bg-white/[0.08] text-noche-texto"
                     }`}
                   >
                     {c.cantidad} × {etiquetaTipo(c.tipo, c.cantidad)}
                   </span>
                   {c.enPreventa > 0 && (
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-red-100 bg-[#CE0100]/30 border border-[#CE0100]/60 rounded-full px-2 py-0.5">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-red-100 bg-[#CE0100]/30 border border-[#CE0100]/60 rounded-full px-2 py-0.5">
                       {c.enPreventa === c.cantidad ? "preventa" : `${c.enPreventa} en preventa`}
                     </span>
                   )}
                   {c.asientos.length > 0 && (
-                    <span className="text-[11px] text-noche-suave border border-white/15 rounded-full px-2.5 py-0.5">
+                    <span className="text-xs text-noche-suave border border-white/15 rounded-full px-2.5 py-0.5">
                       {c.asientos.join(" · ")}
                     </span>
                   )}
@@ -182,7 +182,7 @@ export default function PendientesList({
                   </p>
                 )}
                 {enBs && c.tasaAplicada != null && (
-                  <p className="text-[11px] text-noche-tenue tabular-nums">tasa {c.tasaAplicada.toLocaleString("es-VE")}</p>
+                  <p className="text-xs text-noche-tenue tabular-nums">tasa {c.tasaAplicada.toLocaleString("es-VE")}</p>
                 )}
               </div>
             </div>
@@ -193,21 +193,21 @@ export default function PendientesList({
                 el banco y no pueden salir cortados con "…". */}
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[13px]">
               <div className="min-w-0">
-                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Método</dt>
+                <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Método</dt>
                 <dd className="truncate">{ETIQUETA_METODO[c.metodoPago] ?? c.metodoPago}{enBs ? " (Bs)" : " (USD)"}</dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Canal</dt>
+                <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Canal</dt>
                 <dd>{canal}</dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Registro</dt>
+                <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Registro</dt>
                 <dd title={horaCaracas(c.creadoEn)}>
                   {haceCuanto(c.creadoEn, ahora)} · {horaCaracas(c.creadoEn)}
                 </dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Teléfono</dt>
+                <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Teléfono</dt>
                 <dd className="truncate">
                   <a
                     href={`https://wa.me/${c.compradorTelefono.replace(/\D/g, "")}`}
@@ -220,7 +220,7 @@ export default function PendientesList({
                 </dd>
               </div>
               <div className="col-span-2 min-w-0">
-                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Referencia</dt>
+                <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Referencia</dt>
                 <dd className="mt-0.5">
                   {c.referenciaPago ? (
                     <button
@@ -237,7 +237,7 @@ export default function PendientesList({
                 </dd>
               </div>
               <div className="col-span-2 min-w-0">
-                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Correo</dt>
+                <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Correo</dt>
                 <dd className="break-words">{c.compradorEmail ?? <span className="text-red-300 font-medium">sin correo</span>}</dd>
               </div>
             </dl>
@@ -287,7 +287,7 @@ export default function PendientesList({
               )}
             </div>
             {confirmandoRechazo === c.grupoId && !enProceso && (
-              <button type="button" onClick={() => setConfirmandoRechazo(null)} className="h-9 px-2 text-xs text-noche-suave self-end -mt-1.5">
+              <button type="button" onClick={() => setConfirmandoRechazo(null)} className="h-11 px-3 text-xs text-noche-suave self-end -mt-1.5">
                 Cancelar
               </button>
             )}

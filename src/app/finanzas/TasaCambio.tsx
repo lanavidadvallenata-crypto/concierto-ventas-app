@@ -56,7 +56,7 @@ export default function TasaCambio({ tasaActual }: { tasaActual: number | null }
       {mensaje && (
         <p className={`text-xs ${mensaje.tipo === "error" ? "text-red-300" : "text-emerald-300"}`}>{mensaje.texto}</p>
       )}
-      <p className="text-[11px] text-noche-tenue">
+      <p className="text-xs text-noche-tenue">
         Se actualiza sola todos los días a las 8am con el BCV oficial. Usa esto solo para corregirla o adelantarla si
         hace falta.
       </p>

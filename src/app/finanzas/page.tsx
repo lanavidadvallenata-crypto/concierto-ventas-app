@@ -214,7 +214,7 @@ export default async function FinanzasPage() {
   // botones y las consultas de arriba son los mismos.
   return (
     <MarcoNoche perfil={perfil}>
-      <EncabezadoNoche seccion="Finanzas" titulo="Verificación de pagos." derecha={<AutoRefresh intervaloMs={30000} tema="noche" />}>
+      <EncabezadoNoche compacto seccion="Finanzas" titulo="Verificación de pagos." derecha={<AutoRefresh intervaloMs={30000} tema="noche" />}>
         {lista.length === 0 ? (
           "Sin pagos pendientes"
         ) : (
@@ -228,16 +228,14 @@ export default async function FinanzasPage() {
       {comprasEnPlan.length > 0 && (
         <a
           href="/cobranza"
-          className="rounded-[20px] border border-lila/30 bg-violeta-hondo/15 hover:bg-violeta-hondo/25 px-4 py-3.5 flex items-center justify-between gap-3"
+          className="min-h-11 rounded-2xl border border-lila/30 bg-violeta-hondo/15 hover:bg-violeta-hondo/25 px-4 py-2.5 flex items-center justify-between gap-3"
         >
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-lila-claro">
               {comprasEnPlan.length} compra{comprasEnPlan.length === 1 ? "" : "s"} en plan de cuotas
             </span>
-            <span className="block text-xs text-noche-suave leading-snug mt-0.5">
-              No salen en esta lista: su monto no es el total de la compra y no se entrega QR hasta completar. Se
-              cobran y se aprueban en Cobranza.
-            </span>
+            {/* Corto a propósito: antes eran cuatro líneas encima de la cola. */}
+            <span className="block text-xs text-noche-suave leading-snug">No salen aquí: se cobran y se aprueban en Cobranza.</span>
           </span>
           <span className="shrink-0 text-sm font-semibold text-lila-claro">Ir →</span>
         </a>

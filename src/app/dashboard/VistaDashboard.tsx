@@ -73,6 +73,11 @@ const desglose = (o: { pagadas: number; enCuotas: number; porVerificar: number }
 // vería que hay algo ahí.
 const tramo = (n: number, de: number) => (de > 0 && n > 0 ? `max(2px, ${Math.min(100, (n / de) * 100)}%)` : "0%");
 
+// "En cuotas" va rayado y no en otro tono de morado: dos morados de igual
+// brillo se confunden con sol o con daltonismo (auditoría del 23 oct). La
+// raya además dice lo que es: apartada, pero todavía no pagada completa.
+const RAYADO = "bg-[repeating-linear-gradient(135deg,#9b5de0_0_2px,transparent_2px_5px)]";
+
 export default function VistaDashboard(d: DatosDashboard) {
   const r = d.recaudado;
   const bsAprox = (usd: number) => (d.tasaEurVes ? formatoBsAprox(convertirABs(usd, d.tasaEurVes)) : null);
@@ -107,7 +112,7 @@ export default function VistaDashboard(d: DatosDashboard) {
               style={{ width: tramo(r.vendidosTotal, r.aforoTotalEntradas) }}
             />
           </div>
-          <p className="text-[11px] text-noche-tenue mt-2 tabular-nums">
+          <p className="text-xs text-noche-tenue mt-2 tabular-nums">
             {fmt(r.ocupadasTotal)} ocupadas contando cuotas · meta a aforo completo ${fmt(r.metaIngresos)}
           </p>
         </div>
@@ -115,11 +120,11 @@ export default function VistaDashboard(d: DatosDashboard) {
         {r.cuotasCobradas > 0 && (
           <dl className="grid grid-cols-2 gap-3 pt-4 border-t border-white/10">
             <div>
-              <dt className="text-[11px] text-noche-tenue">Cuotas ya cobradas</dt>
+              <dt className="text-xs text-noche-tenue">Cuotas ya cobradas</dt>
               <dd className="text-lg font-semibold tabular-nums">+${fmt(r.cuotasCobradas)}</dd>
             </div>
             <div>
-              <dt className="text-[11px] text-noche-tenue">Total en banco</dt>
+              <dt className="text-xs text-noche-tenue">Total en banco</dt>
               <dd className="text-lg font-semibold tabular-nums text-lila-claro">${fmt(r.enBanco)}</dd>
             </div>
           </dl>
@@ -151,17 +156,17 @@ export default function VistaDashboard(d: DatosDashboard) {
       <section className={`${TARJETA} p-5 flex flex-col gap-5`}>
         <div className="flex items-center justify-between gap-x-4 gap-y-2 flex-wrap">
           <h2 className="text-[15px] font-semibold">Ocupación por zona</h2>
-          <ul className="flex items-center gap-3 text-[11px] text-noche-tenue">
+          <ul className="flex items-center gap-3 text-xs text-noche-tenue">
             <li className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-violeta" />
+              <span className="w-3 h-3 rounded-sm bg-violeta" />
               pagadas
             </li>
             <li className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-lila/50" />
+              <span className={`w-3 h-3 rounded-sm border border-violeta/70 ${RAYADO}`} />
               en cuotas
             </li>
             <li className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              <span className="w-3 h-3 rounded-sm bg-amber-400" />
               por verificar
             </li>
           </ul>
@@ -177,19 +182,19 @@ export default function VistaDashboard(d: DatosDashboard) {
               </span>
             </div>
             <div
-              className="flex h-2 rounded-full bg-white/[0.08] overflow-hidden"
+              className="flex gap-[2px] h-2.5 rounded-full bg-white/[0.08] overflow-hidden"
               role="img"
               aria-label={`${z.etiqueta}: ${z.ocupadas} de ${z.aforo} ocupadas (${desglose(z)})`}
             >
-              <div className="h-full bg-violeta" style={{ width: tramo(z.pagadas, z.aforo) }} />
-              <div className="h-full bg-lila/50" style={{ width: tramo(z.enCuotas, z.aforo) }} />
-              <div className="h-full bg-amber-400" style={{ width: tramo(z.porVerificar, z.aforo) }} />
+              {z.pagadas > 0 && <div className="h-full shrink-0 bg-violeta" style={{ width: tramo(z.pagadas, z.aforo) }} />}
+              {z.enCuotas > 0 && <div className={`h-full shrink-0 ${RAYADO}`} style={{ width: tramo(z.enCuotas, z.aforo) }} />}
+              {z.porVerificar > 0 && <div className="h-full shrink-0 bg-amber-400" style={{ width: tramo(z.porVerificar, z.aforo) }} />}
             </div>
             <div className="flex items-start justify-between gap-3 text-xs">
               <span className="text-noche-suave">{desglose(z)}</span>
               <span className="flex flex-col items-end text-right tabular-nums">
                 <span className="text-noche-suave">Pagado ${fmt(z.pagadoUsd)}</span>
-                {bsAprox(z.pagadoUsd) && <span className="text-[11px] text-noche-tenue">{bsAprox(z.pagadoUsd)}</span>}
+                {bsAprox(z.pagadoUsd) && <span className="text-noche-tenue">{bsAprox(z.pagadoUsd)}</span>}
               </span>
             </div>
           </div>
@@ -199,7 +204,7 @@ export default function VistaDashboard(d: DatosDashboard) {
       <section className={`${TARJETA} p-5`}>
         <div className="flex items-baseline justify-between gap-3 mb-3">
           <h2 className="text-[15px] font-semibold">Ritmo de ventas</h2>
-          <span className="text-[11px] text-noche-tenue">verificadas por día</span>
+          <span className="text-xs text-noche-tenue">verificadas por día</span>
         </div>
         <VentasChart dias={d.dias} />
       </section>
@@ -225,7 +230,7 @@ export default function VistaDashboard(d: DatosDashboard) {
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-[15px] font-semibold">Preventa</h2>
             {preventaAgotada && (
-              <span className="text-[10px] font-bold tracking-[0.12em] text-red-100 bg-[#CE0100]/30 border border-[#CE0100]/60 rounded-full px-2.5 py-0.5">
+              <span className="text-[11px] font-bold tracking-[0.12em] text-red-100 bg-[#CE0100]/30 border border-[#CE0100]/60 rounded-full px-2.5 py-0.5">
                 AGOTADA
               </span>
             )}
@@ -246,7 +251,7 @@ export default function VistaDashboard(d: DatosDashboard) {
               </div>
             </div>
           ))}
-          <p className="text-[11px] text-noche-tenue">Incluye pendientes de verificar</p>
+          <p className="text-xs text-noche-tenue">Incluye pendientes de verificar</p>
         </section>
       </div>
 
@@ -272,7 +277,7 @@ export default function VistaDashboard(d: DatosDashboard) {
         </div>
       </section>
 
-      <p className="text-[11px] leading-relaxed text-noche-tenue">
+      <p className="text-xs leading-relaxed text-noche-tenue">
         {d.tasaEurVes
           ? `Los montos con ≈ están ${NOTA_TASA_CORTA} (Bs ${d.tasaEurVes.toLocaleString("es-VE", { maximumFractionDigits: 2 })} por $1) y cambian cada día. Los bolívares por método de pago son los que entraron de verdad.`
           : `${SIN_TASA} — todo sale en dólares hasta que vuelva.`}
