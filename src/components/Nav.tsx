@@ -9,7 +9,15 @@ const ETIQUETA_ROL: Record<string, string> = {
   acceso: "Acceso",
 };
 
-export default function Nav({ perfil }: { perfil: PerfilActual }) {
+export default function Nav({
+  perfil,
+  tema = "claro",
+}: {
+  perfil: PerfilActual;
+  /** "noche" = la dirección visual nueva de 6.18 (hoy solo en el Dashboard).
+   *  Por defecto la barra se ve exactamente igual que siempre. */
+  tema?: "claro" | "noche";
+}) {
   const links = [
     { href: "/ventas", label: "Ventas", roles: ["ventas", "finanzas", "admin"] },
     // Cotizar cuotas para cualquier mezcla de entradas (Anita, 20 oct).
@@ -31,6 +39,34 @@ export default function Nav({ perfil }: { perfil: PerfilActual }) {
   // enlaces, nombre, rol y "Salir" en una sola fila de 375px y se montaban
   // unos sobre otros. Ahora: fila 1 = marca + quién soy + salir; fila 2 =
   // pestañas con área táctil de 44px y scroll horizontal si no caben.
+  if (tema === "noche") {
+    return (
+      <header className="border-b border-white/10 bg-noche/85 backdrop-blur-md sticky top-0 z-20 text-noche-texto">
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="flex items-center justify-between gap-3 h-12">
+            <span className="flex items-center gap-2.5 min-w-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-618-white.png" alt="6.18 Producciones" width={35} height={20} className="h-5 w-auto shrink-0" />
+              {/* En el teléfono basta el logo: el título grande de la página ya dice el evento. */}
+              <span className="hidden sm:inline font-semibold text-sm truncate">Navidad Vallenata</span>
+            </span>
+            <div className="flex items-center gap-3 text-sm text-noche-suave min-w-0">
+              <span className="truncate">
+                {perfil.nombre} <span className="text-noche-tenue">· {ETIQUETA_ROL[perfil.rol] ?? perfil.rol}</span>
+              </span>
+              <form action={cerrarSesion} className="shrink-0">
+                <button type="submit" className="text-noche-suave hover:text-white h-11 px-2 -mr-2">
+                  Salir
+                </button>
+              </form>
+            </div>
+          </div>
+          {visibles.length > 1 && <NavTabs tema="noche" links={visibles.map(({ href, label }) => ({ href, label }))} />}
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="border-b border-neutral-200 bg-white sticky top-0 z-20">
       <div className="max-w-3xl mx-auto px-4">

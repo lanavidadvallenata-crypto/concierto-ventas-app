@@ -37,14 +37,14 @@ export default function PanelPlanes({
   const topeLleno = resumen.vip.enPlan >= resumen.vip.tope;
 
   return (
-    <div className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
+    <section className="rounded-[20px] bg-white/[0.04] border border-white/10 p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold">Abona618 · pago en cuotas</p>
+        <h2 className="text-[15px] font-semibold text-noche-texto">Abona618 · pago en cuotas</h2>
         <span
-          className={`text-[11px] px-2 py-0.5 rounded-full border ${
+          className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full border ${
             config.activo
-              ? "bg-marca-secundario/10 border-marca-secundario/30 text-marca-secundario"
-              : "bg-neutral-100 border-neutral-200 text-neutral-500"
+              ? "bg-violeta-hondo/30 border-lila/35 text-lila-claro"
+              : "bg-white/5 border-white/10 text-noche-tenue"
           }`}
         >
           {config.activo ? "ofreciéndose" : "apagado"}
@@ -52,44 +52,44 @@ export default function PanelPlanes({
       </div>
 
       {resumen.error ? (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-red-300">
           No se pudieron leer los planes. Los números de esta tarjeta no son confiables — vuelve a
           cargar en un momento, y si sigue igual avísale a quien lleva el sistema.
         </p>
       ) : !resumen.hayPlanes ? (
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-noche-suave">
           El módulo está encendido y todavía no hay ningún plan. El primero aparecerá aquí.
         </p>
       ) : (
         <>
           <div>
-            <div className="flex items-end justify-between gap-3 flex-wrap">
+            <div className="grid grid-cols-[1fr_auto] items-end gap-3">
               <div>
-                <p className="text-xs text-neutral-500">Cobrado de los planes en curso</p>
-                <p className="text-3xl font-semibold text-marca-secundario">
+                <p className="text-xs text-noche-suave">Cobrado de los planes en curso</p>
+                <p className="font-titular font-extrabold text-[34px] leading-none mt-1 text-white tabular-nums">
                   ${fmt(resumen.enCurso.cobradoUsd)}
                 </p>
                 {bs(resumen.enCurso.cobradoUsd, tasaEurVes) && (
-                  <p className="text-xs text-neutral-500 tabular-nums">{bs(resumen.enCurso.cobradoUsd, tasaEurVes)}</p>
+                  <p className="text-xs text-noche-tenue tabular-nums mt-1">{bs(resumen.enCurso.cobradoUsd, tasaEurVes)}</p>
                 )}
               </div>
               <div className="text-right">
-                <p className="text-xs text-neutral-500">de ${fmt(resumen.enCurso.valorUsd)} comprometido</p>
-                <p className="text-sm font-semibold tabular-nums">
+                <p className="text-xs text-noche-tenue">de ${fmt(resumen.enCurso.valorUsd)} comprometido</p>
+                <p className="text-sm font-semibold tabular-nums text-noche-texto">
                   por cobrar ${fmt(resumen.enCurso.porCobrarUsd)}
                 </p>
                 {bs(resumen.enCurso.porCobrarUsd, tasaEurVes) && (
-                  <p className="text-xs text-neutral-500 tabular-nums">{bs(resumen.enCurso.porCobrarUsd, tasaEurVes)}</p>
+                  <p className="text-xs text-noche-tenue tabular-nums">{bs(resumen.enCurso.porCobrarUsd, tasaEurVes)}</p>
                 )}
               </div>
             </div>
-            <div className="mt-2 h-2 rounded-full bg-neutral-100 overflow-hidden">
+            <div className="mt-3 h-2 rounded-full bg-white/[0.08] overflow-hidden">
               <div
-                className="h-full rounded-full bg-marca-secundario"
+                className="h-full rounded-full bg-violeta shadow-[0_0_12px_rgba(155,93,224,0.7)]"
                 style={{ width: `${Math.min(pctCobrado, 100)}%` }}
               />
             </div>
-            <p className="text-xs text-neutral-400 mt-1.5">
+            <p className="text-xs text-noche-tenue mt-2">
               {resumen.enCurso.compras} compra{resumen.enCurso.compras === 1 ? "" : "s"} ·{" "}
               {resumen.enCurso.entradas} entrada{resumen.enCurso.entradas === 1 ? "" : "s"} apartada
               {resumen.enCurso.entradas === 1 ? "" : "s"} que todavía no tienen QR
@@ -97,7 +97,7 @@ export default function PanelPlanes({
           </div>
 
           {resumen.vencidoSinCobrarUsd > 0 && (
-            <p className="text-sm text-red-600">
+            <p className="text-sm text-red-300 rounded-xl bg-red-500/10 border border-red-400/25 px-3 py-2.5">
               ${fmt(resumen.vencidoSinCobrarUsd)}
               {bs(resumen.vencidoSinCobrarUsd, tasaEurVes) ? ` (${bs(resumen.vencidoSinCobrarUsd, tasaEurVes)})` : ""} atrasados:
               cuotas que ya vencieron y nadie ha confirmado.
@@ -113,7 +113,7 @@ export default function PanelPlanes({
           )}
 
           {resumen.proximoUsd > 0 && (
-            <p className="text-sm text-amber-600">
+            <p className="text-sm text-amber-200 rounded-xl bg-amber-400/10 border border-amber-300/25 px-3 py-2.5">
               ${fmt(resumen.proximoUsd)}
               {bs(resumen.proximoUsd, tasaEurVes) ? ` (${bs(resumen.proximoUsd, tasaEurVes)})` : ""} vencen esta semana.
               {puedeCobrar && (
@@ -129,62 +129,62 @@ export default function PanelPlanes({
 
           <div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-neutral-500">VIP apartadas en plan</p>
+              <p className="text-xs text-noche-suave">VIP apartadas en plan</p>
               <p
                 className={`text-sm font-semibold tabular-nums ${
-                  topeLleno ? "text-red-600" : topeEnAviso ? "text-amber-600" : ""
+                  topeLleno ? "text-red-300" : topeEnAviso ? "text-amber-200" : "text-noche-texto"
                 }`}
               >
-                {resumen.vip.enPlan} <span className="font-normal text-neutral-400">/ {resumen.vip.tope}</span>
+                {resumen.vip.enPlan} <span className="font-normal text-noche-tenue">/ {resumen.vip.tope}</span>
               </p>
             </div>
-            <div className="mt-1.5 h-1.5 rounded-full bg-neutral-100 overflow-hidden">
+            <div className="mt-2 h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
               <div
                 className={`h-full rounded-full ${
-                  topeLleno ? "bg-red-500" : topeEnAviso ? "bg-amber-500" : "bg-marca-secundario"
+                  topeLleno ? "bg-red-400" : topeEnAviso ? "bg-amber-400" : "bg-violeta"
                 }`}
                 style={{ width: `${Math.min(pctTope, 100)}%` }}
               />
             </div>
             {topeLleno ? (
-              <p className="text-xs text-red-600 mt-1.5">
+              <p className="text-xs text-red-300 mt-1.5">
                 Tope lleno: el checkout ya no ofrece cuotas en VIP. Para extenderlo hay que subir el
                 tope en la configuración.
               </p>
             ) : topeEnAviso ? (
-              <p className="text-xs text-amber-600 mt-1.5">
+              <p className="text-xs text-amber-200 mt-1.5">
                 Quedan {resumen.vip.tope - resumen.vip.enPlan} cupos del tope. Es el momento de
                 decidir si se extiende.
               </p>
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 pt-1 border-t border-neutral-100">
+          <div className="grid grid-cols-2 gap-3 pt-1 border-t border-white/10">
             <div className="pt-3">
-              <p className="text-xs text-neutral-500">Completados</p>
-              <p className="text-sm font-semibold tabular-nums">
+              <p className="text-xs text-noche-suave">Completados</p>
+              <p className="text-sm font-semibold tabular-nums text-noche-texto">
                 {resumen.completados.compras} · ${fmt(resumen.completados.valorUsd)}
               </p>
               {resumen.completados.valorUsd > 0 && bs(resumen.completados.valorUsd, tasaEurVes) && (
-                <p className="text-[11px] text-neutral-500 tabular-nums">{bs(resumen.completados.valorUsd, tasaEurVes)}</p>
+                <p className="text-[11px] text-noche-tenue tabular-nums">{bs(resumen.completados.valorUsd, tasaEurVes)}</p>
               )}
-              <p className="text-[11px] text-neutral-400">ya suman en el recaudado de arriba</p>
+              <p className="text-[11px] text-noche-tenue">ya suman en el recaudado de arriba</p>
             </div>
             <div className="pt-3">
-              <p className="text-xs text-neutral-500">Caídos</p>
-              <p className="text-sm font-semibold tabular-nums">
+              <p className="text-xs text-noche-suave">Caídos</p>
+              <p className="text-sm font-semibold tabular-nums text-noche-texto">
                 {resumen.caidos.vencidos + resumen.caidos.anulados} · ${fmt(resumen.caidos.abonadoUsd)}
               </p>
               {resumen.caidos.abonadoUsd > 0 && bs(resumen.caidos.abonadoUsd, tasaEurVes) && (
-                <p className="text-[11px] text-neutral-500 tabular-nums">{bs(resumen.caidos.abonadoUsd, tasaEurVes)}</p>
+                <p className="text-[11px] text-noche-tenue tabular-nums">{bs(resumen.caidos.abonadoUsd, tasaEurVes)}</p>
               )}
-              <p className="text-[11px] text-neutral-400">
+              <p className="text-[11px] text-noche-tenue">
                 {resumen.caidos.vencidos} por falta de pago · {resumen.caidos.anulados} anulados a mano
               </p>
               {resumen.caidos.vencidos + resumen.caidos.anulados > 0 && (
                 <Link
                   href="/cobranza/caidos"
-                  className="mt-2 h-9 px-3 inline-flex items-center rounded-lg border border-neutral-300 bg-white text-xs font-semibold text-neutral-800"
+                  className="mt-2 h-10 px-3 inline-flex items-center rounded-lg border border-white/15 bg-white/[0.06] text-xs font-semibold text-noche-texto hover:bg-white/10"
                 >
                   Ver detalle →
                 </Link>
@@ -193,6 +193,6 @@ export default function PanelPlanes({
           </div>
         </>
       )}
-    </div>
+    </section>
   );
 }

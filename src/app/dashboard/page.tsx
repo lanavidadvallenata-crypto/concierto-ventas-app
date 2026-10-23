@@ -2,15 +2,13 @@ import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { calcularTotal } from "@/lib/precios";
 import Nav from "@/components/Nav";
-import VentasChart, { type DiaVenta } from "./VentasChart";
-import AutoRefresh from "./AutoRefresh";
-import Link from "next/link";
+import type { DiaVenta } from "./VentasChart";
 import { seleccionarTodo } from "@/lib/db";
 import { ETAPAS } from "@/lib/precios";
 import { leerConfig, resumenPlanes } from "@/lib/abona618";
-import { obtenerTasaActual, convertirABs } from "@/lib/tasa";
-import { NOTA_TASA_CORTA, SIN_TASA, formatoBs, formatoBsAprox } from "@/lib/formato";
-import PanelPlanes from "./PanelPlanes";
+import { obtenerTasaActual } from "@/lib/tasa";
+import { hoyEnVenezuela } from "@/lib/cuotas";
+import VistaDashboard from "./VistaDashboard";
 
 // Sin `revalidate`: esta página lee la sesión (cookies) y por eso Next la
 // trata como dinámica siempre — el "revalidate = 10" de antes no hacía nada y
@@ -153,169 +151,49 @@ export default async function DashboardPage() {
   const ocVip = ocupacion("vip");
   const ocPreferencial = ocupacion("preferencial");
   const ocGeneral = ocupacion("general");
-  const desglose = (o: { pagadas: number; enCuotas: number; porVerificar: number }) =>
-    [`${o.pagadas} pagada${o.pagadas === 1 ? "" : "s"}`, o.enCuotas ? `${o.enCuotas} en cuotas` : "", o.porVerificar ? `${o.porVerificar} por verificar` : ""]
-      .filter(Boolean)
-      .join(" · ");
 
   const vendidosTotal = verificados.length;
   const aforoTotalEntradas = aforoVip + aforoPreferencial + aforoGeneral;
   const pctVendido = aforoTotalEntradas > 0 ? Math.round((vendidosTotal / aforoTotalEntradas) * 1000) / 10 : 0;
 
-  const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-  // Un Bs estimado a la tasa de hoy. Si no hay tasa no se inventa nada: la
-  // línea simplemente no sale.
-  const bsAprox = (usd: number) => (tasaEurVes ? formatoBsAprox(convertirABs(usd, tasaEurVes)) : null);
-
+  // Todo lo de arriba es la cuenta; lo de abajo solo la entrega a la vista.
+  // El rediseño visual (23 oct) no cambió ni un cálculo: vive en VistaDashboard.
   return (
-    <>
-      <Nav perfil={perfil} />
-      <main className="max-w-3xl mx-auto w-full px-4 py-6 flex flex-col gap-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-semibold">Dashboard de ventas</h1>
-            <p className="text-sm text-neutral-500">La Navidad Vallenata · 4 dic 2026</p>
-          </div>
-          <AutoRefresh />
-        </div>
-
-        <div className="bg-white border border-neutral-200 rounded-xl p-5">
-          <div className="flex items-end justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-xs text-neutral-500">Recaudado (verificado)</p>
-              <p className="text-4xl font-semibold text-marca-secundario">${fmt(ingresoTotal)}</p>
-              {bsAprox(ingresoTotal) && <p className="text-sm text-neutral-600 -mt-0.5 tabular-nums">{bsAprox(ingresoTotal)}</p>}
-              <p className="text-xs text-neutral-400 mt-1">Meta a aforo completo: ${fmt(metaIngresos)}</p>
-              {planes.enCurso.cobradoUsd > 0 && (
-                <p className="text-xs text-neutral-500 mt-1">
-                  +${fmt(planes.enCurso.cobradoUsd)} de cuotas ya cobradas · <span className="font-medium text-neutral-700">${fmt(enBanco)} en banco</span>
-                </p>
-              )}
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-neutral-500">{vendidosTotal} pagadas de {aforoTotalEntradas} entradas</p>
-              <p className="text-2xl font-semibold">{pctVendido}%</p>
-              <p className="text-[11px] text-neutral-400">
-                {ocVip.ocupadas + ocPreferencial.ocupadas + ocGeneral.ocupadas} ocupadas contando cuotas
-              </p>
-            </div>
-          </div>
-          <div className="mt-3 h-2 rounded-full bg-neutral-100 overflow-hidden">
-            <div className="h-full rounded-full bg-marca-secundario" style={{ width: `${Math.min(pctVendido, 100)}%` }} />
-          </div>
-          {ingresoPendiente > 0 && (
-            <p className="text-xs text-amber-600 mt-2">
-              +${fmt(ingresoPendiente)} {bsAprox(ingresoPendiente) ? `(${bsAprox(ingresoPendiente)}) ` : ""}en {pendientesSueltos.length} pago{pendientesSueltos.length === 1 ? "" : "s"} esperando verificación
-              {(perfil.rol === "finanzas" || perfil.rol === "admin") && (
-                <>
-                  {" · "}
-                  <Link href="/finanzas" className="underline underline-offset-2 font-medium">ir a Finanzas</Link>
-                </>
-              )}
-            </p>
-          )}
-        </div>
-
-        <PanelPlanes
-          resumen={planes}
-          config={config}
-          tasaEurVes={tasaEurVes}
-          puedeCobrar={perfil.rol === "ventas" || perfil.rol === "finanzas" || perfil.rol === "admin"}
-        />
-
-        <div className={`grid gap-3 ${hayPreferencial ? "grid-cols-3" : "grid-cols-2"}`}>
-          <div className="bg-white border border-neutral-200 rounded-xl p-4">
-            <p className="text-xs text-neutral-500">VIP ocupadas</p>
-            <p className="text-2xl font-semibold">
-              {ocVip.ocupadas} <span className="text-sm font-normal text-neutral-400">/ {aforoVip}</span>
-            </p>
-            <p className="text-xs text-neutral-600 mt-1">{desglose(ocVip)}</p>
-            <p className="text-xs text-neutral-400 mt-1 tabular-nums">Pagado ${fmt(ingresoVip)}{bsAprox(ingresoVip) ? ` · ${bsAprox(ingresoVip)}` : ""}</p>
-          </div>
-          {hayPreferencial && (
-            <div className="bg-white border border-neutral-200 rounded-xl p-4">
-              <p className="text-xs text-neutral-500">Preferencial ocupadas</p>
-              <p className="text-2xl font-semibold">
-                {ocPreferencial.ocupadas} <span className="text-sm font-normal text-neutral-400">/ {aforoPreferencial}</span>
-              </p>
-              <p className="text-xs text-neutral-600 mt-1">{desglose(ocPreferencial)}</p>
-              <p className="text-xs text-neutral-400 mt-1 tabular-nums">Pagado ${fmt(ingresoPreferencial)}{bsAprox(ingresoPreferencial) ? ` · ${bsAprox(ingresoPreferencial)}` : ""}</p>
-            </div>
-          )}
-          <div className="bg-white border border-neutral-200 rounded-xl p-4">
-            <p className="text-xs text-neutral-500">General ocupadas</p>
-            <p className="text-2xl font-semibold">
-              {ocGeneral.ocupadas} <span className="text-sm font-normal text-neutral-400">/ {aforoGeneral}</span>
-            </p>
-            <p className="text-xs text-neutral-600 mt-1">{desglose(ocGeneral)}</p>
-            <p className="text-xs text-neutral-400 mt-1 tabular-nums">Pagado ${fmt(ingresoGeneral)}{bsAprox(ingresoGeneral) ? ` · ${bsAprox(ingresoGeneral)}` : ""}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white border border-neutral-200 rounded-xl p-4">
-            <p className="text-xs text-neutral-500">Preventa ({cupoPreventa.vip} VIP · {cupoPreventa.general} General)</p>
-            <p className="text-2xl font-semibold">
-              {preventaVip} <span className="text-sm font-normal text-neutral-400">/ {cupoPreventa.vip} VIP</span>
-            </p>
-            <p className="text-sm font-semibold">
-              {preventaGeneral} <span className="text-xs font-normal text-neutral-400">/ {cupoPreventa.general} General</span>
-            </p>
-            <p className="text-[11px] text-neutral-400 mt-1">Incluye pendientes de verificar</p>
-          </div>
-          <div className="bg-white border border-neutral-200 rounded-xl p-4">
-            <p className="text-xs text-neutral-500">Por canal (verificado)</p>
-            {["web", "manual", "taquilla", "patrocinio", "cortesia"].map((c) => {
-              const d = porCanal.get(c) ?? { cantidad: 0, monto: 0 };
-              return (
-                <div key={c} className="flex items-center justify-between text-sm">
-                  <span className="text-neutral-600">{CANAL_ETIQUETA[c]}</span>
-                  <span className="tabular-nums">
-                    {d.cantidad} · {c === "patrocinio" || c === "cortesia" ? "sin cobro" : `$${fmt(d.monto)}`}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <p className="text-[11px] text-neutral-500 -mt-3">
-          {tasaEurVes
-            ? `Los montos con ≈ están ${NOTA_TASA_CORTA} (Bs ${tasaEurVes.toLocaleString("es-VE", { maximumFractionDigits: 2 })} por $1) y cambian cada día. Los bolívares por método de pago son los que entraron de verdad.`
-            : `${SIN_TASA} — todo sale en dólares hasta que vuelva.`}
-        </p>
-
-        <div className="bg-white border border-neutral-200 rounded-xl p-5">
-          <p className="text-sm font-semibold mb-3">Ritmo de ventas (últimos días)</p>
-          <VentasChart dias={dias} />
-        </div>
-
-        <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-neutral-200">
-            <p className="text-sm font-semibold">Por método de pago</p>
-          </div>
-          <div className="divide-y divide-neutral-100">
-            {METODOS_ORDEN.map((m) => {
-              const d = porMetodo.get(m) ?? { cantidad: 0, monto: 0, bs: 0 };
-              const pct = Math.round((d.monto / maxMonto) * 100);
-              return (
-                <div key={m} className="px-4 py-3">
-                  <div className="flex items-center justify-between text-sm mb-1.5">
-                    <span>{METODO_ETIQUETA[m]}</span>
-                    <span className="text-neutral-500 tabular-nums">
-                      {d.cantidad} · ${fmt(d.monto)}
-                      {d.bs > 0 && <span className="text-neutral-400"> · {formatoBs(d.bs)}</span>}
-                    </span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-neutral-100 overflow-hidden">
-                    <div className="h-full rounded-full bg-marca-secundario" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </main>
-    </>
+    <VistaDashboard
+      perfil={perfil}
+      hoy={hoyEnVenezuela()}
+      tasaEurVes={tasaEurVes}
+      recaudado={{
+        ingresoTotal,
+        ingresoPendiente,
+        pagosPorVerificar: pendientesSueltos.length,
+        cuotasCobradas: planes.enCurso.cobradoUsd,
+        enBanco,
+        metaIngresos,
+        vendidosTotal,
+        aforoTotalEntradas,
+        pctVendido,
+        ocupadasTotal: ocVip.ocupadas + ocPreferencial.ocupadas + ocGeneral.ocupadas,
+      }}
+      zonas={[
+        { id: "vip", etiqueta: "VIP", aforo: aforoVip, pagadoUsd: ingresoVip, ...ocVip },
+        ...(hayPreferencial
+          ? [{ id: "preferencial", etiqueta: "Preferencial", aforo: aforoPreferencial, pagadoUsd: ingresoPreferencial, ...ocPreferencial }]
+          : []),
+        { id: "general", etiqueta: "General", aforo: aforoGeneral, pagadoUsd: ingresoGeneral, ...ocGeneral },
+      ]}
+      preventa={{ vip: preventaVip, general: preventaGeneral, cupoVip: cupoPreventa.vip, cupoGeneral: cupoPreventa.general }}
+      canales={["web", "manual", "taquilla", "patrocinio", "cortesia"].map((c) => {
+        const d = porCanal.get(c) ?? { cantidad: 0, monto: 0 };
+        return { id: c, etiqueta: CANAL_ETIQUETA[c], cantidad: d.cantidad, monto: d.monto, sinCobro: c === "patrocinio" || c === "cortesia" };
+      })}
+      metodos={METODOS_ORDEN.map((m) => {
+        const d = porMetodo.get(m) ?? { cantidad: 0, monto: 0, bs: 0 };
+        return { id: m, etiqueta: METODO_ETIQUETA[m], cantidad: d.cantidad, monto: d.monto, bs: d.bs, pct: Math.round((d.monto / maxMonto) * 100) };
+      })}
+      dias={dias}
+      planes={planes}
+      config={config}
+    />
   );
 }

@@ -3,8 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export default function NavTabs({ links }: { links: { href: string; label: string }[] }) {
+export default function NavTabs({
+  links,
+  tema = "claro",
+}: {
+  links: { href: string; label: string }[];
+  /** "noche" = la dirección visual nueva de 6.18. Por defecto se ve igual que siempre. */
+  tema?: "claro" | "noche";
+}) {
   const pathname = usePathname();
+  const noche = tema === "noche";
   return (
     <nav className="flex gap-1 -mb-px overflow-x-auto" aria-label="Secciones">
       {links.map((l) => {
@@ -15,9 +23,13 @@ export default function NavTabs({ links }: { links: { href: string; label: strin
             href={l.href}
             aria-current={activo ? "page" : undefined}
             className={`shrink-0 h-11 px-3 flex items-center text-sm font-medium border-b-2 ${
-              activo
-                ? "text-marca-secundario border-marca-secundario"
-                : "text-neutral-600 border-transparent hover:text-neutral-900 hover:border-neutral-300"
+              noche
+                ? activo
+                  ? "text-white border-violeta"
+                  : "text-noche-tenue border-transparent hover:text-noche-texto hover:border-white/20"
+                : activo
+                  ? "text-marca-secundario border-marca-secundario"
+                  : "text-neutral-600 border-transparent hover:text-neutral-900 hover:border-neutral-300"
             }`}
           >
             {l.label}

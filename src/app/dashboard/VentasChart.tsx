@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatoUsd } from "@/lib/formato";
 
 // Un día del gráfico. Además del total se guarda el desglose por tipo y el
@@ -11,9 +11,17 @@ export type DiaVenta = { fecha: string; total: number; vip: number; preferencial
 export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
   // Arranca mostrando el día más reciente: el gráfico nunca se ve "vacío".
   const [sel, setSel] = useState<number>(Math.max(0, dias.length - 1));
+  // En el teléfono las 14 barras no caben y el gráfico se desliza de lado.
+  // Arranca pegado a la derecha, donde están los días recientes: antes abría
+  // mostrando la venta de hace dos semanas y había que ir a buscar la de hoy.
+  const carril = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = carril.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [dias.length]);
 
   if (dias.length === 0) {
-    return <p className="text-sm text-neutral-400">Todavía no hay ventas verificadas para graficar.</p>;
+    return <p className="text-sm text-noche-tenue">Todavía no hay ventas verificadas para graficar.</p>;
   }
 
   const max = Math.max(...dias.map((d) => d.total), 1);
@@ -36,14 +44,15 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="overflow-x-auto">
+      <div ref={carril} className="overflow-x-auto">
         <svg
           width={Math.max(anchoTotal, 280)}
           height={alturaTotal}
           role="img"
           aria-label="Entradas verificadas por día"
         >
-          <line x1={0} y1={baseY} x2={anchoTotal} y2={baseY} stroke="var(--marca-neutro-2)" strokeOpacity={0.3} strokeWidth={1} />
+          <line x1={0} y1={padTop} x2={anchoTotal} y2={padTop} stroke="#F1ECE2" strokeOpacity={0.06} strokeWidth={1} />
+          <line x1={0} y1={baseY} x2={anchoTotal} y2={baseY} stroke="#F1ECE2" strokeOpacity={0.14} strokeWidth={1} />
           {dias.map((d, i) => {
             const h = Math.max(2, (d.total / max) * (altoBarras - 4));
             const x = i * paso;
@@ -63,8 +72,8 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
                   width={anchoBarra}
                   height={h}
                   rx={4}
-                  className={esActivo ? "fill-marca-principal" : "fill-marca-secundario"}
-                  opacity={esActivo ? 1 : 0.75}
+                  className={esActivo ? "fill-lila-claro" : "fill-violeta"}
+                  opacity={esActivo ? 1 : 0.6}
                 />
                 {/* Zona de toque ancha y de alto completo: en el teléfono una
                     barra de 2px de alto es imposible de acertar con el dedo. */}
@@ -83,7 +92,7 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
                   x={x + anchoBarra / 2}
                   y={baseY + 14}
                   textAnchor="middle"
-                  className={esActivo ? "fill-neutral-700" : "fill-neutral-400"}
+                  className={esActivo ? "fill-noche-texto" : "fill-noche-tenue"}
                   fontSize={10}
                   fontWeight={esActivo ? 700 : 400}
                 >
@@ -95,16 +104,16 @@ export default function VentasChart({ dias }: { dias: DiaVenta[] }) {
         </svg>
       </div>
 
-      <div className="rounded-lg bg-neutral-50 border border-neutral-200 px-3 py-2">
-        <p className="text-xs text-neutral-500 capitalize">{fechaLarga}</p>
+      <div className="rounded-xl bg-white/[0.05] border border-white/10 px-3 py-2.5">
+        <p className="text-xs text-noche-tenue capitalize">{fechaLarga}</p>
         <p className="text-sm font-semibold tabular-nums">
           {activo.total} entrada{activo.total === 1 ? "" : "s"}
-          <span className="font-normal text-neutral-500">
+          <span className="font-normal text-noche-suave">
             {" · "}
             {activo.general} General {" · "} {activo.preferencial > 0 && <>{activo.preferencial} Preferencial {" · "}</>}{activo.vip} VIP {" · "} {formatoUsd(activo.usd)}
           </span>
         </p>
-        <p className="text-[11px] text-neutral-400 mt-0.5">Toca cualquier barra para ver ese día.</p>
+        <p className="text-[11px] text-noche-tenue mt-0.5">Toca cualquier barra para ver ese día.</p>
       </div>
     </div>
   );
