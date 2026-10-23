@@ -7,11 +7,12 @@ import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, reenviarCorre
 import { codigoCompra } from "@/lib/compra";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
 import { conAsiento, etiquetaTipo } from "@/lib/precios";
+import { BOTON_SUAVE, CAMPO, TARJETA } from "@/components/noche/estilos";
 
 const ESTADO: Record<TicketBuscado["estadoPago"], { texto: string; clase: string }> = {
-  pendiente: { texto: "Pendiente", clase: "bg-amber-100 text-amber-800" },
-  verificado: { texto: "Verificado", clase: "bg-green-100 text-green-800" },
-  rechazado: { texto: "Rechazado", clase: "bg-red-100 text-red-800" },
+  pendiente: { texto: "Pendiente", clase: "bg-amber-400/15 text-amber-200 border border-amber-300/30" },
+  verificado: { texto: "Verificado", clase: "bg-emerald-400/15 text-emerald-200 border border-emerald-300/30" },
+  rechazado: { texto: "Rechazado", clase: "bg-red-400/15 text-red-200 border border-red-300/30" },
 };
 
 // Para atender al comprador que escribe "pagué y no me llegó nada" o "me
@@ -110,10 +111,10 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
   }
 
   return (
-    <section className="bg-white border border-neutral-200 rounded-xl p-4 flex flex-col gap-3">
+    <section className={`${TARJETA} p-4 flex flex-col gap-3`}>
       <div>
-        <p className="text-sm font-semibold">Buscar comprador</p>
-        <p className="text-xs text-neutral-500">
+        <h2 className="text-[15px] font-semibold">Buscar comprador</h2>
+        <p className="text-xs text-noche-suave mt-0.5">
           Para &ldquo;pagué y no me llegó nada&rdquo; o &ldquo;me rechazaron pero aquí está el comprobante&rdquo;: busca por nombre, correo, teléfono o referencia.
         </p>
       </div>
@@ -122,25 +123,26 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
           value={consulta}
           onChange={(e) => setConsulta(e.target.value)}
           placeholder="Nombre, correo, teléfono o referencia"
-          className="flex-1 min-w-0 h-11 border border-neutral-300 rounded-lg px-3 text-sm"
+          aria-label="Buscar comprador"
+          className={`flex-1 min-w-0 ${CAMPO}`}
         />
         <button
           type="submit"
           disabled={cargando || consulta.trim().length < 3}
-          className="h-11 px-4 bg-neutral-900 text-white rounded-lg text-sm font-semibold disabled:opacity-50"
+          className="h-11 px-4 rounded-xl border border-lila/40 bg-violeta-hondo/30 hover:bg-violeta-hondo/45 text-noche-texto text-sm font-semibold disabled:opacity-50"
         >
           {cargando ? "Buscando…" : "Buscar"}
         </button>
       </form>
 
-      {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-red-200 bg-red-500/10 border border-red-400/30 rounded-xl px-3 py-2">{error}</p>}
 
       {resultados && resultados.length === 0 && (
-        <p className="text-sm text-neutral-500">No hay ninguna compra que coincida. Si la persona dice que compró, pídele la captura del pago y la referencia.</p>
+        <p className="text-sm text-noche-suave">No hay ninguna compra que coincida. Si la persona dice que compró, pídele la captura del pago y la referencia.</p>
       )}
 
       {resultados && resultados.length > 0 && (
-        <div className="flex flex-col divide-y divide-neutral-100 border-t border-neutral-100">
+        <div className="flex flex-col divide-y divide-white/[0.08] border-t border-white/[0.08]">
           {resultados.map((t) => {
             const estado = ESTADO[t.estadoPago];
             const aviso = avisos[t.grupoId];
@@ -148,19 +150,19 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
             return (
               <div key={t.grupoId} className="py-3 flex flex-col gap-1.5">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold truncate">{t.compradorNombre}</p>
+                  <p className="text-sm font-semibold truncate text-noche-texto">{t.compradorNombre}</p>
                   <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 shrink-0 ${estado.clase}`}>{estado.texto}</span>
                 </div>
-                <p className="text-xs text-neutral-600">
+                <p className="text-xs text-noche-suave">
                   {t.cantidad} × {etiquetaTipo(t.tipo, t.cantidad)} · {formatoUsd(t.precio)}
                   {t.precioBs != null ? ` · ${formatoBs(t.precioBs)}` : ""} · {ETIQUETA_METODO[t.metodoPago] ?? t.metodoPago}
                   {t.referenciaPago ? ` · ref. ${t.referenciaPago}` : ""} · {ETIQUETA_CANAL[t.canal] ?? t.canal}
                 </p>
-                <p className="text-xs text-neutral-500">
+                <p className="text-xs text-noche-tenue break-words">
                   {t.compradorEmail ?? "sin correo"} · {t.compradorTelefono} · {haceCuanto(t.creadoEn)} ({horaCaracas(t.creadoEn)})
                 </p>
                 {t.estadoPago === "verificado" && (
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-noche-tenue">
                     {t.qrUsados >= t.cantidad
                       ? "Todas las entradas ya se usaron en la puerta."
                       : t.qrUsados > 0
@@ -179,7 +181,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                       type="button"
                       onClick={() => accion(t, "reenviar")}
                       disabled={ocupado || !t.compradorEmail}
-                      className="mt-1 h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+                      className={`mt-1 ${BOTON_SUAVE}`}
                     >
                       {ocupado ? "Enviando…" : `Reenviar ${t.cantidad > 1 ? "los QR" : "QR"} por correo`}
                     </button>
@@ -189,7 +191,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                       type="button"
                       onClick={() => abrirEdicion(t)}
                       disabled={ocupado}
-                      className="mt-1 h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+                      className={`mt-1 ${BOTON_SUAVE}`}
                     >
                       Corregir correo / teléfono
                     </button>
@@ -199,7 +201,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                       type="button"
                       onClick={() => accion(t, "correo1")}
                       disabled={ocupado || !t.compradorEmail}
-                      className="mt-1 h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+                      className={`mt-1 ${BOTON_SUAVE}`}
                     >
                       {ocupado ? "Enviando…" : "Reenviar correo de compra"}
                     </button>
@@ -212,7 +214,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                         setAnulando(t.grupoId);
                       }}
                       disabled={ocupado}
-                      className="mt-1 h-9 px-3 border border-red-300 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-50 disabled:opacity-50"
+                      className="mt-1 h-10 px-3 rounded-xl border border-red-400/55 text-red-300 text-xs font-semibold hover:bg-red-500/10 disabled:opacity-50"
                     >
                       Anular compra
                     </button>
@@ -222,7 +224,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                       type="button"
                       onClick={() => accion(t, "reabrir")}
                       disabled={ocupado}
-                      className="mt-1 h-9 px-3 border border-amber-400 text-amber-900 bg-amber-50 rounded-lg text-xs font-semibold hover:bg-amber-100 disabled:opacity-50"
+                      className="mt-1 h-10 px-3 rounded-xl border border-amber-300/50 text-amber-100 bg-amber-400/15 text-xs font-semibold hover:bg-amber-400/25 disabled:opacity-50"
                     >
                       {ocupado ? "Reabriendo…" : "Reabrir — mandó el comprobante"}
                     </button>
@@ -232,31 +234,31 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                   <ConfirmarAnulacion t={t} ocupado={ocupado} onAnular={() => anular(t)} onCancelar={() => setAnulando(null)} />
                 )}
                 {editando === t.grupoId && (
-                  <div className="mt-1 border border-amber-300 bg-amber-50 rounded-lg p-3 flex flex-col gap-2">
-                    <p className="text-xs text-amber-900">
+                  <div className="mt-1 border border-amber-300/35 bg-amber-400/10 rounded-xl p-3 flex flex-col gap-2.5">
+                    <p className="text-xs text-amber-100">
                       Antes de cambiar el correo, confirma que es el comprador: pídele la captura del pago y verifica la referencia
                       {t.referenciaPago ? ` (${t.referenciaPago})` : ""} y el monto. Así nadie se queda con entradas ajenas.
                     </p>
-                    <label className="text-xs font-medium text-neutral-700">
+                    <label className="text-xs font-medium text-noche-suave">
                       Correo correcto
                       <input
                         type="email"
                         value={nuevoEmail}
                         onChange={(e) => setNuevoEmail(e.target.value)}
-                        className="mt-1 w-full h-10 border border-neutral-300 rounded-md px-3 text-sm bg-white"
+                        className={`mt-1 w-full ${CAMPO}`}
                       />
                     </label>
-                    <label className="text-xs font-medium text-neutral-700">
+                    <label className="text-xs font-medium text-noche-suave">
                       Teléfono correcto
                       <input
                         type="tel"
                         value={nuevoTelefono}
                         onChange={(e) => setNuevoTelefono(e.target.value)}
-                        className="mt-1 w-full h-10 border border-neutral-300 rounded-md px-3 text-sm bg-white"
+                        className={`mt-1 w-full ${CAMPO}`}
                       />
                     </label>
-                    <label className="flex items-start gap-2 text-xs text-neutral-800">
-                      <input type="checkbox" checked={identidadConfirmada} onChange={(e) => setIdentidadConfirmada(e.target.checked)} className="mt-0.5" />
+                    <label className="flex items-start gap-2.5 text-xs text-noche-texto min-h-11 cursor-pointer">
+                      <input type="checkbox" checked={identidadConfirmada} onChange={(e) => setIdentidadConfirmada(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-violeta" />
                       Verifiqué la captura del pago con la referencia y el monto.
                     </label>
                     <div className="flex gap-2">
@@ -264,18 +266,22 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                         type="button"
                         onClick={() => guardarContacto(t)}
                         disabled={ocupado || !identidadConfirmada || !nuevoEmail.trim() || !nuevoTelefono.trim()}
-                        className="h-9 px-3 bg-neutral-900 text-white rounded-lg text-xs font-semibold disabled:opacity-50"
+                        className="h-10 px-3 rounded-xl bg-violeta-hondo hover:bg-violeta text-white text-xs font-semibold disabled:opacity-50"
                       >
                         {ocupado ? "Guardando…" : "Guardar datos"}
                       </button>
-                      <button type="button" onClick={() => setEditando(null)} className="h-9 px-3 border border-neutral-300 rounded-lg text-xs font-semibold">
+                      <button type="button" onClick={() => setEditando(null)} className={BOTON_SUAVE}>
                         Cancelar
                       </button>
                     </div>
                   </div>
                 )}
                 {aviso && (
-                  <p className={`text-xs rounded-md px-3 py-2 ${aviso.tipo === "ok" ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>
+                  <p
+                    className={`text-xs rounded-xl border px-3 py-2 ${
+                      aviso.tipo === "ok" ? "bg-emerald-500/10 border-emerald-400/30 text-emerald-200" : "bg-red-500/10 border-red-400/30 text-red-200"
+                    }`}
+                  >
                     {aviso.texto}
                   </p>
                 )}
@@ -307,11 +313,11 @@ function ConfirmarAnulacion({
   const leAvisa = !sinPago && !!t.compradorEmail;
   const varias = t.cantidad > 1;
   return (
-    <div className="mt-1 border border-red-300 bg-red-50 rounded-lg p-3 flex flex-col gap-2">
-      <p className="text-xs font-semibold text-red-900">
+    <div className="mt-1 border border-red-400/40 bg-red-500/10 rounded-xl p-3 flex flex-col gap-2.5">
+      <p className="text-xs font-semibold text-red-100">
         Anular la compra de {t.compradorNombre}: {t.cantidad} × {etiquetaTipo(t.tipo, t.cantidad)} · {formatoUsd(t.precio)}
       </p>
-      <ul className="text-xs text-red-900 list-disc pl-4 flex flex-col gap-0.5">
+      <ul className="text-xs text-red-100/90 list-disc pl-4 flex flex-col gap-0.5">
         <li>
           {t.canal === "taquilla"
             ? varias ? "Las entradas quedan sin efecto." : "La entrada queda sin efecto."
@@ -333,15 +339,15 @@ function ConfirmarAnulacion({
           type="button"
           onClick={onAnular}
           disabled={ocupado}
-          className="h-9 px-3 bg-red-600 text-white rounded-lg text-xs font-semibold disabled:opacity-50"
+          className="h-10 px-3 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50"
         >
           {ocupado ? "Anulando…" : leAvisa ? "Sí, anular y avisarle" : "Sí, anular"}
         </button>
-        <button type="button" onClick={onCancelar} disabled={ocupado} className="h-9 px-3 border border-neutral-300 bg-white rounded-lg text-xs font-semibold">
+        <button type="button" onClick={onCancelar} disabled={ocupado} className={BOTON_SUAVE}>
           Cancelar
         </button>
       </div>
-      <p className="text-[11px] text-red-800">No lo uses para cambios de zona: le llegaría ese correo. Los cambios de zona se hacen como dice el SOP.</p>
+      <p className="text-[11px] text-red-200/80">No lo uses para cambios de zona: le llegaría ese correo. Los cambios de zona se hacen como dice el SOP.</p>
     </div>
   );
 }
@@ -356,25 +362,25 @@ function DondeEsta({ t }: { t: TicketBuscado }) {
 
   if (t.plan === undefined) {
     return (
-      <p className="text-xs text-amber-700">
+      <p className="text-xs text-amber-200">
         No se pudo saber si es en cuotas. Si es de contado, está arriba en la lista de pendientes; si es en cuotas, está en{" "}
         <Link href={enCobranza} className="underline font-semibold">Cobranza</Link>.
       </p>
     );
   }
   if (t.plan === null) {
-    return <p className="text-xs text-amber-700">Compra de contado: está arriba en la lista de pendientes — verifícala desde ahí.</p>;
+    return <p className="text-xs text-amber-200">Compra de contado: está arriba en la lista de pendientes — verifícala desde ahí.</p>;
   }
   if (t.plan.estado === "anulado" || t.plan.estado === "vencido") {
     return (
-      <p className="text-xs rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-red-800">
+      <p className="text-xs rounded-xl border border-red-400/30 bg-red-500/10 px-2.5 py-1.5 text-red-200">
         Compra en cuotas con el plan <strong>{t.plan.estado === "anulado" ? "anulado" : "caído por falta de pago"}</strong>. Pagó{" "}
         {usd(t.plan.pagadoUsd)} de {usd(t.plan.totalUsd)}. No se aprueba desde aquí: consúltalo con Anita.
       </p>
     );
   }
   return (
-    <p className="text-xs rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-sky-900">
+    <p className="text-xs rounded-xl border border-lila/35 bg-violeta-hondo/15 px-2.5 py-1.5 text-lila-claro">
       <strong>Compra en cuotas</strong> · confirmado {usd(t.plan.pagadoUsd)} de {usd(t.plan.totalUsd)}
       {t.plan.porConfirmarUsd > 0 ? <> · <strong>{usd(t.plan.porConfirmarUsd)} por confirmar en el banco</strong></> : null}. No está
       en la lista de arriba: sus pagos se confirman en{" "}

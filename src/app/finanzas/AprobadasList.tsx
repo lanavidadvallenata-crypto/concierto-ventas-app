@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { anularCompraVerificada } from "./actions";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
 import { etiquetaTipo, type Tipo } from "@/lib/precios";
+import { TARJETA } from "@/components/noche/estilos";
 
 // Auditoría solo para admin: qué compras se aprobaron, quién las vendió,
 // quién las aprobó y cuándo. El dato ya vivía en tickets (vendido_por,
@@ -69,8 +70,8 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
   if (filas.length === 0) {
     return (
       <section className="flex flex-col gap-2">
-        <h2 className="font-semibold">Aprobadas recientemente</h2>
-        <p className="text-sm text-neutral-500 rounded-xl border border-neutral-200 bg-white p-4">
+        <h2 className="text-[15px] font-semibold">Aprobadas recientemente</h2>
+        <p className={`text-sm text-noche-suave p-4 ${TARJETA}`}>
           Todavía no hay pagos aprobados.
         </p>
       </section>
@@ -84,17 +85,17 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
   return (
     <section className="flex flex-col gap-2">
       <div>
-        <h2 className="font-semibold">Aprobadas recientemente</h2>
-        <p className="text-sm text-neutral-500">
+        <h2 className="text-[15px] font-semibold">Aprobadas recientemente</h2>
+        <p className="text-xs text-noche-suave mt-0.5">
           Últimas {filas.length} compra{filas.length === 1 ? "" : "s"} verificadas · {totalEntradas} entrada
           {totalEntradas === 1 ? "" : "s"} · ${totalUsd.toFixed(2)}. Solo tú ves esta sección.
         </p>
       </div>
 
-      {mensaje && <p className="text-sm rounded-lg bg-neutral-100 px-3 py-2">{mensaje}</p>}
+      {mensaje && <p className="text-sm rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2">{mensaje}</p>}
 
       {sinControl > 0 && (
-        <p className="text-sm rounded-lg bg-red-50 text-red-800 px-3 py-2">
+        <p className="text-sm rounded-xl border border-red-400/30 bg-red-500/10 text-red-200 px-3 py-2">
           {sinControl === 1
             ? "1 venta fue registrada y aprobada por la misma persona"
             : `${sinControl} ventas fueron registradas y aprobadas por la misma persona`}
@@ -102,67 +103,67 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
         </p>
       )}
 
-      <div className="rounded-xl border border-neutral-200 bg-white divide-y divide-neutral-100 overflow-hidden">
+      <div className={`${TARJETA} divide-y divide-white/[0.07] overflow-hidden`}>
         {filas.map((f) => {
           const auto = CANALES_AUTOVERIFICADOS.has(f.canal);
           const alerta = f.mismoUsuario && !auto;
           const espera = f.canal === "web" ? demora(f.creadoEn, f.aprobadoEn) : null;
           return (
-            <div key={f.grupoId} className={`px-4 py-3 flex flex-col gap-1 ${alerta ? "bg-red-50/40" : ""} ${anuladas.has(f.grupoId) ? "opacity-50" : ""}`}>
+            <div key={f.grupoId} className={`px-4 py-3 flex flex-col gap-1 ${alerta ? "bg-red-500/[0.07]" : ""} ${anuladas.has(f.grupoId) ? "opacity-50" : ""}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{f.compradorNombre}</p>
-                  {f.compradorEmail && <p className="text-xs text-neutral-400 truncate">{f.compradorEmail}</p>}
+                  <p className="font-medium text-sm truncate text-noche-texto">{f.compradorNombre}</p>
+                  {f.compradorEmail && <p className="text-xs text-noche-tenue truncate">{f.compradorEmail}</p>}
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="font-semibold text-sm tabular-nums">{formatoUsd(f.total)}</p>
-                  {f.totalBs != null && <p className="text-xs text-neutral-400 tabular-nums">{formatoBs(f.totalBs)}</p>}
+                  <p className="font-semibold text-sm tabular-nums text-noche-texto">{formatoUsd(f.total)}</p>
+                  {f.totalBs != null && <p className="text-xs text-noche-tenue tabular-nums">{formatoBs(f.totalBs)}</p>}
                 </div>
               </div>
 
-              <p className="text-xs text-neutral-500">
+              <p className="text-xs text-noche-suave">
                 {f.cantidad} {etiquetaTipo(f.tipo, f.cantidad)} · {ETIQUETA_METODO[f.metodoPago] ?? f.metodoPago}
                 {f.referenciaPago ? ` · ref. ${f.referenciaPago}` : ""} · {ETIQUETA_CANAL[f.canal] ?? f.canal}
               </p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                 {alerta ? (
-                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-semibold bg-red-100 text-red-800">
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-semibold bg-red-400/15 border border-red-300/30 text-red-200">
                     Vendió y aprobó {f.vendidoPor ?? "—"} · sin control cruzado
                   </span>
                 ) : auto ? (
-                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-medium bg-amber-50 text-amber-800">
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-medium bg-amber-400/10 border border-amber-300/25 text-amber-200">
                     Automático al registrar{f.vendidoPor ? ` · ${f.vendidoPor}` : ""}
                   </span>
                 ) : (
-                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-medium bg-green-50 text-green-800">
+                  <span className="inline-flex items-center rounded-full px-2 py-0.5 font-medium bg-emerald-400/10 border border-emerald-300/25 text-emerald-200">
                     {f.vendidoPor ? `Vendió ${f.vendidoPor} · ` : ""}Aprobó {f.aprobadoPor ?? "—"}
                   </span>
                 )}
                 {f.aprobadoEn && (
-                  <span className="text-neutral-400">
+                  <span className="text-noche-tenue">
                     {horaCaracas(f.aprobadoEn)} · {haceCuanto(f.aprobadoEn)}
                   </span>
                 )}
-                {espera && <span className="text-neutral-400">esperó {espera}</span>}
+                {espera && <span className="text-noche-tenue">esperó {espera}</span>}
                 {anuladas.has(f.grupoId) ? (
-                  <span className="font-semibold text-neutral-500">Anulada</span>
+                  <span className="font-semibold text-noche-tenue">Anulada</span>
                 ) : confirmando === f.grupoId ? (
                   <span className="flex items-center gap-2">
                     <button
                       type="button"
                       disabled={enviando}
                       onClick={() => anular(f)}
-                      className="rounded-md bg-red-600 text-white px-3 py-1 font-semibold disabled:opacity-60"
+                      className="h-9 rounded-lg bg-red-600 hover:bg-red-500 text-white px-3 font-semibold disabled:opacity-60"
                     >
                       {enviando ? "Anulando…" : "Sí, anular"}
                     </button>
-                    <button type="button" onClick={() => setConfirmando(null)} className="text-neutral-500 underline">
+                    <button type="button" onClick={() => setConfirmando(null)} className="h-9 px-1 text-noche-suave underline">
                       Cancelar
                     </button>
                   </span>
                 ) : (
-                  <button type="button" onClick={() => setConfirmando(f.grupoId)} className="text-red-600 underline">
+                  <button type="button" onClick={() => setConfirmando(f.grupoId)} className="h-9 px-1 text-red-300 underline">
                     Anular compra
                   </button>
                 )}

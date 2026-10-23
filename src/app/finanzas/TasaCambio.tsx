@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { actualizarTasaManual } from "./actions";
+import { CAMPO, TARJETA } from "@/components/noche/estilos";
 
 export default function TasaCambio({ tasaActual }: { tasaActual: number | null }) {
   const [valor, setValor] = useState("");
@@ -27,10 +28,10 @@ export default function TasaCambio({ tasaActual }: { tasaActual: number | null }
   }
 
   return (
-    <div className="bg-white border border-neutral-200 rounded-xl p-4 flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Tasa EUR/Bs del día</p>
-        <span className="text-sm font-mono tabular-nums text-neutral-600">
+    <div className={`${TARJETA} p-4 flex flex-col gap-2.5`}>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-[15px] font-semibold">Tasa EUR/Bs del día</h2>
+        <span className="text-[15px] font-mono font-semibold tabular-nums text-lila-claro">
           {tasaActual !== null ? `Bs ${tasaActual.toLocaleString("es-VE")}` : "No disponible"}
         </span>
       </div>
@@ -41,20 +42,21 @@ export default function TasaCambio({ tasaActual }: { tasaActual: number | null }
           value={valor}
           onChange={(e) => setValor(e.target.value)}
           placeholder="Ej: 977.18"
-          className="flex-1 border border-neutral-300 rounded-md px-3 py-2 text-sm"
+          aria-label="Nueva tasa EUR/Bs"
+          className={`flex-1 min-w-0 ${CAMPO}`}
         />
         <button
           type="submit"
           disabled={cargando}
-          className="bg-neutral-900 text-white rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
+          className="h-11 px-4 rounded-xl border border-lila/40 bg-violeta-hondo/30 hover:bg-violeta-hondo/45 text-noche-texto text-sm font-semibold disabled:opacity-50"
         >
           {cargando ? "Guardando…" : "Actualizar"}
         </button>
       </form>
       {mensaje && (
-        <p className={`text-xs ${mensaje.tipo === "error" ? "text-red-600" : "text-green-700"}`}>{mensaje.texto}</p>
+        <p className={`text-xs ${mensaje.tipo === "error" ? "text-red-300" : "text-emerald-300"}`}>{mensaje.texto}</p>
       )}
-      <p className="text-[11px] text-neutral-400">
+      <p className="text-[11px] text-noche-tenue">
         Se actualiza sola todos los días a las 8am con el BCV oficial. Usa esto solo para corregirla o adelantarla si
         hace falta.
       </p>

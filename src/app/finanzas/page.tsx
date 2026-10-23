@@ -2,6 +2,7 @@ import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerTasaActual } from "@/lib/tasa";
 import Nav from "@/components/Nav";
+import MarcoNoche, { EncabezadoNoche } from "@/components/noche/MarcoNoche";
 import PendientesList, { type CompraPendiente } from "./PendientesList";
 import TasaCambio from "./TasaCambio";
 import BuscarComprador from "./BuscarComprador";
@@ -209,55 +210,53 @@ export default async function FinanzasPage() {
     aprobadas.push(...[...porGrupo.values()].slice(0, 40));
   }
 
+  // Tema "noche" de 6.18 (23 oct): solo cambia cómo se ve. La cola, los
+  // botones y las consultas de arriba son los mismos.
   return (
-    <>
-      <Nav perfil={perfil} />
-      <main className="max-w-3xl mx-auto w-full px-4 py-6 flex flex-col gap-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-semibold">Verificación de pagos</h1>
-            <p className="text-sm text-neutral-500">
-              {lista.length === 0
-                ? "Sin pagos pendientes"
-                : `${lista.length} compra${lista.length === 1 ? "" : "s"} · ${entradasPendientes} entrada${entradasPendientes === 1 ? "" : "s"} · $${totalPendienteUsd.toFixed(2)} por verificar`}
-            </p>
-          </div>
-          <AutoRefresh intervaloMs={30000} />
-        </div>
-
-        {comprasEnPlan.length > 0 && (
-          <a
-            href="/cobranza"
-            className="rounded-xl border border-marca-secundario/30 bg-marca-secundario/5 px-4 py-3 flex items-center justify-between gap-3"
-          >
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold text-marca-secundario">
-                {comprasEnPlan.length} compra{comprasEnPlan.length === 1 ? "" : "s"} en plan de cuotas
-              </span>
-              <span className="block text-xs text-neutral-600 leading-snug">
-                No salen en esta lista: su monto no es el total de la compra y no se entrega QR hasta completar. Se
-                cobran y se aprueban en Cobranza.
-              </span>
-            </span>
-            <span className="shrink-0 text-sm font-semibold text-marca-secundario">Ir →</span>
-          </a>
-        )}
-
-        {errorPlanes ? (
-          <p className="text-sm rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
-            No se pudo leer la base de datos para separar las compras en cuotas de las de contado. La cola no se
-            muestra para no aprobar una por error. Recarga en un momento.
-          </p>
+    <MarcoNoche perfil={perfil}>
+      <EncabezadoNoche seccion="Finanzas" titulo="Verificación de pagos." derecha={<AutoRefresh intervaloMs={30000} tema="noche" />}>
+        {lista.length === 0 ? (
+          "Sin pagos pendientes"
         ) : (
-          <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
+          <>
+            {lista.length} compra{lista.length === 1 ? "" : "s"} · {entradasPendientes} entrada{entradasPendientes === 1 ? "" : "s"} ·{" "}
+            <strong className="font-semibold text-noche-texto">${totalPendienteUsd.toFixed(2)}</strong> por verificar
+          </>
         )}
+      </EncabezadoNoche>
 
-        <BuscarComprador esAdmin={perfil.rol === "admin"} />
+      {comprasEnPlan.length > 0 && (
+        <a
+          href="/cobranza"
+          className="rounded-[20px] border border-lila/30 bg-violeta-hondo/15 hover:bg-violeta-hondo/25 px-4 py-3.5 flex items-center justify-between gap-3"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-lila-claro">
+              {comprasEnPlan.length} compra{comprasEnPlan.length === 1 ? "" : "s"} en plan de cuotas
+            </span>
+            <span className="block text-xs text-noche-suave leading-snug mt-0.5">
+              No salen en esta lista: su monto no es el total de la compra y no se entrega QR hasta completar. Se
+              cobran y se aprueban en Cobranza.
+            </span>
+          </span>
+          <span className="shrink-0 text-sm font-semibold text-lila-claro">Ir →</span>
+        </a>
+      )}
 
-        {perfil.rol === "admin" && <AprobadasList filas={aprobadas} />}
+      {errorPlanes ? (
+        <p className="text-sm rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2.5 text-red-200">
+          No se pudo leer la base de datos para separar las compras en cuotas de las de contado. La cola no se
+          muestra para no aprobar una por error. Recarga en un momento.
+        </p>
+      ) : (
+        <PendientesList compras={lista} miId={perfil.id} miRol={perfil.rol} tasaEurVes={tasaActual} />
+      )}
 
-        <TasaCambio tasaActual={tasaActual} />
-      </main>
-    </>
+      <BuscarComprador esAdmin={perfil.rol === "admin"} />
+
+      {perfil.rol === "admin" && <AprobadasList filas={aprobadas} />}
+
+      <TasaCambio tasaActual={tasaActual} />
+    </MarcoNoche>
   );
 }

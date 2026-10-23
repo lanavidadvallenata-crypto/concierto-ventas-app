@@ -109,15 +109,18 @@ export default function PendientesList({
     }
   }
 
+  // Tema "noche" de 6.18 (23 oct): misma tarjeta, mismos botones y mismas
+  // reglas; solo cambia cómo se ve. Verificar sigue siendo el botón verde
+  // grande y Rechazar pide confirmación, igual que antes.
   return (
     <div className="flex flex-col gap-3">
       {avisoGlobal && (
         <div
           role="status"
-          className={`rounded-lg border px-4 py-3 text-sm font-medium ${
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${
             avisoGlobal.tipo === "ok"
-              ? "bg-green-50 border-green-300 text-green-800"
-              : "bg-amber-50 border-amber-300 text-amber-900"
+              ? "bg-emerald-500/10 border-emerald-400/30 text-emerald-200"
+              : "bg-amber-400/10 border-amber-300/30 text-amber-100"
           }`}
         >
           {avisoGlobal.texto}
@@ -125,9 +128,9 @@ export default function PendientesList({
       )}
 
       {visibles.length === 0 && (
-        <div className="bg-white border border-neutral-200 rounded-xl p-6 text-center">
-          <p className="text-sm font-medium text-neutral-700">No hay pagos pendientes por verificar.</p>
-          <p className="text-xs text-neutral-400 mt-1">Esta lista se actualiza sola cada 30 segundos.</p>
+        <div className="rounded-[20px] bg-white/[0.04] border border-white/10 p-6 text-center">
+          <p className="text-sm font-medium text-noche-texto">No hay pagos pendientes por verificar.</p>
+          <p className="text-xs text-noche-tenue mt-1">Esta lista se actualiza sola cada 30 segundos.</p>
         </div>
       )}
 
@@ -144,96 +147,122 @@ export default function PendientesList({
           c.canal === "web" ? ETIQUETA_CANAL.web : esMio ? "Vendido por ti" : `Vendido por ${c.vendedorNombre ?? "—"}`;
 
         return (
-          <div key={c.grupoId} className="bg-white border border-neutral-200 rounded-xl p-4 flex flex-col gap-3">
+          <article
+            key={c.grupoId}
+            className="rounded-[20px] border border-white/[0.11] bg-[linear-gradient(180deg,rgba(241,236,226,0.07),rgba(241,236,226,0.03))] shadow-[0_20px_50px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.06)] p-4 flex flex-col gap-3.5"
+          >
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold text-base leading-tight truncate">{c.compradorNombre}</p>
-                <p className="text-sm text-neutral-600 mt-0.5">
-                  <span className={conAsiento(c.tipo) ? "font-medium text-marca-secundario" : ""}>
+              <div className="min-w-0 flex flex-col gap-1.5">
+                <h2 className="font-semibold text-[17px] leading-tight truncate text-noche-texto">{c.compradorNombre}</h2>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={`text-[11px] font-semibold rounded-full px-2.5 py-0.5 ${
+                      conAsiento(c.tipo) ? "bg-violeta-hondo/40 text-lila-claro" : "bg-white/[0.08] text-noche-texto"
+                    }`}
+                  >
                     {c.cantidad} × {etiquetaTipo(c.tipo, c.cantidad)}
                   </span>
-                  {c.asientos.length > 0 && <span className="text-neutral-500"> · {c.asientos.join(", ")}</span>}
                   {c.enPreventa > 0 && (
-                    <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide bg-evento-acento/10 text-evento-acento rounded-full px-2 py-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-red-100 bg-[#CE0100]/30 border border-[#CE0100]/60 rounded-full px-2 py-0.5">
                       {c.enPreventa === c.cantidad ? "preventa" : `${c.enPreventa} en preventa`}
                     </span>
                   )}
-                </p>
+                  {c.asientos.length > 0 && (
+                    <span className="text-[11px] text-noche-suave border border-white/15 rounded-full px-2.5 py-0.5">
+                      {c.asientos.join(" · ")}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="text-right shrink-0">
-                <p className="text-lg font-semibold tabular-nums leading-tight">{formatoUsd(c.total)}</p>
+                <p className="font-titular font-extrabold text-[26px] leading-none tabular-nums text-white">{formatoUsd(c.total)}</p>
                 {enBs && (
-                  <p className="text-xs text-neutral-600 tabular-nums">
+                  <p className="text-xs text-noche-suave tabular-nums mt-1">
                     {montoBs !== null ? `${bsEstimado ? "≈ " : ""}${formatoBs(montoBs)}` : "tasa no disponible"}
-                    {c.tasaAplicada != null && <span className="text-neutral-400"> · tasa {c.tasaAplicada.toLocaleString("es-VE")}</span>}
                   </p>
                 )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-sm">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-neutral-400 w-20 shrink-0 text-xs uppercase tracking-wide">Método</span>
-                <span className="truncate">{ETIQUETA_METODO[c.metodoPago] ?? c.metodoPago}{enBs ? " (Bs)" : " (USD)"}</span>
-              </div>
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-neutral-400 w-20 shrink-0 text-xs uppercase tracking-wide">Referencia</span>
-                {c.referenciaPago ? (
-                  <button
-                    type="button"
-                    onClick={() => copiar(c.referenciaPago!, c.grupoId)}
-                    title="Copiar referencia"
-                    className="font-mono text-sm bg-neutral-100 hover:bg-neutral-200 rounded px-2 py-0.5 truncate max-w-full text-left"
-                  >
-                    {copiado === c.grupoId ? "✓ copiada" : c.referenciaPago}
-                  </button>
-                ) : (
-                  <span className="text-red-600 font-medium">sin referencia</span>
+                {enBs && c.tasaAplicada != null && (
+                  <p className="text-[11px] text-noche-tenue tabular-nums">tasa {c.tasaAplicada.toLocaleString("es-VE")}</p>
                 )}
               </div>
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-neutral-400 w-20 shrink-0 text-xs uppercase tracking-wide">Registro</span>
-                <span className="truncate" title={horaCaracas(c.creadoEn)}>
-                  {haceCuanto(c.creadoEn, ahora)} · {horaCaracas(c.creadoEn)}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-neutral-400 w-20 shrink-0 text-xs uppercase tracking-wide">Canal</span>
-                <span className="truncate">{canal}</span>
-              </div>
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-neutral-400 w-20 shrink-0 text-xs uppercase tracking-wide">Teléfono</span>
-                <a href={`https://wa.me/${c.compradorTelefono.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="truncate underline decoration-neutral-300 underline-offset-2">
-                  {c.compradorTelefono}
-                </a>
-              </div>
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-neutral-400 w-20 shrink-0 text-xs uppercase tracking-wide">Correo</span>
-                <span className="truncate">{c.compradorEmail ?? <span className="text-red-600 font-medium">sin correo</span>}</span>
-              </div>
             </div>
 
+            <div className="h-px bg-white/[0.08]" />
+
+            {/* Referencia y correo van a lo ancho: son lo que se compara con
+                el banco y no pueden salir cortados con "…". */}
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[13px]">
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Método</dt>
+                <dd className="truncate">{ETIQUETA_METODO[c.metodoPago] ?? c.metodoPago}{enBs ? " (Bs)" : " (USD)"}</dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Canal</dt>
+                <dd>{canal}</dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Registro</dt>
+                <dd title={horaCaracas(c.creadoEn)}>
+                  {haceCuanto(c.creadoEn, ahora)} · {horaCaracas(c.creadoEn)}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Teléfono</dt>
+                <dd className="truncate">
+                  <a
+                    href={`https://wa.me/${c.compradorTelefono.replace(/\D/g, "")}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-lila hover:text-lila-claro underline decoration-lila/40 underline-offset-2"
+                  >
+                    {c.compradorTelefono}
+                  </a>
+                </dd>
+              </div>
+              <div className="col-span-2 min-w-0">
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Referencia</dt>
+                <dd className="mt-0.5">
+                  {c.referenciaPago ? (
+                    <button
+                      type="button"
+                      onClick={() => copiar(c.referenciaPago!, c.grupoId)}
+                      title="Copiar referencia"
+                      className="font-mono text-[13px] bg-white/[0.08] hover:bg-white/[0.14] rounded-md px-2 py-1 max-w-full text-left break-words"
+                    >
+                      {copiado === c.grupoId ? "✓ copiada" : c.referenciaPago}
+                    </button>
+                  ) : (
+                    <span className="text-red-300 font-medium">sin referencia</span>
+                  )}
+                </dd>
+              </div>
+              <div className="col-span-2 min-w-0">
+                <dt className="text-[10px] uppercase tracking-[0.12em] text-noche-tenue">Correo</dt>
+                <dd className="break-words">{c.compradorEmail ?? <span className="text-red-300 font-medium">sin correo</span>}</dd>
+              </div>
+            </dl>
+
             {bloqueado && (
-              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              <p className="text-xs text-amber-100 bg-amber-400/10 border border-amber-300/25 rounded-xl px-3 py-2">
                 Esta venta la registraste tú — por control cruzado la verifica otra persona de Finanzas o un admin.
               </p>
             )}
             {esMio && miRol === "admin" && (
-              <p className="text-xs text-neutral-500">Venta registrada por ti. Como admin puedes verificarla.</p>
+              <p className="text-xs text-noche-tenue">Venta registrada por ti. Como admin puedes verificarla.</p>
             )}
 
             {error && (
-              <div role="alert" className="rounded-lg border border-red-300 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800">
+              <div role="alert" className="rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2.5 text-sm font-medium text-red-200">
                 {error}
               </div>
             )}
 
-            <div className="flex gap-2 mt-1">
+            <div className="grid grid-cols-[1.6fr_1fr] gap-2">
               <button
                 type="button"
                 onClick={() => ejecutar(c, "verificar")}
                 disabled={enProceso || bloqueado}
-                className="flex-[2] h-11 bg-green-700 hover:bg-green-800 text-white rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                className="h-12 bg-green-700 hover:bg-green-600 text-white rounded-[14px] text-sm font-semibold shadow-[0_8px_24px_rgba(21,128,61,0.35)] disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed"
               >
                 {enProceso ? "Procesando…" : c.cantidad > 1 ? `Verificar y enviar ${c.cantidad} QR` : "Verificar y enviar QR"}
               </button>
@@ -242,7 +271,7 @@ export default function PendientesList({
                   type="button"
                   onClick={() => ejecutar(c, "rechazar")}
                   disabled={enProceso}
-                  className="flex-1 h-11 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50"
+                  className="h-12 bg-red-600 hover:bg-red-500 text-white rounded-[14px] text-sm font-semibold disabled:opacity-50"
                 >
                   {enProceso ? "…" : "Confirmar rechazo"}
                 </button>
@@ -251,18 +280,18 @@ export default function PendientesList({
                   type="button"
                   onClick={() => setConfirmandoRechazo(c.grupoId)}
                   disabled={enProceso}
-                  className="flex-1 h-11 border border-red-300 text-red-700 hover:bg-red-50 rounded-lg text-sm font-semibold disabled:opacity-50"
+                  className="h-12 border border-red-400/55 text-red-300 hover:bg-red-500/10 rounded-[14px] text-sm font-semibold disabled:opacity-50"
                 >
                   Rechazar
                 </button>
               )}
             </div>
             {confirmandoRechazo === c.grupoId && !enProceso && (
-              <button type="button" onClick={() => setConfirmandoRechazo(null)} className="text-xs text-neutral-500 self-end -mt-1">
+              <button type="button" onClick={() => setConfirmandoRechazo(null)} className="h-9 px-2 text-xs text-noche-suave self-end -mt-1.5">
                 Cancelar
               </button>
             )}
-          </div>
+          </article>
         );
       })}
     </div>
