@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import Nav from "@/components/Nav";
+import MarcoNoche, { EncabezadoNoche } from "@/components/noche/MarcoNoche";
 import { listarCaidos } from "@/lib/abona618";
 import { hoyEnVenezuela } from "@/lib/cuotas";
 import { codigoCompra } from "@/lib/compra";
@@ -51,98 +52,92 @@ export default async function CaidosPage() {
   const abonadoTotal = Math.round(caidos.reduce((s, c) => s + c.abonadoUsd, 0) * 100) / 100;
 
   return (
-    <>
-      <Nav perfil={perfil} />
-      <main className="max-w-3xl mx-auto w-full px-4 py-5 flex flex-col gap-4">
-        <div>
-          <Link href="/dashboard" className="text-sm text-neutral-500 underline">
-            ← Volver al dashboard
-          </Link>
-          <h1 className="text-lg font-semibold mt-2">Planes caídos</h1>
-          <p className="text-sm text-neutral-500">
-            Compras en cuotas que se anularon. {caidos.length} en total · {formatoUsd(abonadoTotal)} abonados.
-          </p>
-        </div>
+    <MarcoNoche perfil={perfil}>
+      <Link href="/dashboard" className="-mb-2 h-11 inline-flex items-center self-start text-sm text-lila hover:text-lila-claro underline underline-offset-2">
+        ← Volver al dashboard
+      </Link>
+      <EncabezadoNoche compacto seccion="Cobranza" titulo="Planes caídos.">
+        Compras en cuotas que se anularon. {caidos.length} en total · {formatoUsd(abonadoTotal)} abonados.
+      </EncabezadoNoche>
 
-        {error ? (
-          <p className="text-sm rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
-            No se pudo leer la base de datos. Recarga en un momento.
-          </p>
-        ) : caidos.length === 0 ? (
-          <p className="text-sm text-neutral-500">No hay planes caídos.</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {caidos.map((c) => {
-              const wa = paraWhatsApp(c.compradorTelefono);
-              const quien = c.anuladoPor ? nombrePorId.get(c.anuladoPor) : null;
-              return (
-                <article key={c.grupoId} className="bg-white border border-neutral-200 rounded-xl p-4 flex flex-col gap-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold truncate">
-                        {c.compradorNombre ?? "Sin nombre"}{" "}
-                        <span className="font-mono text-xs text-neutral-400">· {codigoCompra(c.grupoId)}</span>
-                      </p>
-                      <p className="text-sm text-neutral-600">
-                        {c.cantidad} {etiquetaTipo(c.tipo, c.cantidad)} · {formatoUsd(c.totalUsd)}
-                      </p>
-                    </div>
-                    <span
-                      className={`shrink-0 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                        c.estado === "vencido" ? "bg-amber-50 text-amber-800" : "bg-neutral-100 text-neutral-700"
-                      }`}
-                    >
-                      {c.estado === "vencido" ? "Por falta de pago" : "Anulado a mano"}
-                    </span>
+      {error ? (
+        <p className="text-sm rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-red-200">
+          No se pudo leer la base de datos. Recarga en un momento.
+        </p>
+      ) : caidos.length === 0 ? (
+        <p className="text-sm text-noche-tenue">No hay planes caídos.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {caidos.map((c) => {
+            const wa = paraWhatsApp(c.compradorTelefono);
+            const quien = c.anuladoPor ? nombrePorId.get(c.anuladoPor) : null;
+            return (
+              <article key={c.grupoId} className="bg-white/[0.05] border border-white/10 rounded-xl p-4 flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">
+                      {c.compradorNombre ?? "Sin nombre"}{" "}
+                      <span className="font-mono text-xs text-noche-tenue">· {codigoCompra(c.grupoId)}</span>
+                    </p>
+                    <p className="text-sm text-noche-suave">
+                      {c.cantidad} {etiquetaTipo(c.tipo, c.cantidad)} · {formatoUsd(c.totalUsd)}
+                    </p>
                   </div>
+                  <span
+                    className={`shrink-0 text-xs font-semibold rounded-full px-2.5 py-1 ${
+                      c.estado === "vencido" ? "bg-amber-400/10 text-amber-200" : "bg-white/[0.06] text-noche-texto"
+                    }`}
+                  >
+                    {c.estado === "vencido" ? "Por falta de pago" : "Anulado a mano"}
+                  </span>
+                </div>
 
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-                    <dt className="text-neutral-500">Abonado</dt>
-                    <dd className="tabular-nums">
-                      <span className="font-semibold">{formatoUsd(c.abonadoUsd)}</span> de {formatoUsd(c.totalUsd)}
-                    </dd>
-                    {c.creadoEn && (
-                      <>
-                        <dt className="text-neutral-500">Apartado</dt>
-                        <dd>{cuandoCaracas(c.creadoEn, hoy)}</dd>
-                      </>
-                    )}
-                    <dt className="text-neutral-500">Se anuló</dt>
-                    <dd>
-                      {c.anuladoEn ? cuandoCaracas(c.anuladoEn, hoy) : "sin fecha"}
-                      {quien ? ` · por ${quien}` : ""}
-                    </dd>
-                  </dl>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                  <dt className="text-noche-tenue">Abonado</dt>
+                  <dd className="tabular-nums">
+                    <span className="font-semibold">{formatoUsd(c.abonadoUsd)}</span> de {formatoUsd(c.totalUsd)}
+                  </dd>
+                  {c.creadoEn && (
+                    <>
+                      <dt className="text-noche-tenue">Apartado</dt>
+                      <dd>{cuandoCaracas(c.creadoEn, hoy)}</dd>
+                    </>
+                  )}
+                  <dt className="text-noche-tenue">Se anuló</dt>
+                  <dd>
+                    {c.anuladoEn ? cuandoCaracas(c.anuladoEn, hoy) : "sin fecha"}
+                    {quien ? ` · por ${quien}` : ""}
+                  </dd>
+                </dl>
 
-                  {c.notas && <p className="text-sm italic text-neutral-600">“{c.notas}”</p>}
+                {c.notas && <p className="text-sm italic text-noche-suave">“{c.notas}”</p>}
 
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {wa && (
-                      <a
-                        href={`https://wa.me/${wa}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="h-10 px-3 inline-flex items-center rounded-lg bg-[#25D366] text-white text-sm font-semibold"
-                      >
-                        WhatsApp
-                      </a>
-                    )}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {wa && (
                     <a
-                      href={`https://${DOMINIO_RAIZ}/compra/${c.grupoId}`}
+                      href={`https://wa.me/${wa}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="h-10 px-3 inline-flex items-center rounded-lg border border-neutral-300 bg-white text-sm font-semibold"
+                      className="h-11 px-3 inline-flex items-center rounded-lg bg-[#25D366] text-white text-sm font-semibold"
                     >
-                      Ver su página
+                      WhatsApp
                     </a>
-                    {c.compradorEmail && <span className="h-10 inline-flex items-center text-xs text-neutral-500">{c.compradorEmail}</span>}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </main>
-    </>
+                  )}
+                  <a
+                    href={`https://${DOMINIO_RAIZ}/compra/${c.grupoId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="h-11 px-3 inline-flex items-center rounded-lg border border-white/15 bg-white/[0.05] text-sm font-semibold"
+                  >
+                    Ver su página
+                  </a>
+                  {c.compradorEmail && <span className="h-11 inline-flex items-center text-xs text-noche-tenue">{c.compradorEmail}</span>}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </MarcoNoche>
   );
 }

@@ -1,6 +1,7 @@
 import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import Nav from "@/components/Nav";
+import MarcoNoche, { EncabezadoNoche } from "@/components/noche/MarcoNoche";
 import AutoRefresh from "@/app/dashboard/AutoRefresh";
 import { leerConfig, listaDeCobranza } from "@/lib/abona618";
 import { hoyEnVenezuela } from "@/lib/cuotas";
@@ -42,23 +43,22 @@ export default async function CobranzaPage({ searchParams }: { searchParams: Pro
     : { data: [] as { id: string; nombre: string }[] };
   const nombrePorId = Object.fromEntries((perfiles ?? []).map((p) => [p.id, p.nombre]));
 
+  // Tema "noche" de 6.18 (24 oct): solo cambia cómo se ve. La lista, los
+  // botones y las reglas de cobro son los mismos.
   return (
-    <>
-      <Nav perfil={perfil} />
-      <AutoRefresh intervaloMs={60000} />
-      <main className="max-w-3xl mx-auto w-full px-4 py-5">
-        <CobranzaList
-          lista={lista}
-          hoy={hoy}
-          miRol={perfil.rol}
-          nombrePorId={nombrePorId}
-          moduloActivo={config.activo}
-          configError={Boolean(config.error)}
-          topeVip={config.topeVip}
-          tasaEurVes={tasaEurVes}
-          busquedaInicial={typeof q === "string" ? q.slice(0, 80) : ""}
-        />
-      </main>
-    </>
+    <MarcoNoche perfil={perfil}>
+      <EncabezadoNoche compacto seccion="Cobranza" titulo="Cobranza de cuotas." derecha={<AutoRefresh intervaloMs={60000} tema="noche" />} />
+      <CobranzaList
+        lista={lista}
+        hoy={hoy}
+        miRol={perfil.rol}
+        nombrePorId={nombrePorId}
+        moduloActivo={config.activo}
+        configError={Boolean(config.error)}
+        topeVip={config.topeVip}
+        tasaEurVes={tasaEurVes}
+        busquedaInicial={typeof q === "string" ? q.slice(0, 80) : ""}
+      />
+    </MarcoNoche>
   );
 }

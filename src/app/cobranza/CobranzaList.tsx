@@ -54,37 +54,37 @@ const SECCIONES: Record<Urgencia, { titulo: string; nota: string; tono: string; 
   paraAnular: {
     titulo: "Hay que anular",
     nota: "Se les pasó la fecha y no pagaron. Confirma por WhatsApp antes de liberar la entrada.",
-    tono: "border-neutral-400 bg-neutral-100",
-    barra: "bg-neutral-500",
+    tono: "border-white/25 bg-white/[0.06]",
+    barra: "bg-noche-tenue",
   },
   enGracia: {
     titulo: "Última llamada",
     nota: "Ya vencieron y no han pagado. Llámalos antes de que pasen a la lista de anular.",
-    tono: "border-red-300 bg-red-50",
+    tono: "border-red-400/45 bg-red-500/10",
     barra: "bg-red-500",
   },
   vencenHoy: {
     titulo: "Vencen hoy",
     nota: "Escríbeles hoy mismo.",
-    tono: "border-amber-300 bg-amber-50",
+    tono: "border-amber-300/35 bg-amber-400/10",
     barra: "bg-amber-500",
   },
   porVerificar: {
     titulo: "Pagaron · falta confirmar en el banco",
     nota: "Trabajo de Finanzas. A estas personas NO hay que cobrarles nada.",
-    tono: "border-sky-300 bg-sky-50",
+    tono: "border-sky-300/35 bg-sky-400/10",
     barra: "bg-sky-500",
   },
   proximas: {
     titulo: "Al día · les toca pronto",
     nota: "Un recordatorio suave, sin apuro.",
-    tono: "border-neutral-200 bg-white",
+    tono: "border-white/10 bg-white/[0.05]",
     barra: "bg-emerald-500",
   },
   masAdelante: {
     titulo: "Al día",
     nota: "No hay que escribirles. Aquí se anotan los que adelantan su pago.",
-    tono: "border-neutral-200 bg-white",
+    tono: "border-white/10 bg-white/[0.05]",
     barra: "bg-emerald-500",
   },
 };
@@ -330,48 +330,49 @@ export default function CobranzaList({
 
   return (
     <div className="space-y-5">
-      <header className="space-y-2">
-        <h1 className="text-lg font-semibold">Cobranza de cuotas</h1>
+      <header className="space-y-2.5">
         {lista.error && (
-          <p className="text-sm rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+          <p className="text-sm rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-red-200">
             <strong>No se pudo leer la base de datos.</strong> Lo que ves abajo no es real: no es que nadie deba
             nada, es que no se pudo cargar. Recarga en un momento.
           </p>
         )}
         {configError && (
-          <p className="text-xs rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+          <p className="text-xs rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-amber-100">
             No se pudo leer si el plan de cuotas está encendido o apagado.
           </p>
         )}
         {!configError && !moduloActivo && (
-          <p className="text-xs rounded-md border border-neutral-300 bg-neutral-50 px-3 py-2 text-neutral-600">
+          <p className="text-xs rounded-md border border-white/15 bg-white/[0.04] px-3 py-2 text-noche-suave">
             El plan de cuotas está <strong>apagado</strong> para compradores nuevos. Lo que aparece aquí son planes
             que ya existen y hay que seguir cobrando igual.
           </p>
         )}
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-lg border border-neutral-200 px-2 py-2">
-            <div className="text-base font-semibold tabular-nums">{formatoUsd(lista.saldoTotal)}</div>
+        {/* "Por cobrar" a lo ancho: con su monto en Bs no cabía en un tercio
+            del teléfono y partía en tres líneas. */}
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div className="col-span-2 rounded-xl border border-white/10 bg-white/[0.04] px-2 py-2.5">
+            <div className="font-titular font-extrabold text-xl leading-tight text-white tabular-nums">{formatoUsd(lista.saldoTotal)}</div>
             {tasaEurVes && (
-              <div className="text-[11px] text-neutral-600 tabular-nums leading-tight">
+              <div className="text-xs text-noche-suave tabular-nums leading-tight">
                 {formatoBsAprox(convertirABs(lista.saldoTotal, tasaEurVes))}
               </div>
             )}
-            <div className="text-[11px] text-neutral-500 leading-tight">por cobrar</div>
+            <div className="text-xs text-noche-tenue leading-tight">por cobrar</div>
           </div>
-          <div className="rounded-lg border border-neutral-200 px-2 py-2">
-            <div className="text-base font-semibold tabular-nums">{lista.planesActivos}</div>
-            <div className="text-[11px] text-neutral-500 leading-tight">compras en plan</div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.04] px-2 py-2.5">
+            <div className="font-titular font-extrabold text-xl leading-tight text-white tabular-nums">{lista.planesActivos}</div>
+            <div className="text-xs text-noche-tenue leading-tight">compras en plan</div>
           </div>
-          <div className="rounded-lg border border-neutral-200 px-2 py-2">
-            <div className="text-base font-semibold tabular-nums">
+          <div className="rounded-xl border border-white/10 bg-white/[0.04] px-2 py-2.5">
+            <div className="font-titular font-extrabold text-xl leading-tight text-white tabular-nums">
               {lista.vipEnPlan}
-              <span className="text-neutral-400 text-xs"> / {topeVip}</span>
+              <span className="text-noche-tenue text-xs"> / {topeVip}</span>
             </div>
-            <div className="text-[11px] text-neutral-500 leading-tight">VIP en plan</div>
+            <div className="text-xs text-noche-tenue leading-tight">VIP en plan</div>
           </div>
         </div>
-        <p className="text-[11px] text-neutral-500">
+        <p className="text-xs text-noche-tenue">
           {tasaEurVes
             ? `Los montos en bolívares son ${NOTA_TASA_CORTA} y cambian cada día. La deuda es en dólares: al cobrar, usa el monto en Bs del día del pago, no el de hoy.`
             : `${SIN_TASA} — los montos salen solo en dólares hasta que vuelva.`}
@@ -387,20 +388,20 @@ export default function CobranzaList({
               onChange={(e) => setBusqueda(e.target.value)}
               placeholder="Nombre, teléfono, correo o referencia"
               aria-label="Buscar en cobranza"
-              className="flex-1 h-11 border border-neutral-300 rounded-lg px-3 text-sm bg-white"
+              className="flex-1 h-11 border border-white/15 rounded-lg px-3 text-sm bg-white/[0.05]"
             />
             {buscando && (
               <button
                 type="button"
                 onClick={() => setBusqueda("")}
-                className="h-11 px-3 border border-neutral-300 rounded-lg text-xs font-semibold"
+                className="h-11 px-3 border border-white/15 rounded-lg text-xs font-semibold"
               >
                 Ver todos
               </button>
             )}
           </div>
           {buscando && (
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-noche-tenue">
               {visibles.length === 0
                 ? `Nadie en cuotas coincide con “${busqueda.trim()}”. Si compró de contado, búscalo en Finanzas → Buscar comprador.`
                 : `${visibles.length} ${visibles.length === 1 ? "persona coincide" : "personas coinciden"} de ${personas.length} en cuotas.`}
@@ -410,7 +411,7 @@ export default function CobranzaList({
       )}
 
       {personas.length === 0 && !lista.error && (
-        <p className="text-sm text-neutral-500 py-6 text-center">
+        <p className="text-sm text-noche-tenue py-6 text-center">
           No hay nada por cobrar ahora mismo. Nadie debe nada.
         </p>
       )}
@@ -422,7 +423,7 @@ export default function CobranzaList({
         const escondidos = personas.filter((p) => p.anotadas.length > 0 && p.urgencia !== "porVerificar");
         if (escondidos.length === 0) return null;
         return (
-          <p className="text-xs rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sky-900">
+          <p className="text-xs rounded-md border border-sky-300/35 bg-sky-400/10 px-3 py-2 text-sky-100">
             <strong>Finanzas:</strong> además de la caja azul, hay {escondidos.length}{" "}
             {escondidos.length === 1 ? "pago anotado" : "pagos anotados"} esperando confirmación en otras cajas:{" "}
             {escondidos.map((p) => `${p.nombre ?? "sin nombre"} (${codigoCompra(p.grupoId)})`).join(", ")}.
@@ -439,9 +440,9 @@ export default function CobranzaList({
           <section key={urgencia} className="space-y-2">
             <div>
               <h2 className="text-sm font-semibold">
-                {sec.titulo} <span className="text-neutral-400 font-normal">· {gente.length}</span>
+                {sec.titulo} <span className="text-noche-tenue font-normal">· {gente.length}</span>
               </h2>
-              <p className="text-xs text-neutral-500">{sec.nota}</p>
+              <p className="text-xs text-noche-tenue">{sec.nota}</p>
             </div>
 
             {gente.map((p) => {
@@ -456,9 +457,9 @@ export default function CobranzaList({
                     <div className="min-w-0">
                       <p className="font-medium text-sm truncate">
                         {p.nombre ?? "Sin nombre"}
-                        <span className="text-neutral-400 font-normal font-mono text-xs"> · {codigoCompra(p.grupoId)}</span>
+                        <span className="text-noche-tenue font-normal font-mono text-xs"> · {codigoCompra(p.grupoId)}</span>
                       </p>
-                      <p className="text-xs text-neutral-600">
+                      <p className="text-xs text-noche-suave">
                         {p.cantidad} {etiquetaTipo(p.tipo, p.cantidad)} ·{" "}
                         {formatoUsd(p.totalUsd)}
                       </p>
@@ -467,25 +468,25 @@ export default function CobranzaList({
                       <div className="font-semibold text-sm tabular-nums">
                         falta {formatoUsd(Math.round((p.saldo - p.anotadas.reduce((s, x) => s + x.montoUsd, 0)) * 100) / 100)}
                       </div>
-                      <div className="text-[11px] text-neutral-600 tabular-nums">
+                      <div className="text-xs text-noche-suave tabular-nums">
                         {tasaEurVes ? formatoBsAprox(convertirABs(p.saldo, tasaEurVes)) : SIN_TASA}
                       </div>
                     </div>
                   </div>
 
                   {/* Lo único que el equipo tiene que leer para saber qué hacer. */}
-                  <p className="text-sm font-semibold text-neutral-900">{queHacer(p)}</p>
+                  <p className="text-sm font-semibold text-noche-texto">{queHacer(p)}</p>
 
                   <div>
-                    <div className="h-1.5 w-full rounded-full bg-white/80 overflow-hidden">
+                    <div className="h-1.5 w-full rounded-full bg-white/[0.08] overflow-hidden">
                       <div className={`h-full rounded-full ${sec.barra}`} style={{ width: `${avance}%` }} />
                     </div>
-                    <p className="text-xs text-neutral-600 mt-1 tabular-nums">
+                    <p className="text-xs text-noche-suave mt-1 tabular-nums">
                       Confirmado {formatoUsd(p.pagado)} de {formatoUsd(p.totalUsd)}
                       {p.anotadas.length > 0 && (
                         <>
                           {" · "}
-                          <span className="text-sky-800">
+                          <span className="text-sky-200">
                             por confirmar {formatoUsd(Math.round(p.anotadas.reduce((s, x) => s + x.montoUsd, 0) * 100) / 100)}
                           </span>
                         </>
@@ -493,22 +494,22 @@ export default function CobranzaList({
                     </p>
                   </div>
 
-                  <ul className="text-xs rounded-md bg-white/70 border border-neutral-200 divide-y divide-neutral-100">
+                  <ul className="text-xs rounded-md bg-white/[0.04] border border-white/10 divide-y divide-white/[0.07]">
                     {p.pagadas.map((c) => (
                       <li key={c.etiqueta} className="flex items-center justify-between gap-2 px-2 py-1.5">
-                        <span className="text-neutral-500">
-                          <span className="text-emerald-700 font-semibold">✓</span> {c.etiqueta}
+                        <span className="text-noche-tenue">
+                          <span className="text-emerald-300 font-semibold">✓</span> {c.etiqueta}
                         </span>
-                        <span className="tabular-nums text-neutral-500">{formatoUsd(c.montoUsd)} · pagada</span>
+                        <span className="tabular-nums text-noche-tenue">{formatoUsd(c.montoUsd)} · pagada</span>
                       </li>
                     ))}
                     {p.pendientes.map((c) => (
                       <li key={c.cuotaId} className="px-2 py-1.5 space-y-0.5">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-neutral-800">{c.etiqueta}</span>
+                          <span className="font-medium text-noche-texto whitespace-nowrap shrink-0">{c.etiqueta}</span>
                           <span className="tabular-nums">
                             {formatoUsd(c.montoUsd)}
-                            <span className="text-neutral-500">
+                            <span className="text-noche-tenue">
                               {" · "}
                               {c.reportadoEn
                                 ? "por confirmar"
@@ -517,7 +518,7 @@ export default function CobranzaList({
                           </span>
                         </div>
                         {c.reportadoEn && (
-                          <div className="text-neutral-500 flex items-center justify-between gap-2 flex-wrap">
+                          <div className="text-noche-tenue flex items-center justify-between gap-2 flex-wrap">
                             <span>
                               {ETIQUETA_METODO[c.metodoPago ?? ""] ?? c.metodoPago}
                               {c.referenciaPago ? ` · ref. ${c.referenciaPago}` : ""}
@@ -527,16 +528,17 @@ export default function CobranzaList({
                                 ? `anotado por ${nombrePorId[c.reportadoPor] ?? "alguien del equipo"}`
                                 : "lo reportó el comprador"}
                               {" · "}
-                              <span className="font-semibold text-neutral-700">{cuandoCaracas(c.reportadoEn, hoy)}</span>
+                              <span className="font-semibold text-noche-texto">{cuandoCaracas(c.reportadoEn, hoy)}</span>
                             </span>
                             {puedeAprobar && (
                               rechazando === c.cuotaId ? (
-                                <span className="flex items-center gap-1.5 w-full">
+                                <span className="flex flex-wrap items-center gap-1.5 w-full">
                                   <input
                                     value={motivoRechazo}
                                     onChange={(e) => setMotivoRechazo(e.target.value)}
                                     placeholder="¿Por qué? Ej: no aparece en Bancamiga"
-                                    className="flex-1 min-w-0 h-9 rounded-md border border-neutral-300 px-2 text-xs"
+                                    aria-label="Motivo del rechazo"
+                                    className="basis-full min-w-0 h-11 rounded-md border border-white/15 px-2 text-xs"
                                   />
                                   <button
                                     type="button"
@@ -544,11 +546,11 @@ export default function CobranzaList({
                                     onClick={() =>
                                       correr(p.grupoId, () => rechazarPagoAnotado({ cuotaId: c.cuotaId, motivo: motivoRechazo.trim() }))
                                     }
-                                    className="h-9 px-2 rounded-md bg-red-600 text-white text-xs font-semibold disabled:opacity-50"
+                                    className="h-11 px-2 rounded-md bg-red-600 text-white text-xs font-semibold disabled:opacity-50"
                                   >
                                     Rechazar
                                   </button>
-                                  <button type="button" onClick={() => setRechazando(null)} className="h-9 px-2 text-xs text-neutral-500">
+                                  <button type="button" onClick={() => setRechazando(null)} className="h-11 px-2 text-xs text-noche-tenue">
                                     Cancelar
                                   </button>
                                 </span>
@@ -556,7 +558,7 @@ export default function CobranzaList({
                                 <button
                                   type="button"
                                   onClick={() => { setRechazando(c.cuotaId); setMotivoRechazo(""); }}
-                                  className="h-9 px-2 rounded-md border border-red-200 text-red-700 bg-white text-xs font-semibold"
+                                  className="h-11 px-2 rounded-md border border-red-400/30 text-red-300 bg-white/[0.05] text-xs font-semibold"
                                 >
                                   No llegó al banco
                                 </button>
@@ -564,7 +566,7 @@ export default function CobranzaList({
                             )}
                           </div>
                         )}
-                        {c.nota && <div className="text-neutral-600 italic">“{c.nota}”</div>}
+                        {c.nota && <div className="text-noche-suave italic">“{c.nota}”</div>}
                       </li>
                     ))}
                   </ul>
@@ -573,8 +575,8 @@ export default function CobranzaList({
                     <p
                       className={`text-xs rounded-md px-2 py-1.5 ${
                         aviso.tipo === "ok"
-                          ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                          : "bg-red-50 text-red-800 border border-red-200"
+                          ? "bg-emerald-500/10 text-emerald-200 border border-emerald-400/30"
+                          : "bg-red-500/10 text-red-200 border border-red-400/30"
                       }`}
                     >
                       {aviso.texto}
@@ -607,7 +609,7 @@ export default function CobranzaList({
                         WhatsApp
                       </a>
                     ) : (
-                      <span className="h-11 px-1 inline-flex items-center text-xs text-neutral-500">
+                      <span className="h-11 px-1 inline-flex items-center text-xs text-noche-tenue">
                         {p.email ? `Sin WhatsApp · ${p.email}` : "Sin teléfono ni correo"}
                       </span>
                     )}
@@ -618,7 +620,7 @@ export default function CobranzaList({
                       href={`https://${DOMINIO_RAIZ}/compra/${p.grupoId}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="h-11 px-3 inline-flex items-center rounded-lg border border-neutral-300 bg-white text-sm font-semibold"
+                      className="h-11 px-3 inline-flex items-center rounded-lg border border-white/15 bg-white/[0.05] text-sm font-semibold"
                     >
                       Ver su plan
                     </a>
@@ -628,7 +630,7 @@ export default function CobranzaList({
                         type="button"
                         disabled={esteProcesando}
                         onClick={() => correr(p.grupoId, () => aprobarCuotas(p.anotadas.map((c) => c.cuotaId)))}
-                        className="h-11 px-3 rounded-lg bg-marca-secundario text-white text-sm font-semibold disabled:opacity-50"
+                        className="h-11 px-3 rounded-lg bg-violeta-hondo text-white text-sm font-semibold disabled:opacity-50"
                       >
                         {esteProcesando
                           ? "Confirmando…"
@@ -648,13 +650,13 @@ export default function CobranzaList({
                             a.montoBs != null && a.tasaAplicada && a.montoBs / a.tasaAplicada > a.montoUsd + 0.01;
                           setMontoRecibido(pagoMayor ? (a.montoBs as number).toLocaleString("es-VE", { minimumFractionDigits: 2 }) : "");
                         }}
-                        className="h-11 px-3 rounded-lg border border-neutral-300 bg-white text-sm font-semibold disabled:opacity-50"
+                        className="h-11 px-3 rounded-lg border border-white/15 bg-white/[0.05] text-sm font-semibold disabled:opacity-50"
                       >
                         Llegó más dinero
                       </button>
                     )}
                     {p.anotadas.length > 0 && !puedeAprobar && (
-                      <span className="h-11 px-1 inline-flex items-center text-xs text-neutral-500">
+                      <span className="h-11 px-1 inline-flex items-center text-xs text-noche-tenue">
                         Esperando a Finanzas
                       </span>
                     )}
@@ -663,7 +665,7 @@ export default function CobranzaList({
                       <button
                         type="button"
                         onClick={() => setAbierto(abierto === p.grupoId ? null : p.grupoId)}
-                        className="h-11 px-3 rounded-lg border border-neutral-300 bg-white text-sm font-semibold"
+                        className="h-11 px-3 rounded-lg border border-white/15 bg-white/[0.05] text-sm font-semibold"
                       >
                         {abierto === p.grupoId ? "Cerrar" : "Anotar un pago"}
                       </button>
@@ -673,7 +675,7 @@ export default function CobranzaList({
                       <button
                         type="button"
                         onClick={() => { setAnulando(p.grupoId); setMotivoAnulacion(""); }}
-                        className="h-11 px-3 rounded-lg border border-neutral-300 text-neutral-600 bg-white text-sm font-semibold"
+                        className="h-11 px-3 rounded-lg border border-white/15 text-noche-suave bg-white/[0.05] text-sm font-semibold"
                       >
                         Anular compra
                       </button>
@@ -693,7 +695,7 @@ export default function CobranzaList({
                         <button
                           type="button"
                           onClick={() => setConfirmando(p.grupoId)}
-                          className="h-11 px-3 rounded-lg border border-red-300 text-red-700 bg-white text-sm font-semibold"
+                          className="h-11 px-3 rounded-lg border border-red-400/45 text-red-300 bg-white/[0.05] text-sm font-semibold"
                         >
                           Anular por falta de pago
                         </button>
@@ -702,9 +704,9 @@ export default function CobranzaList({
                   </div>
 
                   {esAdmin && anulando === p.grupoId && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-2">
-                      <p className="text-sm font-semibold text-red-900">Anular esta compra y devolver sus entradas a la venta</p>
-                      <p className="text-xs text-red-900/80">
+                    <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-3 space-y-2">
+                      <p className="text-sm font-semibold text-red-100">Anular esta compra y devolver sus entradas a la venta</p>
+                      <p className="text-xs text-red-100/80">
                         Es para compras duplicadas, pruebas o compradores que se arrepintieron. Si no pagó a tiempo, usa
                         &ldquo;Anular por falta de pago&rdquo; cuando le aparezca.
                         {p.pagado > 0 && ` Tiene ${formatoUsd(p.pagado)} confirmados: lo que se haga con ese dinero lo decides tú con el comprador.`}
@@ -715,7 +717,7 @@ export default function CobranzaList({
                         value={motivoAnulacion}
                         onChange={(e) => setMotivoAnulacion(e.target.value)}
                         placeholder="Motivo (queda en el registro). Ej: compra de prueba"
-                        className="w-full h-11 rounded-md border border-neutral-300 bg-white px-2 text-sm"
+                        className="w-full h-11 rounded-md border border-white/15 bg-white/[0.05] px-2 text-sm"
                       />
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -728,7 +730,7 @@ export default function CobranzaList({
                         >
                           {esteProcesando ? "Anulando…" : "Sí, anular la compra"}
                         </button>
-                        <button type="button" onClick={() => setAnulando(null)} className="h-11 px-3 text-sm text-neutral-600">
+                        <button type="button" onClick={() => setAnulando(null)} className="h-11 px-3 text-sm text-noche-suave">
                           Cancelar
                         </button>
                       </div>
@@ -750,7 +752,7 @@ export default function CobranzaList({
         );
       })}
 
-      <p className="text-[11px] text-neutral-400 pt-2">
+      <p className="text-xs text-noche-tenue pt-2">
         Al día de hoy, {fechaCorta(hoy)}. La pantalla se actualiza sola cada minuto.
       </p>
     </div>
@@ -788,7 +790,7 @@ function FormularioPago({
 
   return (
     <form
-      className="rounded-lg border border-neutral-300 bg-white p-3 space-y-2.5"
+      className="rounded-lg border border-white/15 bg-white/[0.05] p-3 space-y-2.5"
       onSubmit={(e) => {
         e.preventDefault();
         // Solo lo que se VE marcado. Si la pantalla se refrescó y una cuota
@@ -812,8 +814,8 @@ function FormularioPago({
       }}
     >
       <div>
-        <p className="text-xs font-medium text-neutral-700">¿Qué cubre este pago?</p>
-        <p className="text-[11px] text-neutral-500 mb-1.5">
+        <p className="text-xs font-medium text-noche-texto">¿Qué cubre este pago?</p>
+        <p className="text-xs text-noche-tenue mb-1.5">
           Marca todas las cuotas que cubrió. Si mandó un solo pago por dos, se anotan juntas con la misma referencia.
         </p>
         <div className="flex flex-col gap-1">
@@ -823,28 +825,28 @@ function FormularioPago({
                 type="checkbox"
                 checked={elegidas.includes(c.cuotaId)}
                 onChange={() => alternar(c.cuotaId)}
-                className="h-5 w-5 shrink-0 accent-[#3F0A62]"
+                className="h-5 w-5 shrink-0 accent-violeta"
               />
               <span className="text-sm">
                 {c.etiqueta} · <span className="font-semibold tabular-nums">{formatoUsd(c.montoUsd)}</span>
-                <span className="text-neutral-500 text-xs"> · vence {fechaCorta(c.venceEl)}</span>
+                <span className="text-noche-tenue text-xs"> · vence {fechaCorta(c.venceEl)}</span>
               </span>
             </label>
           ))}
         </div>
       </div>
 
-      <p className="text-xs text-neutral-700 border-t border-neutral-200 pt-2">
+      <p className="text-xs text-noche-texto border-t border-white/10 pt-2">
         Vas a anotar <strong className="tabular-nums">{formatoUsd(total)}</strong>. Finanzas lo confirma después en el
         banco: todavía no queda cobrado.
       </p>
 
       <label className="block">
-        <span className="text-xs font-medium text-neutral-700">¿Cómo pagó?</span>
+        <span className="text-xs font-medium text-noche-texto">¿Cómo pagó?</span>
         <select
           value={metodo}
           onChange={(e) => setMetodo(e.target.value)}
-          className="mt-1 w-full h-11 rounded-lg border border-neutral-300 px-2 text-sm"
+          className="mt-1 w-full h-11 rounded-lg border border-white/15 px-2 text-sm"
         >
           {METODOS.map((m) => (
             <option key={m} value={m}>
@@ -855,34 +857,34 @@ function FormularioPago({
       </label>
 
       <label className="block">
-        <span className="text-xs font-medium text-neutral-700">Referencia del pago</span>
+        <span className="text-xs font-medium text-noche-texto">Referencia del pago</span>
         <input
           value={referencia}
           onChange={(e) => setReferencia(e.target.value)}
           inputMode={enBs ? "numeric" : "text"}
           placeholder={enBs ? "Últimos dígitos de la referencia" : "Correo o usuario del pago"}
-          className="mt-1 w-full h-11 rounded-lg border border-neutral-300 px-2 text-sm"
+          className="mt-1 w-full h-11 rounded-lg border border-white/15 px-2 text-sm"
           required
         />
       </label>
 
       {enBs && (
         <label className="block">
-          <span className="text-xs font-medium text-neutral-700">Monto exacto en bolívares</span>
+          <span className="text-xs font-medium text-noche-texto">Monto exacto en bolívares</span>
           <input
             value={montoBs}
             onChange={(e) => setMontoBs(e.target.value)}
             inputMode="decimal"
             placeholder="Lo que dice su comprobante, ej: 23.534,75"
-            className="mt-1 w-full h-11 rounded-lg border border-neutral-300 px-2 text-sm"
+            className="mt-1 w-full h-11 rounded-lg border border-white/15 px-2 text-sm"
             required
           />
           {montoBs && bsLeido != null && (
-            <span className="block text-[11px] text-neutral-500 mt-1 tabular-nums">Se va a guardar {formatoBs(bsLeido)}</span>
+            <span className="block text-xs text-noche-tenue mt-1 tabular-nums">Se va a guardar {formatoBs(bsLeido)}</span>
           )}
-          {errorBs && <span className="block text-[11px] text-red-700 mt-1">{errorBs}</span>}
+          {errorBs && <span className="block text-xs text-red-300 mt-1">{errorBs}</span>}
           {elegidas.length > 1 && (
-            <span className="block text-[11px] text-neutral-500 mt-1">
+            <span className="block text-xs text-noche-tenue mt-1">
               Escribe el total del comprobante. Se reparte entre las cuotas que marcaste, para que los bolívares
               cobrados cuadren con el banco.
             </span>
@@ -891,11 +893,11 @@ function FormularioPago({
       )}
 
       <label className="block">
-        <span className="text-xs font-medium text-neutral-700">¿Por dónde te llegó?</span>
+        <span className="text-xs font-medium text-noche-texto">¿Por dónde te llegó?</span>
         <select
           value={canal}
           onChange={(e) => setCanal(e.target.value)}
-          className="mt-1 w-full h-11 rounded-lg border border-neutral-300 px-2 text-sm"
+          className="mt-1 w-full h-11 rounded-lg border border-white/15 px-2 text-sm"
         >
           {CANALES.map((c) => (
             <option key={c.valor} value={c.valor}>
@@ -906,19 +908,19 @@ function FormularioPago({
       </label>
 
       <label className="block">
-        <span className="text-xs font-medium text-neutral-700">Nota (opcional)</span>
+        <span className="text-xs font-medium text-noche-texto">Nota (opcional)</span>
         <input
           value={nota}
           onChange={(e) => setNota(e.target.value)}
           placeholder="Ej: dijo que el resto lo paga el lunes"
-          className="mt-1 w-full h-11 rounded-lg border border-neutral-300 px-2 text-sm"
+          className="mt-1 w-full h-11 rounded-lg border border-white/15 px-2 text-sm"
         />
       </label>
 
       <button
         type="submit"
         disabled={procesando || elegidas.length === 0}
-        className="w-full h-11 rounded-lg bg-marca-secundario text-white text-sm font-semibold disabled:opacity-50"
+        className="w-full h-11 rounded-lg bg-violeta-hondo text-white text-sm font-semibold disabled:opacity-50"
       >
         {procesando ? "Anotando…" : elegidas.length === 0 ? "Marca al menos una cuota" : `Anotar ${formatoUsd(total)}`}
       </button>
@@ -971,30 +973,30 @@ function PagoDeMas({
   const listo = excedente != null && excedente >= 0.01 && siguiente != null && !problema;
 
   return (
-    <div className="rounded-lg border border-sky-300 bg-white px-3 py-2.5 space-y-2">
-      <p className="text-xs text-neutral-700">
+    <div className="rounded-lg border border-sky-300/35 bg-white/[0.05] px-3 py-2.5 space-y-2">
+      <p className="text-xs text-noche-texto">
         Anotado: <strong>{x.etiqueta}</strong> por {formatoUsd(x.montoUsd)}
         {enBs ? ` (${formatoBs(x.montoBs as number)})` : ""}. Si en el banco llegó más, escribe cuánto llegó: la diferencia se
         descuenta de su próxima cuota.
       </p>
-      <label className="block text-xs font-medium text-neutral-700">
+      <label className="block text-xs font-medium text-noche-texto">
         {enBs ? "Bolívares que llegaron al banco" : "Dólares que llegaron"}
         <input
           inputMode="decimal"
           value={monto}
           onChange={(e) => onMonto(e.target.value)}
           placeholder={enBs ? "Ej: 59.338,20" : "Ej: 60"}
-          className="mt-1 w-full h-11 rounded-md border border-neutral-300 px-3 text-sm"
+          className="mt-1 w-full h-11 rounded-md border border-white/15 px-3 text-sm"
         />
       </label>
       {enBs && recibidoUsd != null && (
-        <p className="text-[11px] text-neutral-500 tabular-nums">
+        <p className="text-xs text-noche-tenue tabular-nums">
           = {formatoUsd(recibidoUsd)} a la tasa con que se le cobró ({tasa!.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Bs por $)
         </p>
       )}
-      {problema && <p className="text-xs rounded-md bg-amber-50 border border-amber-200 text-amber-900 px-2 py-1.5">{problema}</p>}
+      {problema && <p className="text-xs rounded-md bg-amber-400/10 border border-amber-300/30 text-amber-100 px-2 py-1.5">{problema}</p>}
       {listo && siguiente && (
-        <p className="text-xs rounded-md bg-sky-50 border border-sky-200 text-sky-900 px-2 py-1.5">
+        <p className="text-xs rounded-md bg-sky-400/10 border border-sky-300/30 text-sky-100 px-2 py-1.5">
           Llegaron <strong>{formatoUsd(recibidoUsd!)}</strong>: {x.etiqueta} queda en {formatoUsd(recibidoUsd!)} y{" "}
           <strong>
             {siguiente.etiqueta} baja de {formatoUsd(siguiente.montoUsd)} a {formatoUsd(Math.round((siguiente.montoUsd - excedente!) * 100) / 100)}
@@ -1007,11 +1009,11 @@ function PagoDeMas({
           type="button"
           disabled={!listo || ocupado}
           onClick={() => onAprobar({ cuotaId: x.cuotaId, recibidoUsd: enBs ? null : leido, recibidoBs: enBs ? leido : null })}
-          className="h-11 px-3 rounded-lg bg-marca-secundario text-white text-sm font-semibold disabled:opacity-50"
+          className="h-11 px-3 rounded-lg bg-violeta-hondo text-white text-sm font-semibold disabled:opacity-50"
         >
           {ocupado ? "Confirmando…" : listo ? `Aprobar y descontar ${formatoUsd(excedente!)}` : "Aprobar y descontar"}
         </button>
-        <button type="button" onClick={onCancelar} disabled={ocupado} className="h-11 px-3 rounded-lg border border-neutral-300 bg-white text-sm font-semibold">
+        <button type="button" onClick={onCancelar} disabled={ocupado} className="h-11 px-3 rounded-lg border border-white/15 bg-white/[0.05] text-sm font-semibold">
           Cancelar
         </button>
       </div>
