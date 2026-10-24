@@ -28,9 +28,7 @@ const METODOS_WEB = metodosParaCanal("web");
 export default function CheckoutForm({
   mesas,
   mesasPreferencial = [],
-  sillasVipDisponibles,
-  sillasPreferencialDisponibles = 0,
-  cupoGeneralRestante,
+  topeGeneral,
   tasaEurVes,
   preventa,
 }: {
@@ -38,9 +36,9 @@ export default function CheckoutForm({
   /** Mesas de la zona Preferencial. Vacío = la zona no está abierta y la
    *  pestaña no se muestra. */
   mesasPreferencial?: MesaMapa[];
-  sillasVipDisponibles: number;
-  sillasPreferencialDisponibles?: number;
-  cupoGeneralRestante: number;
+  /** Cuántas generales puede llevar en esta compra: el máximo por compra, o
+   *  menos solo si quedan menos. Nunca el conteo de lo que queda (24 oct). */
+  topeGeneral: number;
   tasaEurVes: number | null;
   // Cupo de preventa restante por tipo (null = no hay preventa activa).
   preventa: { vip: number; general: number; precioVip: number; precioGeneral: number } | null;
@@ -618,20 +616,19 @@ export default function CheckoutForm({
       {tipo === "vip" ? (
         <div>
           <p className="text-xs text-neutral-500 mb-2">
-            {sillasVipDisponibles} sillas VIP disponibles · elige hasta {MAX_POR_COMPRA.vip} por compra
+            Mesas de 10 · elige hasta {MAX_POR_COMPRA.vip} por compra
           </p>
           <MapaVip
             mesas={mesas}
             seleccionadas={sillas}
             onCambiar={setSillas}
             maximo={MAX_POR_COMPRA.vip}
-            cupoGeneralRestante={cupoGeneralRestante}
           />
         </div>
       ) : tipo === "preferencial" ? (
         <div>
           <p className="text-xs text-neutral-500 mb-2">
-            {sillasPreferencialDisponibles} puestos Preferencial disponibles · mesas de 8 · elige hasta {MAX_POR_COMPRA.preferencial} por compra
+            Mesas de 8 · elige hasta {MAX_POR_COMPRA.preferencial} por compra
           </p>
           <MapaVip
             key="preferencial"
@@ -640,7 +637,6 @@ export default function CheckoutForm({
             seleccionadas={sillas}
             onCambiar={setSillas}
             maximo={MAX_POR_COMPRA.preferencial}
-            cupoGeneralRestante={cupoGeneralRestante}
           />
         </div>
       ) : (
@@ -658,22 +654,20 @@ export default function CheckoutForm({
             <input
               type="number"
               min={1}
-              max={Math.min(MAX_POR_COMPRA.general, Math.max(1, cupoGeneralRestante))}
+              max={Math.max(1, topeGeneral)}
               value={cantidadGeneral}
-              onChange={(e) =>
-                setCantidadGeneral(Math.max(1, Math.min(MAX_POR_COMPRA.general, Number(e.target.value) || 1)))
-              }
+              onChange={(e) => setCantidadGeneral(Math.max(1, Math.min(Math.max(1, topeGeneral), Number(e.target.value) || 1)))}
               className="w-16 h-11 text-center border border-neutral-300 rounded-md text-base font-semibold"
             />
             <button
               type="button"
-              onClick={() => setCantidadGeneral((c) => Math.min(MAX_POR_COMPRA.general, c + 1))}
+              onClick={() => setCantidadGeneral((c) => Math.min(Math.max(1, topeGeneral), c + 1))}
               className="w-11 h-11 rounded-md border border-neutral-300 text-lg font-semibold"
               aria-label="Más"
             >
               +
             </button>
-            <span className="text-xs text-neutral-500">máx. {MAX_POR_COMPRA.general} · {cupoGeneralRestante} disponibles</span>
+            <span className="text-xs text-neutral-500">máx. {MAX_POR_COMPRA.general} por compra</span>
           </div>
         </div>
       )}

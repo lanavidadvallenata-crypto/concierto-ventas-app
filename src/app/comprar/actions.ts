@@ -121,7 +121,7 @@ export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarChe
         error:
           cupoRestante <= 0
             ? "Se agotaron los cupos generales."
-            : `Solo quedan ${cupoRestante} entradas generales — baja la cantidad.`,
+            : "No hay suficientes entradas generales para esa cantidad — baja la cantidad.",
       };
     }
   }
@@ -301,7 +301,7 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
         error:
           cupoRestante <= 0
             ? "Se agotaron los cupos generales — ya no quedan entradas de este tipo."
-            : `Solo quedan ${cupoRestante} entradas generales. Vuelve atrás y ajusta la cantidad.`,
+            : "No hay suficientes entradas generales para esa cantidad. Vuelve atrás y ajusta la cantidad.",
       };
     }
   } else {

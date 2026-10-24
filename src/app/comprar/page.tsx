@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { obtenerMapas, sillasDisponibles } from "@/lib/mapa-vip";
+import { obtenerMapas } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
-import { disponibilidadEtapas } from "@/lib/precios";
+import { disponibilidadEtapas, MAX_POR_COMPRA } from "@/lib/precios";
 import CheckoutForm from "./CheckoutForm";
 import { HeroEvento, SobreElEvento, PreciosExplicados, ComoComprar, PreguntasFrecuentes } from "./SeccionesVenta";
 
@@ -20,8 +20,6 @@ export default async function ComprarPage() {
 
   const mapas = await obtenerMapas(service);
   const tasaEurVes = await obtenerTasaActual(service);
-  const sillasVipDisponibles = sillasDisponibles(mapas.vip);
-  const sillasPreferencialDisponibles = sillasDisponibles(mapas.preferencial);
 
   const { count: generalVendidos } = await service
     .from("tickets")
@@ -36,6 +34,11 @@ export default async function ComprarPage() {
     .single();
 
   const cupoGeneralRestante = (evento?.aforo_general_total ?? 4500) - (generalVendidos ?? 0);
+  // El comprador NO ve cuántas entradas quedan por zona (Anita, 24 oct). Ni
+  // siquiera viaja a su navegador: al formulario solo le llega el tope de su
+  // compra (máximo 20), que únicamente baja de 20 cuando de verdad quedan
+  // menos. El conteo exacto vive en el servidor y en las pantallas del equipo.
+  const topeGeneral = Math.max(0, Math.min(MAX_POR_COMPRA.general, cupoGeneralRestante));
 
   const [dispVip, dispGeneral] = await Promise.all([
     disponibilidadEtapas(service, "vip"),
@@ -71,9 +74,7 @@ export default async function ComprarPage() {
         <CheckoutForm
           mesas={mapas.vip}
           mesasPreferencial={mapas.preferencial}
-          sillasVipDisponibles={sillasVipDisponibles}
-          sillasPreferencialDisponibles={sillasPreferencialDisponibles}
-          cupoGeneralRestante={cupoGeneralRestante}
+          topeGeneral={topeGeneral}
           tasaEurVes={tasaEurVes}
           preventa={preventa}
         />
