@@ -13,7 +13,7 @@ import { formatoBs, formatoUsd } from "@/lib/formato";
 
 const FILAS: { tipo: Tipo; nombre: string; detalle: string }[] = [
   { tipo: "vip", nombre: "VIP", detalle: "mesa de 10, primeras filas" },
-  { tipo: "preferencial", nombre: "Preferencial", detalle: "mesa de 6, detrás del VIP" },
+  { tipo: "preferencial", nombre: "Preferencial", detalle: "mesa de 8, detrás del VIP" },
   { tipo: "general", nombre: "General", detalle: "de pie, sin asiento" },
 ];
 

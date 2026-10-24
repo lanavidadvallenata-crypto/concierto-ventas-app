@@ -31,8 +31,8 @@ test("VIP y General no cambian", () => {
   assert.equal(MAX_POR_COMPRA.general, 20);
 });
 
-test("una mesa completa (6) es el tope por compra, y las sillas se validan contra el mayor tope", () => {
-  assert.equal(MAX_POR_COMPRA.preferencial, 6);
+test("una mesa completa (8) es el tope por compra, y las sillas se validan contra el mayor tope", () => {
+  assert.equal(MAX_POR_COMPRA.preferencial, 8);
   assert.equal(MAX_SILLAS_POR_COMPRA, 10);
 });
 

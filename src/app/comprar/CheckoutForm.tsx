@@ -631,7 +631,7 @@ export default function CheckoutForm({
       ) : tipo === "preferencial" ? (
         <div>
           <p className="text-xs text-neutral-500 mb-2">
-            {sillasPreferencialDisponibles} puestos Preferencial disponibles · mesas de 6 · elige hasta {MAX_POR_COMPRA.preferencial} por compra
+            {sillasPreferencialDisponibles} puestos Preferencial disponibles · mesas de 8 · elige hasta {MAX_POR_COMPRA.preferencial} por compra
           </p>
           <MapaVip
             key="preferencial"

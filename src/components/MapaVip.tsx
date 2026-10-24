@@ -22,7 +22,7 @@ function estadoAgregadoMesa(sillas: SillaMapa[]): "vacia" | "parcial" | "llena" 
 export type SillaElegida = { id: string; numero: number; mesaNumero: number; fila: string };
 
 // La etiqueta corta de una silla elegida. VIP: "A4 · S3" (fila letra + mesa).
-// Preferencial tiene filas "1" y "2": "14 · S3" se lee como mesa 14, así que
+// Preferencial tiene filas numeradas (1 a 4): "14 · S3" se lee como mesa 14, así que
 // va con la fila y la mesa separadas: "F1 · M4 · S3".
 export function etiquetaSilla(s: SillaElegida, zona: Zona): string {
   return zona === "preferencial" ? `F${s.fila} · M${s.mesaNumero} · S${s.numero}` : `${s.fila}${s.mesaNumero} · S${s.numero}`;
@@ -163,7 +163,13 @@ export default function MapaVip({
                 : `Agregar las otras ${cabenMasEnMesaActiva} sillas`}
             </button>
           )}
-          <div className={`grid gap-1.5 ${mesaActiva.sillas.length <= 6 ? "grid-cols-6" : "grid-cols-5"}`}>
+          {/* 6 sillas en una fila, 8 en dos de 4 (Preferencial desde el 24 oct)
+              y 10 en dos de 5 (VIP): ninguna silla queda sola en una fila. */}
+          <div
+            className={`grid gap-1.5 ${
+              mesaActiva.sillas.length <= 6 ? "grid-cols-6" : mesaActiva.sillas.length <= 8 ? "grid-cols-4" : "grid-cols-5"
+            }`}
+          >
             {[...mesaActiva.sillas]
               .sort((a, b) => a.numero - b.numero)
               .map((s) => {

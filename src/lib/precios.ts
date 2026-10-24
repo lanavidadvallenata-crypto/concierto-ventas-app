@@ -2,8 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Los tres tipos de entrada, del más caro al más barato. Preferencial se abrió
 // el 13 de octubre (Anita): "solo había entradas muy caras o muy baratas".
-// Son mesas redondas de 6 puestos entre el VIP y la zona general, a $70 por
-// persona, con mesa y silla elegidas en el mapa igual que VIP.
+// Son mesas redondas entre el VIP y la zona general, a $70 por persona, con
+// mesa y silla elegidas en el mapa igual que VIP. Nacieron de 6 puestos; el
+// 24 oct pasaron a 8 y a 4 filas (Anita), y el máximo por compra subió a 8
+// para que una mesa completa siga saliendo en una sola compra.
 export type Tipo = "vip" | "preferencial" | "general";
 export type Etapa = "preventa" | "regular";
 
@@ -74,7 +76,7 @@ function buscarEtapa(etapa: Etapa) {
 }
 
 // Preferencial: una mesa completa (6) como tope por compra (Anita, 13 oct).
-export const MAX_POR_COMPRA: Record<Tipo, number> = { vip: 10, preferencial: 6, general: 20 };
+export const MAX_POR_COMPRA: Record<Tipo, number> = { vip: 10, preferencial: 8, general: 20 };
 
 /** El máximo de sillas que puede traer una compra con asiento, para validar
  *  entradas sin saber todavía el tipo. */

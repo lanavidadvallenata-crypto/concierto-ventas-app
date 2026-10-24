@@ -139,7 +139,7 @@ export function PreciosExplicados({
         <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-evento-secundario">Preferencial</p>
           <p className="text-xl font-bold">${preferencial.total}</p>
-          <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa redonda de 6, justo detrás del VIP. Hasta 6 por compra.</p>
+          <p className="text-xs text-neutral-500 mt-1">Silla numerada en mesa redonda de 8, justo detrás del VIP. Hasta 8 por compra.</p>
         </div>
       )}
       <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-1">

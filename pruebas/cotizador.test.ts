@@ -27,7 +27,8 @@ test("validarPedido: cantidades, máximos por compra y pedido vacío", () => {
     ],
   });
   assert.equal(validarPedido({}).ok, false);
-  assert.equal(validarPedido({ preferencial: 7 }).ok, false); // máx 6
+  assert.equal(validarPedido({ preferencial: 9 }).ok, false); // máx 8 (mesas de 8 desde el 24 oct)
+  assert.equal(validarPedido({ preferencial: 8 }).ok, true); // una mesa completa sí
   assert.equal(validarPedido({ general: 1.5 }).ok, false);
   assert.equal(validarPedido({ vip: -1 }).ok, false);
 });
