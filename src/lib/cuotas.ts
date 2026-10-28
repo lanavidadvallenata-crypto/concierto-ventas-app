@@ -5,41 +5,44 @@ import type { Tipo } from "@/lib/precios";
 // Finanzas, los correos y el cron. Si un monto se calcula en dos sitios, un
 // día van a discrepar y el comprador va a ver dos cifras distintas.
 //
-// Cómo funciona (decidido entre Jose Luis y Anita, 9-12 oct):
+// Cómo funciona (Anita, 28 oct; reemplaza las quincenas del 12 oct):
 //
-//   · La inicial es SIEMPRE el 40 % y se paga al comprar.
-//   · El 60 % restante se cobra EN LAS QUINCENAS: los días 15 y 30 de cada
-//     mes, que es cuando se cobra en Venezuela. Tres pagos en total: la
-//     inicial y las dos quincenas siguientes.
-//   · El plan se va encogiendo solo según cuándo se compre, y ninguna cuota
-//     puede caer después del 25 de noviembre.
+//   · Cada pago vence 14 días después del anterior, contando desde el día de
+//     la compra. Si cae sábado o domingo se paga ese día igual: no se corre
+//     al lunes (Anita, 28 oct).
+//   · Ningún pago puede vencer después del 27 de noviembre.
+//   · El plan se encoge solo según cuándo se compre:
+//       - caben dos cuotas de 14 días → 3 pagos: 40 % hoy, 30 % y 30 %;
+//       - cabe solo una → 2 pagos: 50 % hoy y 50 % a los 14 días;
+//       - no cabe ninguna → de contado.
 //
-// Por qué las quincenas (Anita, 12 oct): el calendario de fechas fijas (16 y
-// 25 de noviembre) le hacía pagar la inicial el 12 de octubre y no volver a
-// cobrarle hasta un mes después, saltándose las dos quincenas de octubre. Un
-// mes sin cobrarle a alguien que apenas dejó el 40 % es un mes para que se
-// arrepienta, se gaste la plata o se le olvide. En las quincenas el comprador
-// paga el día que tiene el dinero en la mano.
+// Por qué se dejaron las quincenas (Anita, 28 oct): con fechas fijas del mes,
+// quien compraba cerca de una quincena volvía a pagar a los 3 días. El que
+// compró el 27 de octubre tenía cuota el 30, y el que compraba el 13 de
+// noviembre pagaba otra vez el 16. Con 14 días desde la compra todos tienen
+// el mismo plazo, compren el día que compren.
 //
 // El plazo de gracia NO se le dice al comprador (Anita, 12 oct): si sabe que
 // tiene dos días extra, espera hasta el último y pide prórroga. El comprador
 // ve su fecha; la gracia la maneja el equipo por dentro.
 
-export const INICIAL = 0.4;
+// Días entre un pago y el siguiente, empezando por el día de la compra.
+export const DIAS_ENTRE_PAGOS = 14;
 
-// Los días de cobro del mes: las quincenas venezolanas.
-export const DIAS_QUINCENA = [15, 30] as const;
-
-// Límite duro: ninguna cuota puede vencer después de esta fecha. Ese día todo
+// Límite duro: ningún pago puede vencer después de esta fecha. Ese día todo
 // el mundo tiene que estar pagado completo, o perdió lo abonado.
-export const TOPE_FINAL = "2026-11-25";
+export const TOPE_FINAL = "2026-11-27";
 
-// Pagos en total, contando la inicial. Tres: la inicial y dos quincenas.
+// Pagos en total, contando la inicial. Como máximo tres: la inicial y dos
+// cuotas.
 export const MAX_PAGOS = 3;
 
-// Una quincena que cae encima de la compra no cuenta como cuota: hay que
-// darle al comprador al menos estos días para llegar a ella.
-export const MARGEN_MIN_DIAS = 3;
+/** Cómo se reparte el total según cuántas cuotas caben después de la
+ *  inicial (Anita, 28 oct). Con una sola cuota es mitad y mitad. */
+export const REPARTO: Readonly<Record<number, readonly number[]>> = {
+  1: [0.5, 0.5],
+  2: [0.4, 0.3, 0.3],
+};
 
 // Días de plazo después de cada vencimiento antes de anular.
 //
@@ -200,55 +203,19 @@ export type SinPlan = {
 };
 
 /**
- * Sábados y domingos no son días de banco: una cuota que cae en fin de semana
- * se corre al lunes. Si no, el comprador no puede transferir el día que le
- * toca y Finanzas no puede confirmar nada hasta el lunes, que es justo cuando
- * se le vence el plazo de gracia.
- */
-function aDiaDeBanco(iso: string): string {
-  const dia = new Date(aNumeroDeDia(iso) * MS_DIA).getUTCDay();
-  if (dia === 0) return sumarDias(iso, 1); // domingo → lunes
-  if (dia === 6) return sumarDias(iso, 2); // sábado  → lunes
-  return iso;
-}
-
-/** El día `dia` del mes dado, recortado al último día si el mes es más corto. */
-function diaDelMes(anio: number, mes: number, dia: number): string {
-  const ultimo = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
-  const d = Math.min(dia, ultimo);
-  return `${anio}-${String(mes).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
-
-/**
- * Las fechas de cobro de una compra hecha el día `hoy`: las quincenas que
- * vienen después de la compra, hasta completar el plan. Vacío = no hay plan y
- * la entrada se vende de contado.
+ * Las fechas de cobro de una compra hecha el día `hoy`: cada 14 días desde la
+ * compra, hasta dos cuotas, y ninguna después del 27 de noviembre. Vacío = no
+ * hay plan y la entrada se vende de contado.
  *
- * Ninguna cuota pasa del 25 de noviembre: cuando la siguiente quincena cae
- * después, el plan se encoge, y cuando no queda ninguna, no hay plan.
+ * Un fin de semana NO se corre al lunes (Anita, 28 oct): se paga ese día.
  */
 export function fechasDelPlan(hoy: string): string[] {
   const fechas: string[] = [];
-  let [anio, mes] = hoy.split("-").map(Number);
-
-  // Tope de vueltas por si acaso: con el tope del 25 de noviembre nunca se
-  // recorren más de un par de meses, pero un while sin freno dentro de una
-  // server action es una caída, no un error.
-  for (let vuelta = 0; vuelta < 24 && fechas.length < MAX_PAGOS - 1; vuelta++) {
-    for (const dia of DIAS_QUINCENA) {
-      const fecha = aDiaDeBanco(diaDelMes(anio, mes, dia));
-      // Ya pasó, o cae tan encima de la compra que no es crédito.
-      if (diasEntre(hoy, fecha) < MARGEN_MIN_DIAS) continue;
-      // Se pasó del límite duro: de aquí en adelante todas se pasan.
-      if (diasEntre(fecha, TOPE_FINAL) < 0) return fechas;
-      // El corrimiento al lunes puede repetir una fecha (un 30 sábado y un 15
-      // domingo nunca coinciden, pero una fecha duplicada violaría
-      // unique(plan_id, orden) y reventaría la compra completa).
-      if (!fechas.includes(fecha)) fechas.push(fecha);
-      if (fechas.length === MAX_PAGOS - 1) break;
-    }
-    mes++;
-    if (mes > 12) { mes = 1; anio++; }
+  for (let i = 1; i < MAX_PAGOS; i++) {
+    const fecha = sumarDias(hoy, DIAS_ENTRE_PAGOS * i);
+    // Se pasó del límite duro: las siguientes también se pasan.
+    if (diasEntre(fecha, TOPE_FINAL) < 0) break;
+    fechas.push(fecha);
   }
   return fechas;
 }
@@ -277,8 +244,8 @@ export function planPara(
     topeVip?: number;
     /** true salta SOLO el chequeo del tope, para honrar un plan ya pagado
      *  cuando el tope se llenó mientras el comprador iba al banco. El
-     *  calendario y el margen mínimo se respetan igual: las cuotas que se
-     *  guardan tienen que ser las mismas que el comprador aceptó. */
+     *  calendario se respeta igual: las cuotas que se guardan tienen que ser
+     *  las mismas que el comprador aceptó. */
     ignorarTope?: boolean;
   } = {}
 ): Plan | SinPlan {
@@ -301,12 +268,14 @@ export function planPara(
   return armarPlanConFechas(total, hoy, vigentes);
 }
 
-/** Construye el plan: inicial hoy + una cuota por cada fecha, 40 % y el
- *  resto en partes iguales. Es lo único que escribe cuotas, venga el
- *  calendario de `fechasDelPlan` o de lo que el comprador vio. */
+/** Construye el plan: inicial hoy + una cuota por cada fecha, repartido según
+ *  REPARTO (40/30/30 con dos cuotas, 50/50 con una). Es lo único que escribe
+ *  cuotas, venga el calendario de `fechasDelPlan` o de lo que el comprador
+ *  vio. */
 function armarPlanConFechas(total: number, hoy: string, fechas: readonly string[]): Plan {
-  const resto = 1 - INICIAL;
-  const porcentajes = [INICIAL, ...fechas.map(() => resto / fechas.length)];
+  const reparto = REPARTO[fechas.length];
+  if (!reparto) throw new Error(`No hay reparto para ${fechas.length} cuotas`);
+  const porcentajes = [...reparto];
   const montos = repartir(total, porcentajes);
 
   const cuotas: Cuota[] = porcentajes.map((pc, i) => {
@@ -436,13 +405,13 @@ export function resumenPlan(plan: Plan): string {
  * versión que aceptó su comprador, así que a nadie se le reclama algo que no
  * estaba cuando compró.
  */
-export const CONDICIONES_VERSION = "v3";
+export const CONDICIONES_VERSION = "v4";
 
 export const CONDICIONES: string[] = [
   "Tu entrada queda apartada a tu nombre desde que verificamos tu pago inicial. El precio se te congela: no sube aunque suba la tarifa.",
   "El QR de acceso te llega cuando completes el 100 % del pago. Antes de eso no tienes entrada válida para entrar al concierto.",
-  "Tus pagos caen en las quincenas, los días 15 y 30 (si cae fin de semana, el lunes siguiente). Ves todas tus fechas, con su monto, antes de pagar, y te avisamos por correo antes de cada una.",
-  `Todas tus fechas de pago son anteriores al ${fechaCorta(TOPE_FINAL)} de 2026.`,
+  "Tus pagos vencen cada 14 días, contando desde el día de tu compra, aunque caigan en fin de semana. Ves todas tus fechas, con su monto, antes de pagar, y te avisamos por correo antes de cada una.",
+  `Ninguna de tus fechas de pago es posterior al ${fechaCorta(TOPE_FINAL)} de 2026.`,
   "Si no pagas en la fecha de cualquiera de tus cuotas, anulamos toda la compra: no se espera a la fecha final. Tu entrada vuelve a la venta y lo que ya abonaste no se devuelve.",
   "Puedes adelantar pagos o pagar el total cuando quieras, sin recargo.",
   "El plan de cuotas no aplica en taquilla el día del evento. Ese día la entrada se paga completa.",

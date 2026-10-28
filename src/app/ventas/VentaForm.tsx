@@ -226,7 +226,7 @@ export default function VentaForm({
                 forma === f ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
               }`}
             >
-              {f === "contado" ? "De contado" : "En cuotas (aparta con 40 %)"}
+              {f === "contado" ? "De contado" : "En cuotas (aparta con 40 % o 50 %)"}
             </button>
           ))}
         </div>
