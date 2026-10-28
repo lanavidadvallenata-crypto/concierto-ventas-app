@@ -1,19 +1,21 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { registrarVenta } from "./actions";
-import { cotizar } from "@/app/cotizar/actions";
+import { planDeVenta, registrarVenta } from "./actions";
 import { CONDICIONES, fechaCorta, type PlanPublico } from "@/lib/cuotas";
-import { leerPagoInicial, TEXTO_SIN_PLAN } from "@/lib/venta-cuotas";
-import MapaVip, { type SillaElegida } from "@/components/MapaVip";
+import { leerPagoInicial } from "@/lib/venta-cuotas";
+import MapaVip, { etiquetaSilla, type SillaElegida } from "@/components/MapaVip";
 import type { MesaMapa } from "@/lib/mapa-vip";
-import { calcularTotal, conAsiento, etiquetaTipo, MAX_POR_COMPRA, type Tipo } from "@/lib/precios";
+import { calcularTotal, conAsiento, etiquetaTipo, MAX_POR_COMPRA, resumenCompra, type Tipo } from "@/lib/precios";
 import { convertirABs } from "@/lib/tasa";
 import { metodosParaCanal, type MetodoPago } from "@/lib/pagos";
 
 const METODOS = metodosParaCanal("manual");
 
 export type PreventaInfo = { vip: number; general: number; precioVip: number; precioGeneral: number } | null;
+
+// Una zona ya agregada a la compra (compra mixta, Anita 28 oct).
+type ParteFija = { tipo: Tipo; sillas: SillaElegida[]; cantidad: number };
 
 export default function VentaForm({
   mesas,
@@ -46,28 +48,39 @@ export default function VentaForm({
   const [verCondiciones, setVerCondiciones] = useState(false);
   const turno = useRef(0);
   const espera = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Compra mixta (Anita, 28 oct): zonas ya agregadas a esta compra. La zona de
+  // la pestaña activa es la que se está eligiendo ahora.
+  const [agregadas, setAgregadas] = useState<ParteFija[]>([]);
 
   const cantidad = conAsiento(tipo) ? sillas.length : cantidadGeneral;
   const enCuotas = forma === "cuotas";
+  const mixta = agregadas.length > 0;
+  const partes: ParteFija[] = [...agregadas, ...(cantidad > 0 ? [{ tipo, sillas, cantidad }] : [])];
+  const cantidadTotal = partes.reduce((s, p) => s + p.cantidad, 0);
+  const tiposCompra = partes.flatMap((p) => Array.from({ length: p.cantidad }, () => p.tipo));
+  const libres = tipos.filter((t) => t !== tipo && !agregadas.some((a) => a.tipo === t));
 
-  // El plan lo calcula el servidor (mismo calendario, mismo tope VIP que la
-  // web). Se pide desde cada cambio, no desde un efecto, y solo vale la
-  // última respuesta.
-  function pedirPlan(t: Tipo, n: number, f: "contado" | "cuotas") {
+  // Lo que se cotiza: las zonas agregadas más la que se está eligiendo.
+  function conteo(base: ParteFija[], t: Tipo, n: number) {
+    return [...base.map((a) => ({ tipo: a.tipo, cantidad: a.cantidad })), ...(n > 0 ? [{ tipo: t, cantidad: n }] : [])];
+  }
+
+  // El plan lo calcula el servidor con la misma función que guarda la venta
+  // (mismo calendario, mismo tope VIP). Se pide desde cada cambio, no desde un
+  // efecto, y solo vale la última respuesta.
+  function pedirPlan(pedido: { tipo: Tipo; cantidad: number }[], f: "contado" | "cuotas") {
     if (espera.current) clearTimeout(espera.current);
     const mio = ++turno.current;
-    if (f !== "cuotas" || n < 1) {
+    if (f !== "cuotas" || pedido.length === 0) {
       setPlan(null);
       return;
     }
     setPlan({ estado: "cargando" });
     espera.current = setTimeout(async () => {
-      const r = await cotizar({ [t]: n });
+      const r = await planDeVenta(pedido);
       if (mio !== turno.current) return;
       if (!r.ok) return setPlan({ estado: "sin", texto: r.error });
-      const linea = r.cotizacion.lineas[0];
-      if (linea?.plan) setPlan({ estado: "listo", plan: linea.plan });
-      else setPlan({ estado: "sin", texto: TEXTO_SIN_PLAN[linea?.sinPlan ?? "error"] ?? TEXTO_SIN_PLAN.error });
+      setPlan({ estado: "listo", plan: r.plan });
     }, 350);
   }
 
@@ -76,17 +89,41 @@ export default function VentaForm({
     setPrecioManual(null);
     setAcepto(false);
     setMontoPagado("");
-    pedirPlan(tipo, cantidad, f);
+    pedirPlan(conteo(agregadas, tipo, cantidad), f);
+  }
+
+  // Fija la zona que se está eligiendo y pasa a la siguiente zona libre.
+  function agregarOtraZona() {
+    if (cantidad === 0 || libres.length === 0) return;
+    const nuevas = [...agregadas, { tipo, sillas, cantidad }];
+    const siguiente = libres[0];
+    setAgregadas(nuevas);
+    setTipo(siguiente);
+    setSillas([]);
+    setCantidadGeneral(1);
+    setPrecioManual(null);
+    pedirPlan(conteo(nuevas, siguiente, conAsiento(siguiente) ? 0 : 1), forma);
+  }
+
+  function quitarZona(t: Tipo) {
+    const nuevas = agregadas.filter((a) => a.tipo !== t);
+    setAgregadas(nuevas);
+    setPrecioManual(null);
+    pedirPlan(conteo(nuevas, tipo, cantidad), forma);
   }
 
   // Precio sugerido según etapa (preventa mientras quede cupo, luego regular).
   // Preferencial no tiene preventa.
-  const preventaRestante = preventa ? (tipo === "vip" ? preventa.vip : tipo === "general" ? preventa.general : 0) : 0;
-  const unitarioPreventa = preventa ? (tipo === "vip" ? preventa.precioVip : tipo === "general" ? preventa.precioGeneral : 0) : 0;
-  const unitarioRegular = calcularTotal(tipo).total;
-  const enPreventa = Math.min(cantidad, Math.max(0, preventaRestante));
-  const enRegular = Math.max(0, cantidad - enPreventa);
-  const sugerido = Math.round((enPreventa * unitarioPreventa + enRegular * unitarioRegular) * 100) / 100;
+  function precioDe(t: Tipo, n: number) {
+    const restante = preventa ? (t === "vip" ? preventa.vip : t === "general" ? preventa.general : 0) : 0;
+    const unitarioPre = preventa ? (t === "vip" ? preventa.precioVip : t === "general" ? preventa.precioGeneral : 0) : 0;
+    const unitarioReg = calcularTotal(t).total;
+    const pre = Math.min(n, Math.max(0, restante));
+    const reg = Math.max(0, n - pre);
+    return { pre, reg, unitarioPre, unitarioReg, total: Math.round((pre * unitarioPre + reg * unitarioReg) * 100) / 100 };
+  }
+  const { pre: enPreventa, reg: enRegular, unitarioPre: unitarioPreventa, unitarioReg: unitarioRegular } = precioDe(tipo, cantidad);
+  const sugerido = Math.round(partes.reduce((s, p) => s + precioDe(p.tipo, p.cantidad).total, 0) * 100) / 100;
 
   const precio = precioManual ?? sugerido;
   const precioEditado = precioManual !== null;
@@ -95,11 +132,12 @@ export default function VentaForm({
   const montoBs = enBolivares && tasaEurVes ? convertirABs(precio, tasaEurVes) : null;
 
   function cambiarTipo(t: Tipo) {
+    if (agregadas.some((a) => a.tipo === t)) return; // ya está en la compra
     setTipo(t);
     setPrecioManual(null);
     // Las sillas son de una sola zona: al cambiar de pestaña se vacían.
     if (t !== tipo) setSillas([]);
-    pedirPlan(t, conAsiento(t) ? (t !== tipo ? 0 : sillas.length) : cantidadGeneral, forma);
+    pedirPlan(conteo(agregadas, t, conAsiento(t) ? (t !== tipo ? 0 : sillas.length) : cantidadGeneral), forma);
   }
 
   const planListo = enCuotas && plan?.estado === "listo" ? plan.plan : null;
@@ -108,7 +146,7 @@ export default function VentaForm({
 
   function onSubmit(formData: FormData) {
     setMensaje(null);
-    if (conAsiento(tipo) && sillas.length === 0) {
+    if (!mixta && conAsiento(tipo) && sillas.length === 0) {
       setMensaje({ tipo: "error", texto: "Toca una mesa y elige las sillas en el mapa antes de registrar la venta." });
       return;
     }
@@ -127,6 +165,7 @@ export default function VentaForm({
         (document.getElementById("venta-form") as HTMLFormElement)?.reset();
         setSillas([]);
         setCantidadGeneral(1);
+        setAgregadas([]);
         setPrecioManual(null);
         setForma("contado");
         setPlan(null);
@@ -140,21 +179,54 @@ export default function VentaForm({
 
   return (
     <form id="venta-form" action={onSubmit} className="bg-white border border-neutral-200 rounded-xl p-5 flex flex-col gap-4">
+      {mixta && (
+        <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm text-violet-950">
+          <p className="text-xs font-semibold mb-1">Ya en esta compra</p>
+          <ul className="flex flex-col gap-1">
+            {agregadas.map((a) => (
+              <li key={a.tipo} className="flex items-start justify-between gap-3">
+                <span className="min-w-0">
+                  <strong>
+                    {a.cantidad} {etiquetaTipo(a.tipo, a.cantidad)}
+                  </strong>
+                  {conAsiento(a.tipo) && <span className="text-xs"> · {a.sillas.map((s) => etiquetaSilla(s, a.tipo as "vip" | "preferencial")).join(", ")}</span>}
+                </span>
+                <button type="button" onClick={() => quitarZona(a.tipo)} className="shrink-0 text-xs underline">
+                  Quitar
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs mt-1.5">
+            Elige ahora {tipo === "general" ? "las Generales" : `las sillas ${etiquetaTipo(tipo)}`} abajo, o registra así. Todo va en una sola compra, con un solo pago.
+          </p>
+        </div>
+      )}
       <div className="flex gap-2">
-        {tipos.map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => cambiarTipo(t)}
-            className={`flex-1 rounded-md py-2 text-sm font-medium border ${
-              tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
-            }`}
-          >
-            {etiquetaTipo(t)}
-          </button>
-        ))}
+        {tipos.map((t) => {
+          const yaEsta = agregadas.some((a) => a.tipo === t);
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => cambiarTipo(t)}
+              disabled={yaEsta}
+              className={`flex-1 rounded-md py-2 text-sm font-medium border disabled:opacity-40 ${
+                tipo === t ? "bg-neutral-900 text-white border-neutral-900" : "border-neutral-300 text-neutral-600"
+              }`}
+            >
+              {etiquetaTipo(t)}
+              {yaEsta ? " ✓" : ""}
+            </button>
+          );
+        })}
       </div>
       <input type="hidden" name="tipo" value={tipo} />
+      <input
+        type="hidden"
+        name="mezcla"
+        value={mixta ? JSON.stringify(partes.map((p) => ({ tipo: p.tipo, sillaIds: p.sillas.map((x) => x.id), cantidad: p.cantidad }))) : ""}
+      />
       <input type="hidden" name="sillaIds" value={JSON.stringify(sillas.map((s) => s.id))} />
       <input type="hidden" name="precioEditado" value={precioEditado ? "1" : "0"} />
 
@@ -171,7 +243,7 @@ export default function VentaForm({
             onCambiar={(s) => {
               setSillas(s);
               setPrecioManual(null);
-              pedirPlan(tipo, s.length, forma);
+              pedirPlan(conteo(agregadas, tipo, s.length), forma);
             }}
             maximo={MAX_POR_COMPRA[tipo]}
             cupoGeneralRestante={cupoGeneralRestante}
@@ -190,12 +262,22 @@ export default function VentaForm({
               const n = Math.max(1, Math.min(MAX_POR_COMPRA.general, Number(e.target.value) || 1));
               setCantidadGeneral(n);
               setPrecioManual(null);
-              pedirPlan(tipo, n, forma);
+              pedirPlan(conteo(agregadas, tipo, n), forma);
             }}
             className="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm"
           />
           <p className="text-xs text-neutral-400 mt-1">Se crea un ticket (y un QR) por cada entrada, todos al mismo correo.</p>
         </div>
+      )}
+
+      {cantidad > 0 && libres.length > 0 && (
+        <button
+          type="button"
+          onClick={agregarOtraZona}
+          className="self-start rounded-md border border-dashed border-neutral-400 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+        >
+          + Agregar otra zona a esta compra
+        </button>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -233,7 +315,7 @@ export default function VentaForm({
         <input type="hidden" name="enCuotas" value={enCuotas ? "1" : "0"} />
         {enCuotas && (
           <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-950">
-            {cantidad === 0 ? (
+            {cantidadTotal === 0 ? (
               <p className="text-xs">Elige las entradas para ver su plan.</p>
             ) : plan?.estado === "cargando" || plan === null ? (
               <p className="text-xs">Calculando el plan…</p>
@@ -241,7 +323,9 @@ export default function VentaForm({
               <p className="text-xs font-medium text-red-800">{plan.texto} Esta venta va de contado.</p>
             ) : (
               <>
-                <p className="text-xs font-semibold mb-1">Su plan ({etiquetaTipo(tipo, cantidad)} · ${plan.plan.total.toFixed(2)})</p>
+                <p className="text-xs font-semibold mb-1">
+                  Su plan ({mixta ? resumenCompra(tiposCompra) : etiquetaTipo(tipo, cantidad)} · ${plan.plan.total.toFixed(2)})
+                </p>
                 <ul className="text-xs space-y-0.5 tabular-nums">
                   {plan.plan.cuotas.map((c) => (
                     <li key={c.orden} className="flex justify-between gap-2">
@@ -273,8 +357,10 @@ export default function VentaForm({
             className={`w-full border border-neutral-300 rounded-md px-3 py-2 text-sm ${enCuotas ? "bg-neutral-100 text-neutral-600" : ""}`}
           />
           <p className="text-xs text-neutral-400 mt-1">
-            {enCuotas ? (cantidad === 0 ? "Elige las entradas para ver el precio." : `En cuotas el precio es el de lista: $${sugerido.toFixed(2)}.`) : cantidad === 0
+            {enCuotas ? (cantidadTotal === 0 ? "Elige las entradas para ver el precio." : `En cuotas el precio es el de lista: $${sugerido.toFixed(2)}.`) : cantidadTotal === 0
               ? "Elige las entradas para ver el precio sugerido."
+              : mixta
+              ? `${partes.map((p) => `${p.cantidad} ${etiquetaTipo(p.tipo, p.cantidad)} $${precioDe(p.tipo, p.cantidad).total.toFixed(2)}`).join(" + ")} = $${sugerido.toFixed(2)}. Editable si negociaste otro precio.`
               : enPreventa > 0 && enRegular > 0
               ? `${enPreventa} × $${unitarioPreventa.toFixed(2)} preventa + ${enRegular} × $${unitarioRegular.toFixed(2)} = $${sugerido.toFixed(2)}. Editable si negociaste otro precio.`
               : enPreventa > 0
@@ -394,15 +480,15 @@ export default function VentaForm({
 
       <button
         type="submit"
-        disabled={pending || cantidad === 0 || (enCuotas && (!planListo || !acepto || (pagoHoy !== null && !pagoHoy.ok)))}
+        disabled={pending || cantidadTotal === 0 || (enCuotas && (!planListo || !acepto || (pagoHoy !== null && !pagoHoy.ok)))}
         className="bg-neutral-900 text-white rounded-md py-2 text-sm font-medium disabled:opacity-50"
       >
         {pending
           ? "Registrando…"
           : enCuotas
-          ? `Registrar venta en cuotas${cantidad > 1 ? ` (${cantidad} entradas)` : ""}`
-          : cantidad > 1
-          ? `Registrar venta (${cantidad} entradas)`
+          ? `Registrar venta en cuotas${cantidadTotal > 1 ? ` (${cantidadTotal} entradas)` : ""}`
+          : cantidadTotal > 1
+          ? `Registrar venta (${cantidadTotal} entradas)`
           : "Registrar venta"}
       </button>
     </form>

@@ -31,6 +31,74 @@ export function etiquetaTipo(tipo: Tipo | string, cantidad = 1): string {
   return ETIQUETA_TIPO[tipo as Tipo] ?? String(tipo);
 }
 
+// ---------------------------------------------------------------- compras mixtas
+//
+// Desde el 28 oct (Anita) una compra hecha en Ventas puede llevar varias
+// zonas: "2 Preferenciales y 1 General" con un solo código, un solo pago y un
+// solo plan de cuotas. Cada ticket sigue teniendo su propio tipo; lo que
+// cambia es cómo se DESCRIBE la compra. Regla de estas funciones: una compra
+// de una sola zona se describe exactamente igual que antes, para que nada de
+// lo que ya existe cambie ni un carácter.
+
+export type ParteCompra = { tipo: Tipo; cantidad: number };
+
+/** "VIP", "Preferencial" / "Preferenciales", "General" / "Generales". */
+function zonaEnPlural(tipo: Tipo, n: number): string {
+  if (tipo === "vip") return "VIP";
+  if (tipo === "preferencial") return n === 1 ? "Preferencial" : "Preferenciales";
+  return n === 1 ? "General" : "Generales";
+}
+
+/** Cuántas entradas de cada zona, en orden VIP, Preferencial, General. */
+export function partesDe(tipos: readonly (Tipo | string)[]): ParteCompra[] {
+  const cuenta = new Map<Tipo, number>();
+  for (const t of tipos) if (TIPOS.includes(t as Tipo)) cuenta.set(t as Tipo, (cuenta.get(t as Tipo) ?? 0) + 1);
+  return TIPOS.filter((t) => cuenta.has(t)).map((t) => ({ tipo: t, cantidad: cuenta.get(t)! }));
+}
+
+/** ¿La compra lleva más de una zona? */
+export function esMixta(tipos: readonly (Tipo | string)[]): boolean {
+  return partesDe(tipos).length > 1;
+}
+
+/** La zona que manda en una compra mixta: VIP si hay, si no Preferencial, si no General. */
+export function zonaPrincipal(tipos: readonly (Tipo | string)[]): Tipo {
+  return partesDe(tipos)[0]?.tipo ?? ((tipos[0] as Tipo) ?? "general");
+}
+
+/** Una compra en una línea. Una sola zona: lo de siempre ("2 × VIP" con
+ *  sep " × ", "2 VIP" con sep " "). Varias: "2 Preferenciales + 1 General". */
+export function resumenCompra(tipos: readonly (Tipo | string)[], sep = " × "): string {
+  const partes = partesDe(tipos);
+  if (partes.length <= 1) {
+    const tipo = partes[0]?.tipo ?? (tipos[0] as Tipo);
+    return `${tipos.length}${sep}${etiquetaTipo(tipo, tipos.length)}`;
+  }
+  return partes.map((p) => `${p.cantidad} ${zonaEnPlural(p.tipo, p.cantidad)}`).join(" + ");
+}
+
+/** Para los correos de una compra mixta: "3 entradas: 2 Preferenciales y
+ *  1 General". null si es de una sola zona (el correo dice lo de siempre). */
+export function detalleMixto(tipos: readonly (Tipo | string)[]): string | null {
+  const partes = partesDe(tipos);
+  if (partes.length <= 1) return null;
+  const textos = partes.map((p) => `${p.cantidad} ${zonaEnPlural(p.tipo, p.cantidad)}`);
+  const lista = `${textos.slice(0, -1).join(", ")} y ${textos[textos.length - 1]}`;
+  return `${tipos.length} entradas: ${lista}`;
+}
+
+/** Con qué tipo y cantidad se guarda el plan de una compra (planes_pago).
+ *  El tope de VIP en cuotas cuenta los planes con tipo "vip" sumando su
+ *  cantidad, así que una compra mixta con VIP se guarda como "vip" con SOLO
+ *  sus entradas VIP: el tope cuenta exacto. Sin VIP, la zona principal con
+ *  su cantidad. Las pantallas describen la compra con sus tickets, no con esto. */
+export function tipoParaPlan(partes: readonly ParteCompra[]): ParteCompra {
+  const vip = partes.find((p) => p.tipo === "vip");
+  if (vip) return { tipo: "vip", cantidad: vip.cantidad };
+  const principal = TIPOS.map((t) => partes.find((p) => p.tipo === t)).find(Boolean);
+  return principal ?? { tipo: "general", cantidad: 0 };
+}
+
 /** "Entrada VIP" / "Entrada Preferencial" / "Entrada General". */
 export function nombreEntrada(tipo: Tipo | string): string {
   return `Entrada ${ETIQUETA_TIPO[tipo as Tipo] ?? String(tipo)}`;

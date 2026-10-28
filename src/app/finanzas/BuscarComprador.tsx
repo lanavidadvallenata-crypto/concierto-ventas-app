@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { buscarTickets, reenviarQR, reabrirPago, corregirContacto, reenviarCorreoCompra, anularCompraVerificada, type TicketBuscado } from "./actions";
 import { codigoCompra } from "@/lib/compra";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
-import { conAsiento, etiquetaTipo } from "@/lib/precios";
+import { conAsiento, resumenCompra } from "@/lib/precios";
 import { BOTON_SUAVE, CAMPO, TARJETA } from "@/components/noche/estilos";
 
 const ESTADO: Record<TicketBuscado["estadoPago"], { texto: string; clase: string }> = {
@@ -154,7 +154,7 @@ export default function BuscarComprador({ esAdmin = false }: { esAdmin?: boolean
                   <span className={`text-xs font-semibold rounded-full px-2 py-0.5 shrink-0 ${estado.clase}`}>{estado.texto}</span>
                 </div>
                 <p className="text-xs text-noche-suave">
-                  {t.cantidad} × {etiquetaTipo(t.tipo, t.cantidad)} · {formatoUsd(t.precio)}
+                  {resumenCompra(t.tipos, " × ")} · {formatoUsd(t.precio)}
                   {t.precioBs != null ? ` · ${formatoBs(t.precioBs)}` : ""} · {ETIQUETA_METODO[t.metodoPago] ?? t.metodoPago}
                   {t.referenciaPago ? ` · ref. ${t.referenciaPago}` : ""} · {ETIQUETA_CANAL[t.canal] ?? t.canal}
                 </p>
@@ -315,7 +315,7 @@ function ConfirmarAnulacion({
   return (
     <div className="mt-1 border border-red-400/40 bg-red-500/10 rounded-xl p-3 flex flex-col gap-2.5">
       <p className="text-xs font-semibold text-red-100">
-        Anular la compra de {t.compradorNombre}: {t.cantidad} × {etiquetaTipo(t.tipo, t.cantidad)} · {formatoUsd(t.precio)}
+        Anular la compra de {t.compradorNombre}: {resumenCompra(t.tipos, " × ")} · {formatoUsd(t.precio)}
       </p>
       <ul className="text-xs text-red-100/90 list-disc pl-4 flex flex-col gap-0.5">
         <li>

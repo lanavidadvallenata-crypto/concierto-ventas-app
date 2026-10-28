@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { verificarPago, rechazarPago } from "./actions";
 import { convertirABs } from "@/lib/tasa";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, METODOS_EN_BS, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
-import { conAsiento, etiquetaTipo, type Tipo } from "@/lib/precios";
+import { conAsiento, resumenCompra, type Tipo } from "@/lib/precios";
 
 export type CompraPendiente = {
   id: string; // id de un ticket del grupo (cualquiera sirve para las acciones)
@@ -14,6 +14,8 @@ export type CompraPendiente = {
   compradorTelefono: string;
   compradorEmail: string | null;
   tipo: Tipo;
+  /** El tipo de cada entrada: una compra mixta lleva varias zonas (28 oct). */
+  tipos: Tipo[];
   cantidad: number;
   total: number;
   totalBs: number | null; // monto exacto que se le indicó al comprador (si pagó en Bs)
@@ -160,7 +162,7 @@ export default function PendientesList({
                       conAsiento(c.tipo) ? "bg-violeta-hondo/40 text-lila-claro" : "bg-white/[0.08] text-noche-texto"
                     }`}
                   >
-                    {c.cantidad} × {etiquetaTipo(c.tipo, c.cantidad)}
+                    {resumenCompra(c.tipos, " × ")}
                   </span>
                   {c.enPreventa > 0 && (
                     <span className="text-[11px] font-bold uppercase tracking-wide text-red-100 bg-[#CE0100]/30 border border-[#CE0100]/60 rounded-full px-2 py-0.5">

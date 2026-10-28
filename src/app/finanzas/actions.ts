@@ -9,9 +9,9 @@ import { enviarCorreoQR, enviarCorreoRechazo, enviarCorreoCuotaVerificada, envia
 import { anularPlan, leerPlanPorGrupo, leerPlanPorGrupoEstricto, planConSaldo, verificarCuota } from "@/lib/abona618";
 import { fechaCorta, usd } from "@/lib/cuotas";
 import { guardarTasaManual } from "@/lib/tasa";
-import { lineasDeAsientos, obtenerAsiento } from "@/lib/asiento";
+import { lineasDeAsientosDe, obtenerAsiento } from "@/lib/asiento";
 import { ETIQUETA_METODO } from "@/lib/formato";
-import type { Tipo } from "@/lib/precios";
+import { detalleMixto, zonaPrincipal, type Tipo } from "@/lib/precios";
 
 type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
 
@@ -189,7 +189,7 @@ export async function verificarPago(ticketId: string): Promise<Resultado> {
       if (r.yaEstaba) {
         aviso = `Esa cuota ya estaba aprobada. ${aviso}`;
       } else if (correo) {
-        const asientos = await lineasDeAsientos(service, grupo.tickets[0].tipo, grupo.tickets.map((t) => t.silla_id));
+        const asientos = await lineasDeAsientosDe(service, grupo.tickets);
         try {
           await enviarCorreoCuotaVerificada({
             destinatario: correo,
@@ -360,6 +360,7 @@ export async function rechazarPago(ticketId: string): Promise<Resultado> {
       nombreComprador: primero.comprador_nombre,
       cantidad: rechazados.length,
       tipo: primero.tipo,
+      detalle: detalleMixto(rechazados.map((t) => t.tipo)),
       totalUsd: Math.round(totalUsd * 100) / 100,
       totalBs: totalBs == null ? null : Math.round(totalBs * 100) / 100,
       referencia: primero.referencia_pago,
@@ -533,6 +534,8 @@ export type TicketBuscado = {
   compradorEmail: string | null;
   compradorTelefono: string;
   tipo: Tipo;
+  /** El tipo de cada entrada: una compra mixta lleva varias zonas (28 oct). */
+  tipos: Tipo[];
   cantidad: number;
   precio: number;
   precioBs: number | null;
@@ -595,6 +598,8 @@ export async function buscarTickets(consulta: string): Promise<{ ok: true; ticke
     const existente = grupos.get(gid);
     if (existente) {
       existente.cantidad += 1;
+      existente.tipos.push(t.tipo as Tipo);
+      existente.tipo = zonaPrincipal(existente.tipos);
       existente.precio = Math.round((existente.precio + Number(t.precio)) * 100) / 100;
       if (existente.precioBs != null && t.precio_bs != null) existente.precioBs = Math.round((existente.precioBs + Number(t.precio_bs)) * 100) / 100;
       if (t.qr_usado) existente.qrUsados += 1;
@@ -609,6 +614,7 @@ export async function buscarTickets(consulta: string): Promise<{ ok: true; ticke
       compradorEmail: (t.comprador_email as string | null) ?? null,
       compradorTelefono: t.comprador_telefono as string,
       tipo: t.tipo as Tipo,
+      tipos: [t.tipo as Tipo],
       cantidad: 1,
       precio: Number(t.precio),
       precioBs: t.precio_bs == null ? null : Number(t.precio_bs),
@@ -712,7 +718,7 @@ export async function reenviarCorreoCompra(ticketId: string): Promise<Resultado>
   const verificadas = cuotasEnOrden.filter((c) => c.verificadoEn);
   // Mesa y sillas apartadas: el comprador las tiene que ver también en el
   // reenvío (nunca lanza: [] para General o si no se pueden leer).
-  const asientos = await lineasDeAsientos(service, primero.tipo, pendientes.map((t) => t.silla_id));
+  const asientos = await lineasDeAsientosDe(service, pendientes);
   if (plan && verificadas.length > 0) {
     const ultima = verificadas[verificadas.length - 1];
     try {
@@ -752,7 +758,8 @@ export async function reenviarCorreoCompra(ticketId: string): Promise<Resultado>
       destinatario: primero.comprador_email,
       nombreComprador: primero.comprador_nombre,
       cantidad: pendientes.length,
-      tipo: primero.tipo,
+      tipo: zonaPrincipal(pendientes.map((t) => t.tipo)),
+      detalle: detalleMixto(pendientes.map((t) => t.tipo)),
       totalUsd,
       totalBs,
       referencia: primero.referencia_pago,
@@ -877,6 +884,7 @@ export async function anularCompraVerificada(ticketId: string): Promise<Resultad
       nombreComprador: primero.comprador_nombre,
       cantidad: anulados.length,
       tipo: primero.tipo,
+      detalle: detalleMixto(anulados.map((t) => t.tipo)),
       totalUsd: Math.round(totalUsd * 100) / 100,
       totalBs: totalBs == null ? null : Math.round(totalBs * 100) / 100,
       referencia: primero.referencia_pago,

@@ -160,9 +160,8 @@ export default function Cotizador() {
 
           {cot.lineas.length > 1 && (
             <p className="text-sm rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
-              <strong>Son {cot.lineas.length} compras separadas</strong>, una por tipo de entrada (la web vende un tipo por compra). Hoy
-              son {cot.lineas.length} pagos:{" "}
-              {cot.lineas.map((l) => formatoUsd(l.plan ? l.plan.inicial : l.total)).join(" y ")}, cada uno con su referencia.
+              <strong>En Ventas va como una sola compra</strong>, con un solo pago por fecha: elige la primera zona y toca “+ Agregar
+              otra zona a esta compra”. Si el cliente compra por la web, son {cot.lineas.length} compras con un pago cada una.
             </p>
           )}
 

@@ -98,6 +98,7 @@ type Persona = {
   email: string | null;
   tipo: Tipo;
   cantidad: number;
+  detalle: string | null;
   totalUsd: number;
   pagado: number;
   saldo: number;
@@ -262,6 +263,7 @@ export default function CobranzaList({
           email: c.compradorEmail,
           tipo: c.tipo,
           cantidad: c.cantidad,
+          detalle: c.detalle,
           totalUsd: c.totalUsd,
           pagado: c.pagado,
           saldo: c.saldo,
@@ -460,7 +462,7 @@ export default function CobranzaList({
                         <span className="text-noche-tenue font-normal font-mono text-xs"> · {codigoCompra(p.grupoId)}</span>
                       </p>
                       <p className="text-xs text-noche-suave">
-                        {p.cantidad} {etiquetaTipo(p.tipo, p.cantidad)} ·{" "}
+                        {p.detalle ?? `${p.cantidad} ${etiquetaTipo(p.tipo, p.cantidad)}`} ·{" "}
                         {formatoUsd(p.totalUsd)}
                       </p>
                     </div>

@@ -6,11 +6,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { enviarCorreoPendiente } from "@/lib/enviar-qr";
 import { lineasDeAsientos } from "@/lib/asiento";
-import { conAsiento, cotizarCompra, MAX_POR_COMPRA, TIPOS, type Tipo } from "@/lib/precios";
+import { conAsiento, detalleMixto, MAX_POR_COMPRA, TIPOS, zonaPrincipal, type Tipo } from "@/lib/precios";
 import { metodoEsEnBs, metodosParaCanal, normalizarReferencia, validarReferencia, type MetodoPago } from "@/lib/pagos";
-import { registrarVentaInterna } from "@/lib/registrar-venta";
+import { registrarVentaInterna, type ParteVenta } from "@/lib/registrar-venta";
 import { crearPlan, planOfrecible } from "@/lib/abona618";
-import { CONDICIONES, CONDICIONES_VERSION, usd } from "@/lib/cuotas";
+import { leerMezcla, planDeCompra, tiposDe } from "@/lib/compra-mixta";
+import { aPlanPublico, CONDICIONES, CONDICIONES_VERSION, usd, type PlanPublico } from "@/lib/cuotas";
 import { leerPagoInicial, TEXTO_SIN_PLAN } from "@/lib/venta-cuotas";
 import { obtenerTasaActual } from "@/lib/tasa";
 
@@ -33,6 +34,9 @@ const ventaSchema = z.object({
   aceptoCondiciones: z.string().optional(),
   canalVenta: z.enum(["whatsapp", "presencial", "llamada"]).optional(),
   montoPagado: z.string().trim().max(30).optional(),
+  // Compra mixta (Anita, 28 oct): JSON [{tipo, sillaIds, cantidad}] cuando la
+  // vendedora agregó otra zona. Si viene, manda sobre tipo / sillaIds / cantidad.
+  mezcla: z.string().max(4000).optional(),
 });
 
 export type RegistrarVentaResult =
@@ -74,26 +78,36 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
     return { ok: false, error: "Ese método de pago no está disponible." };
   }
 
-  let sillaIds: string[] = [];
-  if (conAsiento(v.tipo)) {
-    try {
-      const arr = JSON.parse(v.sillaIds ?? "[]");
-      sillaIds = Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
-    } catch {
-      sillaIds = [];
+  let partes: ParteVenta[];
+  if (v.mezcla) {
+    const leidas = leerMezcla(v.mezcla);
+    if (!leidas.ok) return { ok: false, error: leidas.error };
+    partes = leidas.partes;
+  } else {
+    let sillaIds: string[] = [];
+    if (conAsiento(v.tipo)) {
+      try {
+        const arr = JSON.parse(v.sillaIds ?? "[]");
+        sillaIds = Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+      } catch {
+        sillaIds = [];
+      }
+      if (sillaIds.length === 0) return { ok: false, error: "Selecciona al menos una silla en el mapa." };
     }
-    if (sillaIds.length === 0) return { ok: false, error: "Selecciona al menos una silla en el mapa." };
+    partes = [{ tipo: v.tipo, sillaIds, cantidad: conAsiento(v.tipo) ? sillaIds.length : (v.cantidadGeneral ?? 1) }];
   }
+  const mixta = partes.length > 1;
 
   const service = createServiceClient();
-  if (v.enCuotas === "1") return registrarVentaEnCuotas(service, user.id, v, sillaIds);
+  if (v.enCuotas === "1") return registrarVentaEnCuotas(service, user.id, v, partes);
 
   const { data: perfil } = await service.from("perfiles").select("rol").eq("id", user.id).maybeSingle();
   const esAdmin = perfil?.rol === "admin";
   const res = await registrarVentaInterna(service, {
-    tipo: v.tipo,
-    sillaIds,
-    cantidad: v.cantidadGeneral ?? 1,
+    tipo: partes[0].tipo,
+    sillaIds: partes[0].sillaIds,
+    cantidad: partes[0].cantidad,
+    partes: mixta ? partes : undefined,
     compradorNombre: v.compradorNombre,
     compradorTelefono: v.compradorTelefono,
     compradorEmail: v.compradorEmail,
@@ -114,13 +128,14 @@ export async function registrarVenta(formData: FormData): Promise<RegistrarVenta
   revalidatePath("/comprar");
 
   let avisoEmail: string | undefined;
-  const asientos = await lineasDeAsientos(service, v.tipo, sillaIds);
+  const asientos = await asientosDe(service, partes);
   try {
     await enviarCorreoPendiente({
       destinatario: v.compradorEmail,
       nombreComprador: v.compradorNombre,
       cantidad: res.cantidad,
-      tipo: v.tipo,
+      tipo: zonaPrincipal(tiposDe(partes)),
+      detalle: detalleMixto(tiposDe(partes)),
       totalUsd: res.total,
       totalBs: res.totalBs,
       referencia: v.referenciaPago || null,
@@ -153,7 +168,7 @@ type DatosVenta = z.infer<typeof ventaSchema>;
  *
  * No se negocia el precio: el plan sale del precio de lista, igual que en la web.
  */
-async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: string, v: DatosVenta, sillaIds: string[]): Promise<RegistrarVentaResult> {
+async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: string, v: DatosVenta, partes: ParteVenta[]): Promise<RegistrarVentaResult> {
   if (v.aceptoCondiciones !== "1") {
     return { ok: false, error: "Marca la casilla: el cliente tiene que haber aceptado las condiciones del plan." };
   }
@@ -170,12 +185,13 @@ async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: strin
     if (errorRef) return { ok: false, error: errorRef };
   }
 
-  const cantidad = conAsiento(v.tipo) ? sillaIds.length : (v.cantidadGeneral ?? 1);
+  const sillaIds = partes.flatMap((p) => p.sillaIds);
+  const mixta = partes.length > 1;
   const enBs = metodoEsEnBs(metodo);
 
-  // Se mira ANTES de apartar nada: si no hay plan, no se crea la venta.
-  const { cotizacion } = await cotizarCompra(service, v.tipo, cantidad);
-  const previa = await planOfrecible(service, { tipo: v.tipo, cantidad, total: cotizacion.total, canal: "manual" });
+  // Se mira ANTES de apartar nada: si no hay plan, no se crea la venta. En
+  // una compra mixta el plan es UNO, sobre el total de todas sus zonas.
+  const previa = await planDeCompra(service, partes, { canal: "manual" });
   if (!previa.plan.hayPlan) return { ok: false, error: TEXTO_SIN_PLAN[previa.plan.motivo] ?? TEXTO_SIN_PLAN.error };
 
   const tasa = enBs ? await obtenerTasaActual(service) : null;
@@ -193,9 +209,10 @@ async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: strin
   }
 
   const res = await registrarVentaInterna(service, {
-    tipo: v.tipo,
-    sillaIds,
-    cantidad,
+    tipo: partes[0].tipo,
+    sillaIds: partes[0].sillaIds,
+    cantidad: partes[0].cantidad,
+    partes: mixta ? partes : undefined,
     compradorNombre: v.compradorNombre,
     compradorTelefono: v.compradorTelefono,
     compradorEmail: v.compradorEmail,
@@ -218,7 +235,10 @@ async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: strin
   }
 
   // El total real de la venta (la etapa pudo cambiar en estos segundos).
-  const ahora = res.total === cotizacion.total ? previa : await planOfrecible(service, { tipo: v.tipo, cantidad: res.cantidad, total: res.total, canal: "manual" });
+  const ahora =
+    res.total === previa.total
+      ? previa
+      : await planOfrecible(service, { tipo: previa.tipoPlan.tipo, cantidad: previa.tipoPlan.cantidad, total: res.total, canal: "manual" });
   if (!ahora.plan.hayPlan) return deshacer(TEXTO_SIN_PLAN[ahora.plan.motivo] ?? TEXTO_SIN_PLAN.error);
   const plan = ahora.plan;
   const pagoFinal = plan.inicial === previa.plan.inicial ? pago : leerPagoInicial({ inicialUsd: plan.inicial, enBs, tasa, texto: v.montoPagado });
@@ -227,8 +247,10 @@ async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: strin
   const creado = await crearPlan(service, {
     grupoId: res.grupoId,
     total: res.total,
-    tipo: v.tipo,
-    cantidad: res.cantidad,
+    // En una compra mixta con VIP, el plan se guarda como VIP con solo sus
+    // entradas VIP: así el tope de VIP en cuotas cuenta exacto (tipoParaPlan).
+    tipo: previa.tipoPlan.tipo,
+    cantidad: previa.tipoPlan.cantidad,
     cuotas: plan.cuotas,
     canal: "manual",
     creadoPor: vendedoraId,
@@ -263,13 +285,14 @@ async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: strin
     };
   }
   let avisoEmail: string | undefined;
-  const asientos = await lineasDeAsientos(service, v.tipo, sillaIds);
+  const asientos = await asientosDe(service, partes);
   try {
     await enviarCorreoPendiente({
       destinatario: v.compradorEmail,
       nombreComprador: v.compradorNombre,
       cantidad: res.cantidad,
-      tipo: v.tipo,
+      tipo: zonaPrincipal(tiposDe(partes)),
+      detalle: detalleMixto(tiposDe(partes)),
       totalUsd: res.total,
       referencia: referencia || null,
       grupoId: res.grupoId,
@@ -281,6 +304,42 @@ async function registrarVentaEnCuotas(service: ServiceClient, vendedoraId: strin
   }
 
   return { ok: true, avisoEmail, cantidad: res.cantidad, total: res.total, plan: { cuotas: calendario, excedenteUsd: pagoFinal.excedenteUsd } };
+}
+
+/** Las líneas de sillas de toda la compra, zona por zona (VIP primero). */
+async function asientosDe(service: ServiceClient, partes: ParteVenta[]): Promise<string[]> {
+  const lineas: string[] = [];
+  for (const p of partes) if (conAsiento(p.tipo)) lineas.push(...(await lineasDeAsientos(service, p.tipo, p.sillaIds)));
+  return lineas;
+}
+
+/**
+ * El plan que tendría la venta en cuotas, para mostrarlo en la pantalla de
+ * Ventas mientras se arma la compra. Es la MISMA función que usa
+ * registrarVentaEnCuotas, así que lo que se ve es lo que se guarda.
+ */
+export async function planDeVenta(
+  pedido: { tipo: Tipo; cantidad: number }[]
+): Promise<{ ok: true; plan: PlanPublico; total: number } | { ok: false; error: string }> {
+  const { user, error } = await requiereVentas();
+  if (!user) return { ok: false, error: error! };
+  const partes: { tipo: Tipo; cantidad: number }[] = [];
+  for (const p of Array.isArray(pedido) ? pedido : []) {
+    if (!TIPOS.includes(p?.tipo) || partes.some((x) => x.tipo === p.tipo)) return { ok: false, error: "Revisa las zonas de la compra." };
+    const n = Number(p.cantidad);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_POR_COMPRA[p.tipo]) return { ok: false, error: "Revisa las cantidades de la compra." };
+    partes.push({ tipo: p.tipo, cantidad: n });
+  }
+  if (partes.length === 0) return { ok: false, error: "Elige al menos una entrada." };
+  try {
+    const service = createServiceClient();
+    const r = await planDeCompra(service, partes, { canal: "manual" });
+    if (!r.plan.hayPlan) return { ok: false, error: TEXTO_SIN_PLAN[r.plan.motivo] ?? TEXTO_SIN_PLAN.error };
+    return { ok: true, plan: aPlanPublico(r.plan), total: r.total };
+  } catch (e) {
+    console.error("Plan de venta:", (e as Error).message);
+    return { ok: false, error: TEXTO_SIN_PLAN.error };
+  }
 }
 
 function revalidar() {

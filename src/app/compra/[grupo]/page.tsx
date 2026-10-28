@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import QRCode from "qrcode";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerTasaActual } from "@/lib/tasa";
-import { obtenerAsiento, descripcionEntrada, lineasDeAsientos } from "@/lib/asiento";
+import { obtenerAsiento, descripcionEntrada, lineasDeAsientosDe } from "@/lib/asiento";
 import { URL_EQUIPO } from "@/lib/dominios";
 import { WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
 import BotonSoporte from "@/components/BotonSoporte";
@@ -11,7 +11,7 @@ import { codigoEntrada } from "@/lib/qr";
 import { leerPlanPorGrupo } from "@/lib/abona618";
 import { INSTRUCCIONES_PAGO } from "@/lib/pagos";
 import PlanComprador, { type CuotaVista } from "./PlanComprador";
-import { etiquetaTipo, nombreEntrada, type Tipo } from "@/lib/precios";
+import { detalleMixto, etiquetaTipo, nombreEntrada, type Tipo } from "@/lib/precios";
 
 // "Mis entradas": todas las entradas de UNA compra, con un botón de WhatsApp
 // por entrada para mandarle a cada invitado la suya (enlace /entrada/<token>).
@@ -80,7 +80,7 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
   // pago en verificación). Con QR, cada entrada ya muestra su asiento abajo.
   const puestosApartados =
     verificadas.length === 0 && pendientes.length > 0
-      ? await lineasDeAsientos(service, pendientes[0].tipo, pendientes.map((t) => t.silla_id))
+      ? await lineasDeAsientosDe(service, pendientes)
       : [];
 
   const filas = await Promise.all(
@@ -111,7 +111,9 @@ export default async function MisEntradasPage({ params }: { params: Promise<{ gr
           <p className="text-sm text-[#E8C9C9] mt-1">
             Compra {codigo} · a nombre de {nombre} ·{" "}
             {plan && verificadas.length === 0
-              ? `${plan.cantidad} ${plan.cantidad === 1 ? "entrada" : "entradas"} ${etiquetaTipo(plan.tipo, plan.cantidad)} en plan de pago`
+              ? detalleMixto(pendientes.map((t) => t.tipo))
+                ? `${detalleMixto(pendientes.map((t) => t.tipo))} en plan de pago`
+                : `${plan.cantidad} ${plan.cantidad === 1 ? "entrada" : "entradas"} ${etiquetaTipo(plan.tipo, plan.cantidad)} en plan de pago`
               : `${verificadas.length} ${verificadas.length === 1 ? "entrada" : "entradas"}`}
           </p>
         </div>

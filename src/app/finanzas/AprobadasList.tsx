@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { anularCompraVerificada } from "./actions";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
-import { etiquetaTipo, type Tipo } from "@/lib/precios";
+import { resumenCompra, type Tipo } from "@/lib/precios";
 import { TARJETA } from "@/components/noche/estilos";
 
 // Auditoría solo para admin: qué compras se aprobaron, quién las vendió,
@@ -16,6 +16,8 @@ export type FilaAprobada = {
   compradorNombre: string;
   compradorEmail: string | null;
   tipo: Tipo;
+  /** El tipo de cada entrada: una compra mixta lleva varias zonas (28 oct). */
+  tipos: Tipo[];
   cantidad: number;
   total: number;
   totalBs: number | null;
@@ -122,7 +124,7 @@ export default function AprobadasList({ filas }: { filas: FilaAprobada[] }) {
               </div>
 
               <p className="text-xs text-noche-suave">
-                {f.cantidad} {etiquetaTipo(f.tipo, f.cantidad)} · {ETIQUETA_METODO[f.metodoPago] ?? f.metodoPago}
+                {resumenCompra(f.tipos, " ")} · {ETIQUETA_METODO[f.metodoPago] ?? f.metodoPago}
                 {f.referenciaPago ? ` · ref. ${f.referenciaPago}` : ""} · {ETIQUETA_CANAL[f.canal] ?? f.canal}
               </p>
 

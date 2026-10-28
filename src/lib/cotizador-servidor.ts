@@ -3,7 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { cotizarCompra, type Tipo } from "@/lib/precios";
 import { planOfrecible } from "@/lib/abona618";
 import { aPlanPublico, hoyEnVenezuela } from "@/lib/cuotas";
-import { sumarPorFecha, type Cotizacion, type LineaCotizada } from "@/lib/cotizador";
+import { pagosDeJunta, sumarPorFecha, type Cotizacion, type LineaCotizada } from "@/lib/cotizador";
+import { planDeCompra } from "@/lib/compra-mixta";
 
 /** Cotiza el pedido con las mismas funciones que el checkout. */
 export async function cotizarPedido(
@@ -28,5 +29,10 @@ export async function cotizarPedido(
   }
 
   const totalUsd = Math.round(lineas.reduce((s, l) => s + l.total, 0) * 100) / 100;
-  return { hoy, tasaEurVes: deps.tasaEurVes, lineas, porFecha: sumarPorFecha(lineas, hoy, deps.tasaEurVes), totalUsd };
+  if (lineas.length < 2) return { hoy, tasaEurVes: deps.tasaEurVes, lineas, porFecha: sumarPorFecha(lineas, hoy, deps.tasaEurVes), totalUsd };
+
+  // Varias zonas: como las registra Ventas, una sola compra con un solo plan.
+  const j = await planDeCompra(service, pedido, { canal: "manual", hoy });
+  const junta = { total: j.total, plan: j.plan.hayPlan ? aPlanPublico(j.plan) : null, sinPlan: j.plan.hayPlan ? null : j.plan.motivo };
+  return { hoy, tasaEurVes: deps.tasaEurVes, lineas, junta, porFecha: pagosDeJunta(junta, hoy, deps.tasaEurVes), totalUsd: j.total };
 }

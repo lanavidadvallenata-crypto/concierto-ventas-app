@@ -65,6 +65,8 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
     // .range() de PostgREST: límites INCLUSIVOS en los dos extremos.
     let rango: { desde: number; hasta: number } | null = null;
     let orden: { col: string; asc: boolean } | null = null;
+    // select("id", { count: "exact", head: true }): cuenta sin traer filas.
+    let contar: { head: boolean } | null = null;
 
     const filas = () => (d.tablas[tabla] ??= []);
 
@@ -111,8 +113,9 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
     };
 
     const api: Record<string, unknown> = {
-      select: (_cols?: string) => {
+      select: (_cols?: string, opciones?: { count?: string; head?: boolean }) => {
         if (accion === "select") d.llamadas.push(`select ${tabla}`);
+        if (opciones?.count) contar = { head: Boolean(opciones.head) };
         return api;
       },
       insert: (v: Fila | Fila[]) => {
@@ -151,6 +154,11 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
       // siempre todo, la prueba pasaría con un paginador roto.
       range: (desde: number, hasta: number) => {
         rango = { desde, hasta };
+        return api;
+      },
+      // LIMIT: las pruebas que lo usan leen una sola fila (el evento).
+      limit: (n: number) => {
+        rango = { desde: 0, hasta: n - 1 };
         return api;
       },
       // ORDER BY. Paginar con .range() sin orden devuelve filas arbitrarias
@@ -194,7 +202,7 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
         );
       },
       // Un await directo sobre la consulta (sin maybeSingle/single).
-      then: (res: (v: { data: Fila[] | null; error: { message: string; code?: string } | null }) => unknown) => {
+      then: (res: (v: { data: Fila[] | null; error: { message: string; code?: string } | null; count?: number }) => unknown) => {
         const e = error();
         if (e) return Promise.resolve(res({ data: null, error: e }));
         correr();
@@ -211,6 +219,7 @@ export function crearDoble(datos: Record<string, Fila[]> = {}): Doble {
           });
         }
         const recortadas = rango ? ordenadas.slice(rango.desde, rango.hasta + 1) : ordenadas;
+        if (contar) return Promise.resolve(res({ data: contar.head ? null : recortadas, error: null, count: afectadas.length }));
         return Promise.resolve(res({ data: recortadas, error: null }));
       },
     };

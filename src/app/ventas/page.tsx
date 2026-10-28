@@ -3,7 +3,7 @@ import { requerirPerfil } from "@/lib/perfil";
 import { createServiceClient } from "@/lib/supabase/server";
 import { obtenerMapas, sillasDisponibles } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
-import { disponibilidadEtapas, etiquetaTipo } from "@/lib/precios";
+import { disponibilidadEtapas, resumenCompra } from "@/lib/precios";
 import Nav from "@/components/Nav";
 import VentaForm from "./VentaForm";
 
@@ -63,16 +63,16 @@ export default async function VentasPage() {
       : null;
 
   // Agrupar "tus últimas ventas" por compra.
-  const grupos = new Map<string, { id: string; nombre: string; tipo: string; cantidad: number; total: number; estado: string; creadoEn: string }>();
+  const grupos = new Map<string, { id: string; nombre: string; tipos: string[]; total: number; estado: string; creadoEn: string }>();
   for (const t of misVentasHoy ?? []) {
     const gid = (t.grupo_id as string | null) ?? (t.id as string);
     const g = grupos.get(gid);
     if (g) {
-      g.cantidad += 1;
+      g.tipos.push(t.tipo as string);
       g.total = Math.round((g.total + Number(t.precio)) * 100) / 100;
       if (t.estado_pago === "pendiente") g.estado = "pendiente";
     } else {
-      grupos.set(gid, { id: gid, nombre: t.comprador_nombre as string, tipo: t.tipo as string, cantidad: 1, total: Number(t.precio), estado: t.estado_pago as string, creadoEn: t.created_at as string });
+      grupos.set(gid, { id: gid, nombre: t.comprador_nombre as string, tipos: [t.tipo as string], total: Number(t.precio), estado: t.estado_pago as string, creadoEn: t.created_at as string });
     }
   }
   const ultimasVentas = [...grupos.values()].slice(0, 8);
@@ -106,7 +106,7 @@ export default async function VentasPage() {
               {ultimasVentas.map((g) => (
                 <div key={g.id} className="flex items-center justify-between bg-white border border-neutral-200 rounded-md px-3 py-2 text-sm">
                   <span className="truncate">
-                    {g.nombre} · {g.cantidad} × {etiquetaTipo(g.tipo, g.cantidad)} · ${g.total.toFixed(2)}
+                    {g.nombre} · {resumenCompra(g.tipos, " × ")} · ${g.total.toFixed(2)}
                   </span>
                   <span
                     className={`shrink-0 ml-3 ${

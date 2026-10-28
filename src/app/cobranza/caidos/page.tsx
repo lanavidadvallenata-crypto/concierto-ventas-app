@@ -80,7 +80,7 @@ export default async function CaidosPage() {
                       <span className="font-mono text-xs text-noche-tenue">· {codigoCompra(c.grupoId)}</span>
                     </p>
                     <p className="text-sm text-noche-suave">
-                      {c.cantidad} {etiquetaTipo(c.tipo, c.cantidad)} · {formatoUsd(c.totalUsd)}
+                      {c.detalle ?? `${c.cantidad} ${etiquetaTipo(c.tipo, c.cantidad)}`} · {formatoUsd(c.totalUsd)}
                     </p>
                   </div>
                   <span

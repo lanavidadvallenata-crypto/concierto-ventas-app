@@ -9,7 +9,7 @@ import { fechaCorta, hoyEnVenezuela, usd } from "@/lib/cuotas";
 import { metodoEsEnBs, normalizarReferencia, validarReferencia } from "@/lib/pagos";
 import { generarTokenQR } from "@/lib/qr";
 import { enviarCorreoQR } from "@/lib/enviar-qr";
-import { lineasDeAsientos, obtenerAsiento } from "@/lib/asiento";
+import { lineasDeAsientosDe, obtenerAsiento } from "@/lib/asiento";
 import type { Tipo } from "@/lib/precios";
 
 type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
@@ -367,7 +367,10 @@ export async function aprobarCuotas(cuotaIds: string[]): Promise<Resultado> {
 
     const correo = primero?.comprador_email as string | null | undefined;
     if (correo) {
-      const asientos = await lineasDeAsientos(service, String(primero.tipo), lista.map((t) => t.silla_id as string | null));
+      const asientos = await lineasDeAsientosDe(
+        service,
+        lista.map((t) => ({ tipo: String(t.tipo), silla_id: t.silla_id as string | null }))
+      );
       try {
         await enviarCorreoCuotaVerificada({
           destinatario: correo,

@@ -19,7 +19,7 @@ import {
   type Plan,
   type SinPlan,
 } from "@/lib/cuotas";
-import type { Tipo } from "@/lib/precios";
+import { esMixta, resumenCompra, type Tipo } from "@/lib/precios";
 
 export type Config = {
   activo: boolean;
@@ -960,6 +960,9 @@ export type CuotaPorCobrar = {
   saldo: number;
   tipo: Tipo;
   cantidad: number;
+  /** Compra mixta (28 oct): "2 Preferenciales + 1 General". null = una sola
+   *  zona, y la pantalla la describe con tipo y cantidad como siempre. */
+  detalle: string | null;
   estadoPlan: PlanGuardado["estado"];
   compradorNombre: string | null;
   compradorTelefono: string | null;
@@ -1048,7 +1051,7 @@ export async function listaDeCobranza(
   const { data: tickets, error: errorTickets } = await seleccionarTodo<Record<string, unknown>>(
     service,
     "tickets",
-    "grupo_id, comprador_nombre, comprador_telefono, comprador_email",
+    "grupo_id, tipo, comprador_nombre, comprador_telefono, comprador_email",
     (q) => q.in("grupo_id", grupos).order("id")
   );
   if (errorTickets) {
@@ -1059,8 +1062,10 @@ export async function listaDeCobranza(
   }
 
   const contacto = new Map<string, { nombre: string | null; telefono: string | null; email: string | null }>();
+  const tiposPorGrupo = new Map<string, string[]>();
   for (const t of tickets ?? []) {
     const g = String(t.grupo_id);
+    tiposPorGrupo.set(g, [...(tiposPorGrupo.get(g) ?? []), String(t.tipo)]);
     if (!contacto.has(g)) {
       contacto.set(g, {
         nombre: (t.comprador_nombre as string | null) ?? null,
@@ -1132,6 +1137,7 @@ export async function listaDeCobranza(
         saldo: plan.saldo,
         tipo: plan.tipo,
         cantidad: plan.cantidad,
+        detalle: esMixta(tiposPorGrupo.get(plan.grupoId) ?? []) ? resumenCompra(tiposPorGrupo.get(plan.grupoId) ?? [], " ") : null,
         estadoPlan: plan.estado,
         compradorNombre: quien?.nombre ?? null,
         compradorTelefono: quien?.telefono ?? null,
@@ -1288,11 +1294,24 @@ export async function resumenPlanes(
     porPlan.set(planId, acc);
   }
 
+  // Entradas por compra contadas en sus tickets: una compra mixta guarda en
+  // el plan solo la cantidad de su zona principal (tipoParaPlan). Si esta
+  // lectura falla, se usa la cantidad del plan como antes: es un conteo de
+  // pantalla, no plata.
+  const entradasPorGrupo = new Map<string, number>();
+  const tickets = await seleccionarTodo<{ grupo_id: string }>(service, "tickets", "grupo_id", (q) =>
+    q
+      .in("grupo_id", planes.data.filter((p) => p.estado === "al_dia" || p.estado === "en_mora" || p.estado === "completado").map((p) => String(p.grupo_id)))
+      .neq("estado_pago", "rechazado")
+  );
+  if (!tickets.error) for (const t of tickets.data) entradasPorGrupo.set(String(t.grupo_id), (entradasPorGrupo.get(String(t.grupo_id)) ?? 0) + 1);
+
   const r = resumenVacio(config, false);
   r.hayPlanes = true;
 
   for (const p of planes.data) {
     const cant = Number(p.cantidad) || 0;
+    const entradas = Math.max(cant, entradasPorGrupo.get(String(p.grupo_id)) ?? 0);
     const total = Number(p.total_usd) || 0;
     const c = porPlan.get(String(p.id)) ?? { cobrado: 0, vencido: 0, proximo: 0 };
 
@@ -1302,7 +1321,7 @@ export async function resumenPlanes(
 
     if (p.estado === "al_dia" || p.estado === "en_mora") {
       r.enCurso.compras += 1;
-      r.enCurso.entradas += cant;
+      r.enCurso.entradas += entradas;
       r.enCurso.valorUsd += total;
       r.enCurso.cobradoUsd += c.cobrado;
       r.vencidoSinCobrarUsd += c.vencido;
@@ -1310,7 +1329,7 @@ export async function resumenPlanes(
       if (p.grupo_id) r.gruposEnCurso.push(String(p.grupo_id));
     } else if (p.estado === "completado") {
       r.completados.compras += 1;
-      r.completados.entradas += cant;
+      r.completados.entradas += entradas;
       r.completados.valorUsd += total;
     } else if (p.estado === "vencido" || p.estado === "anulado") {
       if (p.estado === "vencido") r.caidos.vencidos += 1;
@@ -1341,6 +1360,8 @@ export type PlanCaido = {
   estado: "vencido" | "anulado";
   tipo: string;
   cantidad: number;
+  /** Compra mixta: ver CuotaPorCobrar.detalle. */
+  detalle: string | null;
   totalUsd: number;
   abonadoUsd: number;
   creadoEn: string | null;
@@ -1369,7 +1390,7 @@ export async function listarCaidos(service: SupabaseClient): Promise<{ caidos: P
     seleccionarTodo<Record<string, unknown>>(
       service,
       "tickets",
-      "grupo_id, comprador_nombre, comprador_email, comprador_telefono",
+      "grupo_id, tipo, comprador_nombre, comprador_email, comprador_telefono",
       (q) => q.in("grupo_id", grupoIds)
     ),
   ]);
@@ -1383,7 +1404,11 @@ export async function listarCaidos(service: SupabaseClient): Promise<{ caidos: P
     abonado.set(String(c.plan_id), (abonado.get(String(c.plan_id)) ?? 0) + monto);
   }
   const comprador = new Map<string, Record<string, unknown>>();
-  for (const t of tickets.data) if (!comprador.has(String(t.grupo_id))) comprador.set(String(t.grupo_id), t);
+  const tiposCaidos = new Map<string, string[]>();
+  for (const t of tickets.data) {
+    if (!comprador.has(String(t.grupo_id))) comprador.set(String(t.grupo_id), t);
+    tiposCaidos.set(String(t.grupo_id), [...(tiposCaidos.get(String(t.grupo_id)) ?? []), String(t.tipo)]);
+  }
 
   const caidos: PlanCaido[] = planes.data.map((p) => {
     const t = comprador.get(String(p.grupo_id));
@@ -1392,6 +1417,7 @@ export async function listarCaidos(service: SupabaseClient): Promise<{ caidos: P
       estado: p.estado === "vencido" ? "vencido" : "anulado",
       tipo: String(p.tipo),
       cantidad: Number(p.cantidad) || 0,
+      detalle: esMixta(tiposCaidos.get(String(p.grupo_id)) ?? []) ? resumenCompra(tiposCaidos.get(String(p.grupo_id)) ?? [], " ") : null,
       totalUsd: centavos(Number(p.total_usd) || 0),
       abonadoUsd: centavos(abonado.get(String(p.id)) ?? 0),
       creadoEn: (p.creado_en as string | null) ?? null,

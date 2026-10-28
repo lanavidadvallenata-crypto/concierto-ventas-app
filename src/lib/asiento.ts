@@ -137,6 +137,22 @@ export async function lineasDeAsientos(
   return asientos && asientos.length > 0 ? resumirAsientos(tipo, asientos) : [];
 }
 
+/** Igual que lineasDeAsientos, pero con los tickets de la compra: sirve para
+ *  las compras mixtas (28 oct), donde cada ticket trae su zona. Primero VIP,
+ *  después Preferencial; General no tiene silla. Una compra de una sola zona
+ *  da exactamente lo mismo que lineasDeAsientos. */
+export async function lineasDeAsientosDe(
+  service: SupabaseClient,
+  tickets: readonly { tipo: Tipo | string; silla_id: string | null | undefined }[]
+): Promise<string[]> {
+  const lineas: string[] = [];
+  for (const zona of ["vip", "preferencial"] as const) {
+    const sillas = tickets.filter((t) => t.tipo === zona).map((t) => t.silla_id);
+    if (sillas.length > 0) lineas.push(...(await lineasDeAsientos(service, zona, sillas)));
+  }
+  return lineas;
+}
+
 /** Lo que se imprime en la entrada, el correo y la puerta para cualquier tipo. */
 export function descripcionEntrada(tipo: Tipo | string, asiento: Asiento | null): string {
   if (!conAsiento(tipo as Tipo)) return "Acceso general · sin asiento asignado";

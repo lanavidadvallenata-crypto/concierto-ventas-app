@@ -11,8 +11,10 @@
 // el cotizador es lo que la web le va a cobrar al cliente, al céntimo, con el
 // calendario del día y el tope de VIP en cuotas real.
 //
-// La web vende UN tipo de entrada por compra, así que una mezcla son varias
-// compras, cada una con su plan y su pago. El cotizador lo dice tal cual.
+// La web vende UN tipo de entrada por compra, pero desde el 28 oct Ventas
+// registra una mezcla como UNA compra con un solo plan (compra mixta). Por eso
+// "El cliente paga" y el mensaje salen del plan de la compra junta; las
+// líneas por zona quedan como desglose.
 //
 // Este archivo es puro (lo usa también la pantalla). La parte que lee la base
 // está en cotizador-servidor.ts.
@@ -44,6 +46,9 @@ export type Cotizacion = {
   hoy: string;
   tasaEurVes: number | null;
   lineas: LineaCotizada[];
+  /** Con más de una zona: la compra junta como la registra Ventas (un plan
+   *  sobre el total). Ausente con una sola zona. */
+  junta?: { total: number; plan: PlanPublico | null; sinPlan: SinPlan["motivo"] | null };
   /** Todos los pagos de todas las compras, sumados por fecha. */
   porFecha: PagoDelDia[];
   totalUsd: number;
@@ -64,6 +69,12 @@ export function validarPedido(pedido: Pedido): { ok: true; lineas: { tipo: Tipo;
   }
   if (lineas.length === 0) return { ok: false, error: "Elige al menos una entrada." };
   return { ok: true, lineas };
+}
+
+/** Los pagos por fecha de la compra junta (compra mixta). Puro. */
+export function pagosDeJunta(junta: NonNullable<Cotizacion["junta"]>, hoy: string, tasaEurVes: number | null): PagoDelDia[] {
+  const pagos = junta.plan ? junta.plan.cuotas.map((c) => ({ venceEl: c.venceEl, monto: c.monto })) : [{ venceEl: hoy, monto: junta.total }];
+  return pagos.map((p) => ({ venceEl: p.venceEl, usd: p.monto, bs: tasaEurVes ? convertirABs(p.monto, tasaEurVes) : null, esHoy: p.venceEl === hoy }));
 }
 
 /** Suma por fecha los pagos de todas las compras. Puro: se prueba solo. */
@@ -101,6 +112,7 @@ function nombre(tipo: Tipo, n: number) {
  * paga a la tasa de ese día.
  */
 export function mensajeCotizacion(c: Cotizacion): string {
+  if (c.junta && c.lineas.length > 1) return mensajeJunta(c, c.junta);
   const conPlan = c.lineas.filter((l) => l.plan);
   const sinPlan = c.lineas.filter((l) => !l.plan);
   const hoyPago = c.porFecha.find((p) => p.esHoy);
@@ -142,6 +154,30 @@ export function mensajeCotizacion(c: Cotizacion): string {
   }
   if (sinPlan.length > 0 && conPlan.length > 0) {
     partes.push(`${sinPlan.map((l) => nombre(l.tipo, l.cantidad)).join(" y ")}: se paga completo, sin cuotas.`);
+  }
+  return partes.join("\n");
+}
+
+/** El mensaje de una compra con varias zonas: una sola compra, un pago por fecha. */
+function mensajeJunta(c: Cotizacion, junta: NonNullable<Cotizacion["junta"]>): string {
+  const partes: string[] = ["¡Hola! Así queda tu compra para Navidad Vallenata:", ""];
+  for (const l of c.lineas) partes.push(`• ${nombre(l.tipo, l.cantidad)} (${usd(l.total)})`);
+  partes.push("");
+  const pagos = pagosDeJunta(junta, c.hoy, c.tasaEurVes);
+  if (junta.plan) {
+    partes.push(`Total: ${usd(junta.total)}, todo en una sola compra:`);
+    for (const p of pagos) {
+      const bs = p.esHoy && p.bs != null ? ` (${formatoBs(p.bs)} a la tasa BCV de hoy)` : "";
+      partes.push(`${p.esHoy ? "Hoy" : fechaCorta(p.venceEl)}: ${usd(p.usd)}${bs}`);
+    }
+    partes.push("");
+    partes.push(
+      "Tu puesto queda apartado a tu nombre con el precio congelado. Las fechas son fijas y puedes adelantar pagos cuando quieras. Las entradas con su QR te llegan al correo cuando completas el último pago."
+    );
+  } else {
+    const hoyPago = pagos[0];
+    const bs = hoyPago?.bs != null ? ` (${formatoBs(hoyPago.bs)} a la tasa BCV de hoy)` : "";
+    partes.push(`Total hoy: ${usd(junta.total)}${bs}, pago completo.`);
   }
   return partes.join("\n");
 }

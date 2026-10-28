@@ -32,7 +32,12 @@ export type DatosVentaInterna = {
   // ticket, pero se guardan a precio 0 para no inflar la recaudación ni el
   // ticket promedio de boletería. El monto del patrocinio vive en su tabla.
   cortesia?: boolean;
+  // Compra mixta (Anita, 28 oct): varias zonas en una sola compra. Si viene,
+  // manda sobre tipo / sillaIds / cantidad. Una zona por parte.
+  partes?: ParteVenta[];
 };
+
+export type ParteVenta = { tipo: Tipo; sillaIds: string[]; cantidad: number };
 
 export type ResultadoVentaInterna =
   | { ok: true; grupoId: string; ticketIds: string[]; cantidad: number; total: number; totalBs: number | null }
@@ -44,59 +49,80 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
   const { data: evento } = await service.from("eventos").select("id, aforo_general_total").limit(1).single();
   if (!evento) return { ok: false, error: "No se encontró el evento en la base de datos." };
 
-  const sillaIds = conAsiento(d.tipo) ? [...new Set(d.sillaIds)] : [];
-  const cantidad = conAsiento(d.tipo) ? sillaIds.length : Math.floor(d.cantidad);
+  // Una venta normal es una sola parte; una compra mixta, una parte por zona.
+  const entrada: ParteVenta[] = d.partes?.length ? d.partes : [{ tipo: d.tipo, sillaIds: d.sillaIds, cantidad: d.cantidad }];
+  if (new Set(entrada.map((p) => p.tipo)).size !== entrada.length) {
+    return { ok: false, error: "Cada zona va una sola vez en la compra." };
+  }
+  const partes = entrada.map((p) => {
+    const sillas = conAsiento(p.tipo) ? [...new Set(p.sillaIds)] : [];
+    return { tipo: p.tipo, sillaIds: sillas, cantidad: conAsiento(p.tipo) ? sillas.length : Math.floor(p.cantidad) };
+  });
 
-  if (cantidad < 1) return { ok: false, error: conAsiento(d.tipo) ? "Elige al menos una silla en el mapa." : "La cantidad debe ser al menos 1." };
-  if (cantidad > MAX_POR_COMPRA[d.tipo]) {
-    return { ok: false, error: `Máximo ${MAX_POR_COMPRA[d.tipo]} ${conAsiento(d.tipo) ? "sillas" : "entradas generales"} por venta.` };
+  for (const p of partes) {
+    if (p.cantidad < 1) return { ok: false, error: conAsiento(p.tipo) ? "Elige al menos una silla en el mapa." : "La cantidad debe ser al menos 1." };
+    if (p.cantidad > MAX_POR_COMPRA[p.tipo]) {
+      return { ok: false, error: `Máximo ${MAX_POR_COMPRA[p.tipo]} ${conAsiento(p.tipo) ? "sillas" : "entradas generales"} por venta.` };
+    }
   }
 
-  if (conAsiento(d.tipo)) {
-    // Las sillas tienen que ser de la zona que se cobra (el precio sale del
-    // tipo, y el tipo viene del formulario).
-    if (!(await sillasSonDeZona(service, sillaIds, d.tipo))) {
+  // Las sillas tienen que ser de la zona que se cobra (el precio sale del
+  // tipo, y el tipo viene del formulario). Se revisa todo antes de apartar.
+  for (const p of partes) {
+    if (conAsiento(p.tipo) && !(await sillasSonDeZona(service, p.sillaIds, p.tipo))) {
       return { ok: false, error: "Esas sillas no son de la zona elegida — revisa el mapa." };
     }
+  }
 
-    // Reserva atómica silla por silla; si alguna falla, se liberan las tomadas.
-    const tomadas: string[] = [];
-    for (const id of sillaIds) {
-      const { data: silla, error } = await service
-        .from("sillas_vip")
-        .update({ estado: "reservada", reservado_hasta: null })
-        .eq("id", id)
-        .eq("estado", "disponible")
-        .select("id")
-        .maybeSingle();
-      if (error || !silla) {
-        if (tomadas.length) await service.from("sillas_vip").update({ estado: "disponible" }).in("id", tomadas);
-        return { ok: false, error: "Una de las sillas ya no está disponible — alguien más la tomó. Elige otra." };
-      }
-      tomadas.push(silla.id);
-    }
-  } else {
+  const general = partes.find((p) => p.tipo === "general");
+  if (general) {
     const { count: generalVendidos } = await service
       .from("tickets")
       .select("id", { count: "exact", head: true })
       .eq("tipo", "general")
       .neq("estado_pago", "rechazado");
     const cupoRestante = evento.aforo_general_total - (generalVendidos ?? 0);
-    if (cupoRestante < cantidad) {
+    if (cupoRestante < general.cantidad) {
       return { ok: false, error: cupoRestante <= 0 ? "Se agotaron los cupos generales." : `Solo quedan ${cupoRestante} entradas generales.` };
     }
   }
 
-  const cotizacion = d.etapaForzada
-    ? cotizar(
-        (await disponibilidadEtapas(service, d.tipo)).filter((x) => x.etapa === d.etapaForzada).map((x) => ({ ...x, restante: null })),
-        cantidad
-      )
-    : (await cotizarCompra(service, d.tipo, cantidad)).cotizacion;
+  // Reserva atómica silla por silla; si alguna falla, se liberan las tomadas.
+  const sillaIds = partes.flatMap((p) => p.sillaIds);
+  const tomadas: string[] = [];
+  for (const id of sillaIds) {
+    const { data: silla, error } = await service
+      .from("sillas_vip")
+      .update({ estado: "reservada", reservado_hasta: null })
+      .eq("id", id)
+      .eq("estado", "disponible")
+      .select("id")
+      .maybeSingle();
+    if (error || !silla) {
+      if (tomadas.length) await service.from("sillas_vip").update({ estado: "disponible" }).in("id", tomadas);
+      return { ok: false, error: "Una de las sillas ya no está disponible — alguien más la tomó. Elige otra." };
+    }
+    tomadas.push(silla.id);
+  }
 
-  // Precio de lista por ticket: el total de su etapa (el fee, cuando la etapa
-  // lo cobra aparte, ya viene sumado en l.total).
-  const preciosLista = cotizacion.lineas.map((l) => l.total);
+  // Un renglón por ticket, con su zona, su etapa, su silla y su precio de
+  // lista (el total de su etapa: el fee, cuando la etapa lo cobra aparte, ya
+  // viene sumado en l.total).
+  const renglones: { tipo: Tipo; etapa: Etapa; sillaId: string | null; precioLista: number }[] = [];
+  for (const p of partes) {
+    const cotizacion = d.etapaForzada
+      ? cotizar(
+          (await disponibilidadEtapas(service, p.tipo)).filter((x) => x.etapa === d.etapaForzada).map((x) => ({ ...x, restante: null })),
+          p.cantidad
+        )
+      : (await cotizarCompra(service, p.tipo, p.cantidad)).cotizacion;
+    cotizacion.lineas.forEach((l, i) =>
+      renglones.push({ tipo: p.tipo, etapa: l.etapa, sillaId: conAsiento(p.tipo) ? p.sillaIds[i] : null, precioLista: l.total })
+    );
+  }
+  const cantidad = renglones.length;
+
+  const preciosLista = renglones.map((r) => r.precioLista);
   const totalLista = Math.round(preciosLista.reduce((s, p) => s + p, 0) * 100) / 100;
 
   // Precio negociado: se reparte proporcionalmente entre los tickets para que
@@ -124,13 +150,13 @@ export async function registrarVentaInterna(service: SupabaseClient, d: DatosVen
 
   const grupoId = randomUUID();
   const ahora = new Date().toISOString();
-  const filas = cotizacion.lineas.map((linea, i) => ({
+  const filas = renglones.map((r, i) => ({
     evento_id: evento.id,
     grupo_id: grupoId,
     canal: d.canal,
-    etapa: linea.etapa,
-    tipo: d.tipo,
-    silla_id: conAsiento(d.tipo) ? sillaIds[i] : null,
+    etapa: r.etapa,
+    tipo: r.tipo,
+    silla_id: r.sillaId,
     comprador_nombre: d.compradorNombre,
     comprador_telefono: d.compradorTelefono,
     comprador_email: d.compradorEmail,

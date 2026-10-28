@@ -9,7 +9,7 @@ import BuscarComprador from "./BuscarComprador";
 import AprobadasList, { type FilaAprobada } from "./AprobadasList";
 import AutoRefresh from "@/app/dashboard/AutoRefresh";
 import { seleccionarTodo } from "@/lib/db";
-import type { Tipo } from "@/lib/precios";
+import { zonaPrincipal, type Tipo } from "@/lib/precios";
 
 export default async function FinanzasPage() {
   const perfil = await requerirPerfil();
@@ -80,6 +80,8 @@ export default async function FinanzasPage() {
     const existente = compras.get(gid);
     if (existente) {
       existente.cantidad += 1;
+      existente.tipos.push(t.tipo as Tipo);
+      existente.tipo = zonaPrincipal(existente.tipos);
       existente.total = Math.round((existente.total + precio) * 100) / 100;
       existente.totalBs = existente.totalBs != null && precioBs != null ? Math.round((existente.totalBs + precioBs) * 100) / 100 : existente.totalBs;
       if (asiento) existente.asientos.push(asiento);
@@ -93,6 +95,7 @@ export default async function FinanzasPage() {
       compradorTelefono: t.comprador_telefono as string,
       compradorEmail: (t.comprador_email as string | null) ?? null,
       tipo: t.tipo as Tipo,
+      tipos: [t.tipo as Tipo],
       cantidad: 1,
       total: precio,
       totalBs: precioBs,
@@ -181,6 +184,8 @@ export default async function FinanzasPage() {
       const existente = porGrupo.get(gid);
       if (existente) {
         existente.cantidad += 1;
+        existente.tipos.push(t.tipo as Tipo);
+        existente.tipo = zonaPrincipal(existente.tipos);
         existente.total = Math.round((existente.total + precio) * 100) / 100;
         existente.totalBs =
           existente.totalBs != null && precioBs != null
@@ -194,6 +199,7 @@ export default async function FinanzasPage() {
         compradorNombre: t.comprador_nombre,
         compradorEmail: t.comprador_email,
         tipo: t.tipo as Tipo,
+        tipos: [t.tipo as Tipo],
         cantidad: 1,
         total: precio,
         totalBs: precioBs,

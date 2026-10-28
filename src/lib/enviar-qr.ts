@@ -148,6 +148,9 @@ export async function enviarCorreoPendiente(params: {
   nombreComprador: string;
   cantidad?: number;
   tipo?: Tipo;
+  /** Compra mixta (28 oct): "3 entradas: 2 Preferenciales y 1 General".
+   *  null o ausente = una sola zona, el correo dice lo de siempre. */
+  detalle?: string | null;
   totalUsd?: number;
   // Desglose neto + fee: solo cuando la etapa comprada cobra fee aparte
   // (preventa). Con el precio final no hay nada que desglosar y se muestra un
@@ -194,7 +197,7 @@ export async function enviarCorreoPendiente(params: {
   const detalle =
     params.tipo && params.totalUsd != null
       ? `<div style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
-          <strong>${cantidad} entrada${cantidad === 1 ? "" : "s"} ${etiquetaTipo(params.tipo, cantidad)}</strong>${
+          <strong>${params.detalle ? escapeHtml(params.detalle) : `${cantidad} entrada${cantidad === 1 ? "" : "s"} ${etiquetaTipo(params.tipo, cantidad)}`}</strong>${
           desglose || plan ? "" : ` · ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}`
         }${bloqueAsientos(params.asientos, cantidad)}${desglose}${
           plan
@@ -486,6 +489,8 @@ export async function enviarCorreoRechazo(params: {
   nombreComprador: string;
   cantidad: number;
   tipo: Tipo;
+  /** Compra mixta: ver enviarCorreoPendiente. */
+  detalle?: string | null;
   totalUsd: number;
   totalBs: number | null;
   referencia: string | null;
@@ -515,7 +520,7 @@ export async function enviarCorreoRechazo(params: {
         </table>
         <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, revisamos tu compra y <strong>no encontramos el pago</strong> con los datos que nos diste:</p>
         <p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
-          <strong>${params.cantidad} entrada${params.cantidad === 1 ? "" : "s"} ${etiquetaTipo(params.tipo, params.cantidad)}</strong><br>
+          <strong>${params.detalle ? escapeHtml(params.detalle) : `${params.cantidad} entrada${params.cantidad === 1 ? "" : "s"} ${etiquetaTipo(params.tipo, params.cantidad)}`}</strong><br>
           Monto: ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}<br>
           Método: ${escapeHtml(params.metodoEtiqueta)}<br>
           Referencia reportada: <strong>${ref}</strong>
@@ -556,6 +561,7 @@ async function enviarCorreoEntradaEnPausa(params: {
   nombreComprador: string;
   cantidad: number;
   tipo: Tipo;
+  detalle?: string | null;
   totalUsd: number;
   totalBs: number | null;
   referencia: string | null;
@@ -586,7 +592,7 @@ async function enviarCorreoEntradaEnPausa(params: {
         </table>
         <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#303030;">Hola <strong>${nombre}</strong>, revisamos tu compra y <strong>no pudimos verificar el pago</strong> con estos datos:</p>
         <p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#303030;background:#F1ECE2;border-radius:8px;padding:12px 14px;">
-          <strong>${params.cantidad} entrada${varias ? "s" : ""} ${etiquetaTipo(params.tipo, params.cantidad)}</strong>${codigo ? ` · compra ${codigo}` : ""}<br>
+          <strong>${params.detalle ? escapeHtml(params.detalle) : `${params.cantidad} entrada${varias ? "s" : ""} ${etiquetaTipo(params.tipo, params.cantidad)}`}</strong>${codigo ? ` · compra ${codigo}` : ""}<br>
           Monto: ${fmtUsd(params.totalUsd)}${params.totalBs != null ? ` · ${fmtBs(params.totalBs)}` : ""}<br>
           Método: ${escapeHtml(params.metodoEtiqueta)}<br>
           Referencia: <strong>${ref}</strong>
