@@ -1,9 +1,15 @@
+"use client";
+
 import { urlWhatsAppSoporte, WHATSAPP_SOPORTE_VISIBLE } from "@/lib/contacto";
+import { medir } from "@/lib/medicion-cliente";
 
 // Botón de soporte por WhatsApp para TODO el proceso de compra (Anita, 22 sep):
 // quien escribe mal su correo o su teléfono no recibe nada y necesita una vía
 // visible para avisarnos en cualquier paso. Sin estado: sirve en componentes
 // de servidor y de cliente.
+//
+// 29 oct: es componente de cliente para contar en el embudo cuánta gente abre
+// WhatsApp desde la web (la conversación que no se ve en el sistema).
 export default function BotonSoporte({
   mensaje,
   texto = "¿Dudas o te equivocaste en un dato? Escríbenos por WhatsApp",
@@ -19,6 +25,7 @@ export default function BotonSoporte({
       <a
         href={url}
         target="_blank"
+        onClick={() => medir("whatsapp")}
         rel="noopener noreferrer"
         className="w-full min-h-11 flex flex-col items-center justify-center rounded-xl bg-[#25D366] text-white font-semibold text-sm px-4 py-2 text-center leading-tight"
       >
@@ -31,6 +38,7 @@ export default function BotonSoporte({
     <a
       href={url}
       target="_blank"
+      onClick={() => medir("whatsapp")}
       rel="noopener noreferrer"
       className="text-xs font-medium text-green-700 underline underline-offset-2 text-center"
     >

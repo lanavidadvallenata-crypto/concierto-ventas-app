@@ -20,6 +20,7 @@ import PlanDePago from "./PlanDePago";
 import BotonSoporte from "@/components/BotonSoporte";
 import { sugerirCorreo } from "@/lib/correo";
 import { TEXTO_HORARIO, avisoFueraDeHorario } from "@/lib/horario";
+import { medir } from "@/lib/medicion-cliente";
 
 type Fase = "seleccion" | "pago" | "confirmado";
 
@@ -117,6 +118,17 @@ export default function CheckoutForm({
     return () => clearInterval(intervalo);
   }, [fase, expiraEn]);
 
+  // Embudo: se le acabaron los 15 minutos en la pantalla de pago sin reportar.
+  // Una vez por apartado (expiraEn cambia con cada uno).
+  const expiroAnotado = useRef<string | null>(null);
+  useEffect(() => {
+    if (fase !== "pago" || !expiraEn || segundosRestantes > 0) return;
+    if (new Date(expiraEn).getTime() > Date.now()) return;
+    if (expiroAnotado.current === expiraEn) return;
+    expiroAnotado.current = expiraEn;
+    medir("expiro", { zona: tipo, cantidad });
+  }, [fase, expiraEn, segundosRestantes, tipo, cantidad]);
+
   // Estimación en pantalla antes de reservar (la real la calcula el servidor).
   // Preferencial no tiene preventa: siempre precio regular.
   const preventaRestante = preventa ? (tipo === "vip" ? preventa.vip : tipo === "general" ? preventa.general : 0) : 0;
@@ -141,6 +153,9 @@ export default function CheckoutForm({
       setError(errorTelefono);
       return;
     }
+    // Embudo: tocó Continuar con sus datos completos. "Llegó al pago" lo
+    // anota el servidor solo si de verdad se apartaron las entradas.
+    medir("continuar", { zona: tipo, cantidad });
     setCargando(true);
     const res = await iniciarCheckoutPublico({
       tipo,
@@ -595,7 +610,10 @@ export default function CheckoutForm({
               onClick={() => {
                 // Las sillas elegidas son de UNA zona: al cambiar de pestaña
                 // se vacían, para no mandar sillas VIP con tipo Preferencial.
-                if (t !== tipo) setSillas([]);
+                if (t !== tipo) {
+                  setSillas([]);
+                  medir("zona", { zona: t });
+                }
                 setTipo(t);
               }}
               className={`flex-1 rounded-md py-2 ${tipos.length > 2 ? "text-xs px-1" : "text-sm"} font-medium border flex flex-col items-center leading-tight ${

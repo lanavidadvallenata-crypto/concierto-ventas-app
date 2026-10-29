@@ -8,7 +8,19 @@ import { ETAPAS } from "@/lib/precios";
 import { leerConfig, resumenPlanes } from "@/lib/abona618";
 import { obtenerTasaActual } from "@/lib/tasa";
 import { hoyEnVenezuela } from "@/lib/cuotas";
-import VistaDashboard from "./VistaDashboard";
+import VistaDashboard, { type DatosEmbudo } from "./VistaDashboard";
+import {
+  calcularRitmo,
+  comprasPorHora,
+  desdeDelPeriodo,
+  diasHastaEvento,
+  leerPeriodo,
+  leerResumen,
+  leerZona,
+  mediana,
+  minutosDesde,
+  restarDias,
+} from "@/lib/embudo";
 
 // Sin `revalidate`: esta página lee la sesión (cookies) y por eso Next la
 // trata como dinámica siempre — el "revalidate = 10" de antes no hacía nada y
@@ -27,8 +39,9 @@ const METODOS_ORDEN = ["transferencia", "zelle", "binance", "pago_movil", "efect
 
 const CANAL_ETIQUETA: Record<string, string> = { web: "Web", manual: "Manual", taquilla: "Taquilla", patrocinio: "Patrocinios", cortesia: "Cortesías" };
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ p?: string; z?: string; v?: string }> }) {
   const perfil = await requerirPerfil();
+  const params = await searchParams;
 
   if (perfil.rol !== "ventas" && perfil.rol !== "finanzas" && perfil.rol !== "admin") {
     return (
@@ -43,21 +56,45 @@ export default async function DashboardPage() {
 
   const service = createServiceClient();
 
-  type TicketResumen = { tipo: string; precio: number | string; metodo_pago: string; estado_pago: string; created_at: string; canal: string | null; etapa: string | null; grupo_id: string | null; precio_bs: number | string | null };
+  type TicketResumen = {
+    tipo: string;
+    precio: number | string;
+    metodo_pago: string;
+    estado_pago: string;
+    created_at: string;
+    verificado_en: string | null;
+    canal: string | null;
+    etapa: string | null;
+    grupo_id: string | null;
+    precio_bs: number | string | null;
+  };
+
+  // Embudo (29 oct): período y zona vienen en la dirección (?p=hoy|7d|todo&z=vip…)
+  // para que el refresco automático los conserve.
+  const hoy = hoyEnVenezuela();
+  const periodo = leerPeriodo(params.p);
+  const zonaFiltro = leerZona(params.z);
 
   // La configuración va primero porque el resumen de planes necesita el tope
   // vigente: si alguien lo subió de 100, la tarjeta tiene que medir contra el
   // número de verdad y no contra la constante del código.
   const config = await leerConfig(service);
-  const [{ data: tickets, error: ticketsError }, { data: evento }, { data: mesas }, planes, tasaEurVes] = await Promise.all([
-    seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, canal, etapa, grupo_id, precio_bs"),
+  const [{ data: tickets, error: ticketsError }, { data: evento }, { data: mesas }, planes, tasaEurVes, rpcEmbudo, { data: gruposPlan }] = await Promise.all([
+    seleccionarTodo<TicketResumen>(service, "tickets", "tipo, precio, metodo_pago, estado_pago, created_at, verificado_en, canal, etapa, grupo_id, precio_bs"),
     service.from("eventos").select("aforo_general_total").limit(1).single(),
     // El aforo con asiento se cuenta por zona (VIP y Preferencial comparten
     // tablas y se distinguen por mesas_vip.zona).
     service.from("mesas_vip").select("zona, sillas_total"),
     resumenPlanes(service, config),
     obtenerTasaActual(service),
+    // Una sola consulta con todo el embudo (supabase/medicion_embudo_29oct.sql).
+    // Si el SQL todavía no se corrió, viene con error y el panel lo dice.
+    service.rpc("resumen_embudo", { p_desde: desdeDelPeriodo(periodo, hoy), p_hasta: new Date().toISOString(), p_zona: zonaFiltro }),
+    // Todas las compras con plan (también las completadas): sus tickets se
+    // confirman al último pago y no sirven para medir la verificación.
+    seleccionarTodo<{ grupo_id: string }>(service, "planes_pago", "grupo_id"),
   ]);
+  if (rpcEmbudo.error) console.warn("Dashboard: resumen_embudo no disponible:", rpcEmbudo.error.message);
   if (ticketsError) console.error("Error cargando tickets para el dashboard:", ticketsError);
 
   const todos = tickets ?? [];
@@ -156,12 +193,73 @@ export default async function DashboardPage() {
   const aforoTotalEntradas = aforoVip + aforoPreferencial + aforoGeneral;
   const pctVendido = aforoTotalEntradas > 0 ? Math.round((vendidosTotal / aforoTotalEntradas) * 1000) / 10 : 0;
 
+  // ---- Ritmo (29 oct): entradas ocupadas por día en los últimos 7 días contra
+  // las que hacen falta por día para llenar cada zona el 4 de diciembre.
+  const diasRestantes = diasHastaEvento(hoy);
+  const desde7 = restarDias(hoy, 6);
+  const diaVe = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "America/Caracas" });
+  const vivos = todos.filter((t) => t.estado_pago !== "rechazado");
+  const ultimos7 = (tipo?: string) => vivos.filter((t) => (!tipo || t.tipo === tipo) && diaVe(t.created_at) >= desde7).length;
+  const ritmoDe = (tipo: string, oc: { ocupadas: number }, aforo: number) =>
+    calcularRitmo({ ocupadas: oc.ocupadas, aforo, ultimos7: ultimos7(tipo), diasRestantes });
+  const ritmoTotal = calcularRitmo({
+    ocupadas: ocVip.ocupadas + ocPreferencial.ocupadas + ocGeneral.ocupadas,
+    aforo: aforoTotalEntradas,
+    ultimos7: ultimos7(),
+    diasRestantes,
+  });
+
+  // ---- Compras (no entradas): primer ticket de cada grupo, sin cortesías ni patrocinios.
+  const CANALES_VENTA = new Set(["web", "manual", "taquilla"]);
+  const primeraPorGrupo = new Map<string, TicketResumen>();
+  for (const t of vivos) {
+    if (!t.grupo_id || !CANALES_VENTA.has(t.canal ?? "web")) continue;
+    const previo = primeraPorGrupo.get(t.grupo_id);
+    if (!previo || t.created_at < previo.created_at) primeraPorGrupo.set(t.grupo_id, t);
+  }
+  const compras = [...primeraPorGrupo.values()];
+  const comprasHoy = compras.filter((t) => diaVe(t.created_at) === hoy).length;
+  const desde14 = restarDias(hoy, 13);
+  const porHora = comprasPorHora(compras.filter((t) => diaVe(t.created_at) >= desde14).map((t) => t.created_at));
+
+  // ---- Verificación de contado: de "ya pagué" a confirmado, mediana de 14 días.
+  // Sin compras en cuotas: sus tickets se confirman al ÚLTIMO pago, semanas después.
+  const conPlan = new Set((gruposPlan ?? []).map((g) => String(g.grupo_id)));
+  const tiemposVerif: number[] = [];
+  const verifPorGrupo = new Map<string, { creado: string; verificado: string }>();
+  for (const t of verificados) {
+    if (!t.grupo_id || !t.verificado_en || conPlan.has(t.grupo_id) || !CANALES_VENTA.has(t.canal ?? "web")) continue;
+    if (diaVe(t.created_at) < desde14) continue;
+    const g = verifPorGrupo.get(t.grupo_id);
+    if (!g) verifPorGrupo.set(t.grupo_id, { creado: t.created_at, verificado: t.verificado_en });
+    else {
+      if (t.created_at < g.creado) g.creado = t.created_at;
+      if (t.verificado_en < g.verificado) g.verificado = t.verificado_en;
+    }
+  }
+  for (const g of verifPorGrupo.values()) tiemposVerif.push((Date.parse(g.verificado) - Date.parse(g.creado)) / 60_000);
+  const masViejoPendiente = pendientesSueltos.reduce<string | null>((m, t) => (!m || t.created_at < m ? t.created_at : m), null);
+
+  const embudo: DatosEmbudo = {
+    periodo,
+    zona: zonaFiltro,
+    resumen: rpcEmbudo.error ? null : leerResumen(rpcEmbudo.data),
+    ritmo: ritmoTotal,
+    comprasHoy,
+    porHora,
+    verificacionMin: mediana(tiemposVerif),
+    verificacionMuestra: tiemposVerif.length,
+    pendienteMasViejoMin: masViejoPendiente ? minutosDesde(masViejoPendiente) : null,
+  };
+
   // Todo lo de arriba es la cuenta; lo de abajo solo la entrega a la vista.
   // El rediseño visual (23 oct) no cambió ni un cálculo: vive en VistaDashboard.
   return (
     <VistaDashboard
       perfil={perfil}
-      hoy={hoyEnVenezuela()}
+      hoy={hoy}
+      vistaInicial={typeof params.v === "string" ? params.v : "hoy"}
+      embudo={embudo}
       tasaEurVes={tasaEurVes}
       recaudado={{
         ingresoTotal,
@@ -176,11 +274,20 @@ export default async function DashboardPage() {
         ocupadasTotal: ocVip.ocupadas + ocPreferencial.ocupadas + ocGeneral.ocupadas,
       }}
       zonas={[
-        { id: "vip", etiqueta: "VIP", aforo: aforoVip, pagadoUsd: ingresoVip, ...ocVip },
+        { id: "vip", etiqueta: "VIP", aforo: aforoVip, pagadoUsd: ingresoVip, ...ocVip, ritmo: ritmoDe("vip", ocVip, aforoVip) },
         ...(hayPreferencial
-          ? [{ id: "preferencial", etiqueta: "Preferencial", aforo: aforoPreferencial, pagadoUsd: ingresoPreferencial, ...ocPreferencial }]
+          ? [
+              {
+                id: "preferencial",
+                etiqueta: "Preferencial",
+                aforo: aforoPreferencial,
+                pagadoUsd: ingresoPreferencial,
+                ...ocPreferencial,
+                ritmo: ritmoDe("preferencial", ocPreferencial, aforoPreferencial),
+              },
+            ]
           : []),
-        { id: "general", etiqueta: "General", aforo: aforoGeneral, pagadoUsd: ingresoGeneral, ...ocGeneral },
+        { id: "general", etiqueta: "General", aforo: aforoGeneral, pagadoUsd: ingresoGeneral, ...ocGeneral, ritmo: ritmoDe("general", ocGeneral, aforoGeneral) },
       ]}
       preventa={{ vip: preventaVip, general: preventaGeneral, cupoVip: cupoPreventa.vip, cupoGeneral: cupoPreventa.general }}
       canales={["web", "manual", "taquilla", "patrocinio", "cortesia"].map((c) => {

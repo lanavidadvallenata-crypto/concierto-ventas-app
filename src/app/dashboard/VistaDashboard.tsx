@@ -7,13 +7,17 @@ import MarcoNoche, { EncabezadoNoche, TARJETA } from "@/components/noche/MarcoNo
 import AutoRefresh from "./AutoRefresh";
 import VentasChart, { type DiaVenta } from "./VentasChart";
 import PanelPlanes from "./PanelPlanes";
+import Pestanas from "./Pestanas";
+import { Kpi, VistaCanales, VistaEmbudo, VistaHoy, type DatosEmbudo } from "./PanelEmbudo";
+import { duracionCorta, type Ritmo } from "@/lib/embudo";
+
+export type { DatosEmbudo };
 
 // Lo que se VE del Dashboard, separado de lo que se CALCULA (page.tsx).
 //
-// Rediseño "noche" de 6.18 (Anita, 23 oct): la página lee exactamente los
-// mismos números que antes; aquí solo cambia cómo se muestran. Separarlo así
-// tiene dos ventajas: el diff del rediseño no toca ninguna cuenta, y la vista
-// se puede probar con datos de ejemplo sin base de datos.
+// 29 oct (Anita: "demasiado texto, el choricero pa abajo"): arriba solo el
+// recaudado y el avance; todo lo demás va en cinco pestañas que caben cada una
+// en una pantalla del teléfono — Hoy, Embudo, Canales, Zonas y Caja.
 
 export type ZonaDashboard = {
   id: string;
@@ -24,6 +28,7 @@ export type ZonaDashboard = {
   enCuotas: number;
   porVerificar: number;
   pagadoUsd: number;
+  ritmo: Ritmo;
 };
 
 export type DatosDashboard = {
@@ -31,6 +36,10 @@ export type DatosDashboard = {
   /** Fecha de hoy en Venezuela, AAAA-MM-DD: solo para la cuenta regresiva. */
   hoy: string;
   tasaEurVes: number | null;
+  /** Pestaña con la que abre (?v=). */
+  vistaInicial: string;
+  /** Embudo, canales, ritmo y horas (29 oct). */
+  embudo: DatosEmbudo;
   recaudado: {
     ingresoTotal: number;
     ingresoPendiente: number;
@@ -55,18 +64,12 @@ export type DatosDashboard = {
 const FECHA_EVENTO = "2026-12-04";
 
 const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+const dec = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
 
-function cuentaRegresiva(hoy: string): string | null {
+function diasParaEvento(hoy: string): number | null {
   const dias = Math.round((Date.parse(`${FECHA_EVENTO}T00:00:00Z`) - Date.parse(`${hoy}T00:00:00Z`)) / 86_400_000);
-  if (!Number.isFinite(dias) || dias < 0) return null;
-  if (dias === 0) return "hoy es el evento";
-  return dias === 1 ? "falta 1 día" : `faltan ${dias} días`;
+  return Number.isFinite(dias) && dias >= 0 ? dias : null;
 }
-
-const desglose = (o: { pagadas: number; enCuotas: number; porVerificar: number }) =>
-  [`${o.pagadas} pagada${o.pagadas === 1 ? "" : "s"}`, o.enCuotas ? `${o.enCuotas} en cuotas` : "", o.porVerificar ? `${o.porVerificar} por verificar` : ""]
-    .filter(Boolean)
-    .join(" · ");
 
 // Ancho de un tramo de barra. Un tramo que existe nunca queda invisible:
 // 13 en cuotas sobre 4.500 generales es 0,3 % y sin el mínimo de 2 px no se
@@ -74,210 +77,220 @@ const desglose = (o: { pagadas: number; enCuotas: number; porVerificar: number }
 const tramo = (n: number, de: number) => (de > 0 && n > 0 ? `max(2px, ${Math.min(100, (n / de) * 100)}%)` : "0%");
 
 // "En cuotas" va rayado y no en otro tono de morado: dos morados de igual
-// brillo se confunden con sol o con daltonismo (auditoría del 23 oct). La
-// raya además dice lo que es: apartada, pero todavía no pagada completa.
+// brillo se confunden con sol o con daltonismo (auditoría del 23 oct).
 const RAYADO = "bg-[repeating-linear-gradient(135deg,#9b5de0_0_2px,transparent_2px_5px)]";
 
 export default function VistaDashboard(d: DatosDashboard) {
   const r = d.recaudado;
   const bsAprox = (usd: number) => (d.tasaEurVes ? formatoBsAprox(convertirABs(usd, d.tasaEurVes)) : null);
-  const faltan = cuentaRegresiva(d.hoy);
+  const dias = diasParaEvento(d.hoy);
   const verFinanzas = d.perfil.rol === "finanzas" || d.perfil.rol === "admin";
-  const preventaAgotada = d.preventa.vip >= d.preventa.cupoVip && d.preventa.general >= d.preventa.cupoGeneral;
+  const esAdmin = d.perfil.rol === "admin";
+  const viejo = d.embudo.pendienteMasViejoMin;
+  const verificacionAtrasada = r.pagosPorVerificar > 0 && viejo != null && viejo > 3 * 60;
 
   return (
     <MarcoNoche perfil={d.perfil}>
-      <EncabezadoNoche seccion="Dashboard de ventas" titulo="Navidad Vallenata." derecha={<AutoRefresh tema="noche" />}>
-        Vie 4 dic · Hangar Grano de Oro, Maracaibo{faltan ? ` · ${faltan}` : ""}
-      </EncabezadoNoche>
+      <EncabezadoNoche compacto seccion="Dashboard" titulo="Navidad Vallenata." derecha={<AutoRefresh tema="noche" intervaloMs={15000} />} />
 
-      {/* Lo primero que se mira: cuánto entró de verdad. */}
-      <section className="rounded-[22px] border border-lila/30 bg-[linear-gradient(160deg,rgba(123,44,191,0.32),rgba(241,236,226,0.035)_62%)] shadow-[0_24px_60px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.07)] p-5 flex flex-col gap-4">
-        <div>
-          <p className="text-xs font-medium text-noche-suave">Recaudado · pagos verificados</p>
-          <p className="font-titular font-extrabold text-[52px] leading-none mt-2 text-white tabular-nums">${fmt(r.ingresoTotal)}</p>
-          {bsAprox(r.ingresoTotal) && <p className="text-sm text-noche-suave mt-2 tabular-nums">{bsAprox(r.ingresoTotal)}</p>}
+      {/* Lo único fijo arriba: cuánto entró y cuánto falta. */}
+      <section className="rounded-[22px] border border-lila/30 bg-[linear-gradient(160deg,rgba(123,44,191,0.32),rgba(241,236,226,0.035)_62%)] shadow-[0_18px_44px_rgba(0,0,0,0.35)] p-4 flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs text-noche-suave">Recaudado</p>
+            <p className="font-titular font-extrabold text-[40px] leading-none mt-1 text-white tabular-nums">${fmt(r.ingresoTotal)}</p>
+          </div>
+          {dias != null && (
+            <div className="shrink-0 text-right">
+              <p className="font-titular font-extrabold text-[28px] leading-none text-white tabular-nums">{dias}</p>
+              <p className="text-[11px] text-noche-tenue">días al evento</p>
+            </div>
+          )}
         </div>
-
         <div>
-          <div className="flex items-baseline justify-between gap-3 text-xs text-noche-suave tabular-nums">
+          <div className="h-2 rounded-full bg-white/[0.08] overflow-hidden">
+            <div className="h-full rounded-full bg-violeta shadow-[0_0_12px_rgba(155,93,224,0.8)]" style={{ width: tramo(r.vendidosTotal, r.aforoTotalEntradas) }} />
+          </div>
+          <p className="flex justify-between gap-3 text-xs text-noche-suave tabular-nums mt-1.5">
             <span>
-              {fmt(r.vendidosTotal)} pagadas de {fmt(r.aforoTotalEntradas)} entradas
+              {fmt(r.vendidosTotal)} pagadas · {fmt(r.ocupadasTotal)} ocupadas
             </span>
-            <span className="text-base font-semibold text-noche-texto">{r.pctVendido}%</span>
-          </div>
-          <div className="mt-2 h-2.5 rounded-full bg-white/[0.08] overflow-hidden">
-            <div
-              className="h-full rounded-full bg-violeta shadow-[0_0_14px_rgba(155,93,224,0.8)]"
-              style={{ width: tramo(r.vendidosTotal, r.aforoTotalEntradas) }}
-            />
-          </div>
-          <p className="text-xs text-noche-tenue mt-2 tabular-nums">
-            {fmt(r.ocupadasTotal)} ocupadas contando cuotas · meta a aforo completo ${fmt(r.metaIngresos)}
+            <span className="text-noche-texto font-semibold">
+              {r.pctVendido}% de {fmt(r.aforoTotalEntradas)}
+            </span>
           </p>
         </div>
+      </section>
 
-        {r.cuotasCobradas > 0 && (
-          <dl className="grid grid-cols-2 gap-3 pt-4 border-t border-white/10">
-            <div>
-              <dt className="text-xs text-noche-tenue">Cuotas ya cobradas</dt>
-              <dd className="text-lg font-semibold tabular-nums">+${fmt(r.cuotasCobradas)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-noche-tenue">Total en banco</dt>
-              <dd className="text-lg font-semibold tabular-nums text-lila-claro">${fmt(r.enBanco)}</dd>
-            </div>
-          </dl>
-        )}
-
-        {r.ingresoPendiente > 0 && (
-          <p className="text-xs text-amber-200 rounded-xl bg-amber-400/10 border border-amber-300/25 px-3 py-2.5">
-            +${fmt(r.ingresoPendiente)} {bsAprox(r.ingresoPendiente) ? `(${bsAprox(r.ingresoPendiente)}) ` : ""}en {r.pagosPorVerificar} pago
-            {r.pagosPorVerificar === 1 ? "" : "s"} esperando verificación
-            {verFinanzas && (
+      <Pestanas
+        inicial={d.vistaInicial}
+        pestanas={[
+          { id: "hoy", etiqueta: "Ahora", alerta: verificacionAtrasada, contenido: <VistaHoy e={d.embudo} porVerificar={r.pagosPorVerificar} /> },
+          { id: "embudo", etiqueta: "Embudo", contenido: <VistaEmbudo e={d.embudo} puedeActivar={esAdmin} /> },
+          { id: "canales", etiqueta: "Canales", contenido: <VistaCanales e={d.embudo} puedeActivar={esAdmin} /> },
+          {
+            id: "zonas",
+            etiqueta: "Zonas",
+            contenido: (
               <>
-                {" · "}
-                <Link href="/finanzas" className="underline underline-offset-2 font-semibold">
-                  ir a Finanzas
-                </Link>
+                <Zonas zonas={d.zonas} />
+                <section className={`${TARJETA} p-4`}>
+                  <VentasChart dias={d.dias} hoy={d.hoy} />
+                </section>
               </>
-            )}
-          </p>
-        )}
-      </section>
-
-      <PanelPlanes
-        resumen={d.planes}
-        config={d.config}
-        tasaEurVes={d.tasaEurVes}
-        puedeCobrar={d.perfil.rol === "ventas" || d.perfil.rol === "finanzas" || d.perfil.rol === "admin"}
+            ),
+          },
+          {
+            id: "caja",
+            etiqueta: "Caja",
+            alerta: verificacionAtrasada,
+            contenido: (
+              <>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <Kpi valor={`$${fmt(r.enBanco)}`} etiqueta="Total en banco" pie={bsAprox(r.enBanco) ?? undefined} tono="ok" />
+                  <Kpi valor={`$${fmt(r.cuotasCobradas)}`} etiqueta="Cuotas cobradas" pie="ya en el banco" />
+                  <Kpi
+                    valor={`$${fmt(r.ingresoPendiente)}`}
+                    etiqueta={`Por verificar (${r.pagosPorVerificar})`}
+                    pie={viejo != null && r.pagosPorVerificar > 0 ? `más viejo: ${duracionCorta(viejo)}` : "al día"}
+                    tono={verificacionAtrasada ? "ambar" : null}
+                  />
+                  <Kpi
+                    valor={d.embudo.verificacionMin != null ? duracionCorta(d.embudo.verificacionMin) : "—"}
+                    etiqueta="Tarda en verificarse"
+                    pie={d.embudo.verificacionMuestra ? `mediana de ${d.embudo.verificacionMuestra}, 14 días` : "contado"}
+                  />
+                </div>
+                {verFinanzas && r.pagosPorVerificar > 0 && (
+                  <Link
+                    href="/finanzas"
+                    className="h-11 rounded-xl bg-violeta-hondo text-white text-sm font-semibold inline-flex items-center justify-center"
+                  >
+                    Ir a Finanzas a verificar
+                  </Link>
+                )}
+                <PanelPlanes
+                  resumen={d.planes}
+                  config={d.config}
+                  tasaEurVes={d.tasaEurVes}
+                  puedeCobrar={d.perfil.rol === "ventas" || d.perfil.rol === "finanzas" || d.perfil.rol === "admin"}
+                />
+                <Filas
+                  titulo="Por método de pago"
+                  filas={d.metodos
+                    .filter((m) => m.cantidad > 0)
+                    .map((m) => ({
+                      id: m.id,
+                      etiqueta: m.etiqueta,
+                      n: m.cantidad,
+                      valor: `$${fmt(m.monto)}`,
+                      sub: m.bs > 0 ? formatoBs(m.bs) : null,
+                      pct: m.pct,
+                    }))}
+                />
+                <Filas
+                  titulo="Por tipo de venta"
+                  filas={d.canales
+                    .filter((c) => c.cantidad > 0)
+                    .map((c) => ({ id: c.id, etiqueta: c.etiqueta, n: c.cantidad, valor: c.sinCobro ? "sin cobro" : `$${fmt(c.monto)}`, sub: null, pct: null }))}
+                />
+                <p className="text-[11px] leading-relaxed text-noche-tenue">
+                  {d.tasaEurVes
+                    ? `≈ ${NOTA_TASA_CORTA} (Bs ${d.tasaEurVes.toLocaleString("es-VE", { maximumFractionDigits: 2 })} por $1).`
+                    : `${SIN_TASA}.`}
+                </p>
+              </>
+            ),
+          },
+        ]}
       />
-
-      <section className={`${TARJETA} p-5 flex flex-col gap-5`}>
-        <div className="flex items-center justify-between gap-x-4 gap-y-2 flex-wrap">
-          <h2 className="text-[15px] font-semibold">Ocupación por zona</h2>
-          <ul className="flex items-center gap-3 text-xs text-noche-tenue">
-            <li className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-violeta" />
-              pagadas
-            </li>
-            <li className="flex items-center gap-1.5">
-              <span className={`w-3 h-3 rounded-sm border border-violeta/70 ${RAYADO}`} />
-              en cuotas
-            </li>
-            <li className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-amber-400" />
-              por verificar
-            </li>
-          </ul>
-        </div>
-
-        {d.zonas.map((z) => (
-          <div key={z.id} className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-sm font-semibold">{z.etiqueta}</span>
-              <span className="tabular-nums">
-                <span className="font-titular font-extrabold text-[26px] leading-none text-white">{z.ocupadas}</span>
-                <span className="text-sm text-noche-tenue"> / {fmt(z.aforo)}</span>
-              </span>
-            </div>
-            <div
-              className="flex gap-[2px] h-2.5 rounded-full bg-white/[0.08] overflow-hidden"
-              role="img"
-              aria-label={`${z.etiqueta}: ${z.ocupadas} de ${z.aforo} ocupadas (${desglose(z)})`}
-            >
-              {z.pagadas > 0 && <div className="h-full shrink-0 bg-violeta" style={{ width: tramo(z.pagadas, z.aforo) }} />}
-              {z.enCuotas > 0 && <div className={`h-full shrink-0 ${RAYADO}`} style={{ width: tramo(z.enCuotas, z.aforo) }} />}
-              {z.porVerificar > 0 && <div className="h-full shrink-0 bg-amber-400" style={{ width: tramo(z.porVerificar, z.aforo) }} />}
-            </div>
-            <div className="flex items-start justify-between gap-3 text-xs">
-              <span className="text-noche-suave">{desglose(z)}</span>
-              <span className="flex flex-col items-end text-right tabular-nums">
-                <span className="text-noche-suave">Pagado ${fmt(z.pagadoUsd)}</span>
-                {bsAprox(z.pagadoUsd) && <span className="text-noche-tenue">{bsAprox(z.pagadoUsd)}</span>}
-              </span>
-            </div>
-          </div>
-        ))}
-      </section>
-
-      <section className={`${TARJETA} p-5`}>
-        <VentasChart dias={d.dias} hoy={d.hoy} />
-      </section>
-
-      <div className="grid gap-5 sm:grid-cols-2">
-        <section className={`${TARJETA} p-5`}>
-          <h2 className="text-[15px] font-semibold">
-            Por canal <span className="text-xs font-normal text-noche-tenue">· verificado</span>
-          </h2>
-          <dl className="mt-2 flex flex-col divide-y divide-white/[0.06]">
-            {d.canales.map((c) => (
-              <div key={c.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <dt className="text-noche-suave">{c.etiqueta}</dt>
-                <dd className="tabular-nums">
-                  {c.cantidad} <span className="text-noche-tenue">· {c.sinCobro ? "sin cobro" : `$${fmt(c.monto)}`}</span>
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-
-        <section className={`${TARJETA} p-5 flex flex-col gap-3`}>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-[15px] font-semibold">Preventa</h2>
-            {preventaAgotada && (
-              <span className="text-[11px] font-bold tracking-[0.12em] text-red-100 bg-[#CE0100]/30 border border-[#CE0100]/60 rounded-full px-2.5 py-0.5">
-                AGOTADA
-              </span>
-            )}
-          </div>
-          {[
-            { etiqueta: "VIP", n: d.preventa.vip, de: d.preventa.cupoVip },
-            { etiqueta: "General", n: d.preventa.general, de: d.preventa.cupoGeneral },
-          ].map((p) => (
-            <div key={p.etiqueta} className="flex flex-col gap-1.5">
-              <div className="flex items-baseline justify-between text-sm">
-                <span className="text-noche-suave">{p.etiqueta}</span>
-                <span className="tabular-nums font-semibold">
-                  {p.n} <span className="font-normal text-noche-tenue">/ {p.de}</span>
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
-                <div className="h-full rounded-full bg-violeta" style={{ width: tramo(p.n, p.de) }} />
-              </div>
-            </div>
-          ))}
-          <p className="text-xs text-noche-tenue">Incluye pendientes de verificar</p>
-        </section>
-      </div>
-
-      <section className={`${TARJETA} overflow-hidden`}>
-        <h2 className="px-5 pt-5 pb-2 text-[15px] font-semibold">Por método de pago</h2>
-        <div className="divide-y divide-white/[0.06]">
-          {d.metodos.map((m) => (
-            <div key={m.id} className="px-5 py-3">
-              <div className="flex items-start justify-between gap-3 text-sm mb-2">
-                <span>{m.etiqueta}</span>
-                <span className="flex flex-col items-end text-right tabular-nums">
-                  <span className="text-noche-suave">
-                    {m.cantidad} · ${fmt(m.monto)}
-                  </span>
-                  {m.bs > 0 && <span className="text-xs text-noche-tenue">{formatoBs(m.bs)}</span>}
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
-                <div className="h-full rounded-full bg-violeta" style={{ width: `${m.pct}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <p className="text-xs leading-relaxed text-noche-tenue">
-        {d.tasaEurVes
-          ? `Los montos con ≈ están ${NOTA_TASA_CORTA} (Bs ${d.tasaEurVes.toLocaleString("es-VE", { maximumFractionDigits: 2 })} por $1) y cambian cada día. Los bolívares por método de pago son los que entraron de verdad.`
-          : `${SIN_TASA} — todo sale en dólares hasta que vuelva.`}
-      </p>
     </MarcoNoche>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Zonas: ocupación y ritmo, una fila compacta por zona.
+// ---------------------------------------------------------------------------
+function Zonas({ zonas }: { zonas: ZonaDashboard[] }) {
+  return (
+    <section className={`${TARJETA} p-4 flex flex-col gap-4`}>
+      <ul className="flex items-center gap-3 text-[11px] text-noche-tenue">
+        <li className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-violeta" />
+          pagadas
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span className={`w-2.5 h-2.5 rounded-sm border border-violeta/70 ${RAYADO}`} />
+          cuotas
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-amber-400" />
+          por verificar
+        </li>
+      </ul>
+      {zonas.map((z) => (
+        <div key={z.id} className="flex flex-col gap-1.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm font-semibold">{z.etiqueta}</span>
+            <span className="tabular-nums">
+              <span className="font-titular font-extrabold text-[22px] leading-none text-white">{fmt(z.ocupadas)}</span>
+              <span className="text-xs text-noche-tenue"> / {fmt(z.aforo)}</span>
+            </span>
+          </div>
+          <div
+            className="flex gap-[2px] h-2 rounded-full bg-white/[0.08] overflow-hidden"
+            role="img"
+            aria-label={`${z.etiqueta}: ${z.ocupadas} de ${z.aforo} ocupadas (${z.pagadas} pagadas, ${z.enCuotas} en cuotas, ${z.porVerificar} por verificar)`}
+          >
+            {z.pagadas > 0 && <div className="h-full shrink-0 bg-violeta" style={{ width: tramo(z.pagadas, z.aforo) }} />}
+            {z.enCuotas > 0 && <div className={`h-full shrink-0 ${RAYADO}`} style={{ width: tramo(z.enCuotas, z.aforo) }} />}
+            {z.porVerificar > 0 && <div className="h-full shrink-0 bg-amber-400" style={{ width: tramo(z.porVerificar, z.aforo) }} />}
+          </div>
+          <div className="flex items-center justify-between gap-3 text-xs tabular-nums">
+            <span className="flex items-center gap-1.5 text-noche-suave">
+              <span className={`w-2 h-2 rounded-full ${z.ritmo.vaBien ? "bg-emerald-400" : "bg-amber-400"}`} aria-hidden="true" />
+              {dec(z.ritmo.real)}/día {z.ritmo.vaBien ? "· alcanza" : `· faltan ${dec(z.ritmo.necesario)}/día`}
+            </span>
+            <span className="text-noche-tenue">4 dic: {z.ritmo.proyeccionPct}%</span>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Lista compacta: una línea por fila, con barra opcional.
+// ---------------------------------------------------------------------------
+function Filas({
+  titulo,
+  filas,
+}: {
+  titulo: string;
+  filas: { id: string; etiqueta: string; n: number; valor: string; sub: string | null; pct: number | null }[];
+}) {
+  if (filas.length === 0) return null;
+  return (
+    <section className={`${TARJETA} p-4 flex flex-col gap-1`}>
+      <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-noche-tenue pb-1">{titulo}</h2>
+      {filas.map((f) => (
+        <div key={f.id} className="py-1.5 flex flex-col gap-1">
+          <div className="flex items-baseline justify-between gap-3 text-[13px]">
+            <span className="text-noche-suave">
+              {f.etiqueta} <span className="text-noche-tenue tabular-nums">· {fmt(f.n)}</span>
+            </span>
+            <span className="text-right tabular-nums">
+              <span className="font-semibold text-white">{f.valor}</span>
+              {f.sub && <span className="block text-[11px] text-noche-tenue">{f.sub}</span>}
+            </span>
+          </div>
+          {f.pct != null && (
+            <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
+              <div className="h-full rounded-full bg-violeta" style={{ width: `${f.pct}%` }} />
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }

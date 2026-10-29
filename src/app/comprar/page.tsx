@@ -3,6 +3,7 @@ import { obtenerMapas } from "@/lib/mapa-vip";
 import { obtenerTasaActual } from "@/lib/tasa";
 import { disponibilidadEtapas, MAX_POR_COMPRA } from "@/lib/precios";
 import CheckoutForm from "./CheckoutForm";
+import Medidor from "@/components/Medidor";
 import { HeroEvento, SobreElEvento, PreciosExplicados, ComoComprar, PreguntasFrecuentes } from "./SeccionesVenta";
 
 // Sin esto, cada visita a esta página (la de más tráfico de todo el sitio el
@@ -58,6 +59,7 @@ export default async function ComprarPage() {
 
   return (
     <main className="max-w-lg mx-auto w-full px-4 py-8 flex flex-col gap-8">
+      <Medidor />
       <HeroEvento
         nombre={evento?.nombre ?? "La Navidad Vallenata"}
         fecha={evento?.fecha ?? null}

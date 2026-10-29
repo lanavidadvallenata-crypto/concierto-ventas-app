@@ -13,6 +13,7 @@ import { METODOS_PAGO_ACTIVOS, metodoEsEnBs, normalizarReferencia, validarRefere
 import { verificarLimite, verificarLimitePorCorreo } from "@/lib/rate-limit";
 import { obtenerTasaActual, convertirABs, tasaParaConfirmar, repartirBs } from "@/lib/tasa";
 import { crearPlan, planOfrecible } from "@/lib/abona618";
+import { anotarEventoServidor } from "@/lib/medicion-servidor";
 import { CONDICIONES_VERSION, aPlanPublico, hoyEnVenezuela, planConFechasVistas, planPara, type Plan, type PlanPublico, type SinPlan } from "@/lib/cuotas";
 
 // 15 minutos (antes 10): una transferencia bancaria en Venezuela desde la app
@@ -140,6 +141,9 @@ export async function iniciarCheckoutPublico(input: unknown): Promise<IniciarChe
   // Al navegador va el plan SIN el margen interno (graciaHasta/liberaEl):
   // "no decírselo al comprador" incluye no mandárselo en el JSON.
   const planPublico = plan.hayPlan ? aPlanPublico(plan) : plan;
+  // Embudo: llegó a la pantalla de pago con sus entradas apartadas. Se anota
+  // después de responder y nunca frena la compra (ver medicion-servidor.ts).
+  anotarEventoServidor({ evento: "pago", zona: v.tipo, cantidad, valorUsd: cotizacion.total });
   return { ok: true, tipo: v.tipo, sillaIds, cantidad, expiraEn, cotizacion, disponibilidad, tasaEurVes, totalBs, plan: planPublico };
 }
 
@@ -550,6 +554,17 @@ export async function confirmarCheckoutPublico(input: unknown): Promise<Confirma
     console.error("Error enviando correo de compra recibida:", (e as Error).message);
     avisoEmail = "Tu compra quedó registrada, pero no pudimos enviarte el correo de confirmación — escríbenos por WhatsApp para avisarte cuando esté listo tu QR.";
   }
+
+  // Embudo: reportó su pago. Con el grupo, el dashboard sabe cuándo Finanzas
+  // lo confirma y de qué canal vino. Va después de responder.
+  anotarEventoServidor({
+    evento: "reporto",
+    zona: v.tipo,
+    cantidad,
+    valorUsd: cotizacion.total,
+    grupoId,
+    enCuotas: Boolean(planCreado),
+  });
 
   return {
     ok: true,

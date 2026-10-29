@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { disponibilidadEtapas } from "@/lib/precios";
 import { ProductoraHome } from "./ProductoraHome";
+import Medidor from "@/components/Medidor";
 
 // El dato del evento (nombre/fecha/venue) no cambia entre visitas — cachearlo
 // unos segundos evita que cada visitante anónimo del home dispare su propia
@@ -39,5 +40,10 @@ export default async function Home() {
   // no la pantalla de login del equipo — antes cualquier visitante caía en /login.
   const { evento, desdeBase } = await obtenerEventoCacheado();
 
-  return <ProductoraHome evento={evento} desdePreventa={desdeBase} />;
+  return (
+    <>
+      <Medidor />
+      <ProductoraHome evento={evento} desdePreventa={desdeBase} />
+    </>
+  );
 }
