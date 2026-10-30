@@ -969,6 +969,18 @@ export type CuotaPorCobrar = {
   compradorEmail: string | null;
 };
 
+/** Una cuota ya cobrada, como la muestra la tarjeta de Cobranza. Lleva el
+ *  pago con que entró para que un admin pueda corregirlo (30 oct). */
+export type CuotaPagada = {
+  cuotaId?: string;
+  etiqueta: string;
+  montoUsd: number;
+  referencia?: string | null;
+  metodoPago?: string | null;
+  montoBs?: number | null;
+  reportadoEn?: string | null;
+};
+
 export type ListaCobranza = {
   porVerificar: CuotaPorCobrar[];
   vencenHoy: CuotaPorCobrar[];
@@ -983,7 +995,7 @@ export type ListaCobranza = {
   /** Las cuotas YA COBRADAS de cada compra, por grupo_id. La pantalla las
    *  muestra dentro de la tarjeta de cada persona: sin ellas, el equipo ve lo
    *  que falta pero no lo que ya pagó, y no puede saber si le escribe o no. */
-  pagadasPorGrupo: Record<string, { etiqueta: string; montoUsd: number; referencia?: string | null }[]>;
+  pagadasPorGrupo: Record<string, CuotaPagada[]>;
   /** true = no se pudo leer la base. La pantalla y el cron tienen que
    *  distinguirlo de "no hay nada que cobrar": un cero que parece
    *  tranquilizador es peor que un error visible. */
@@ -1109,7 +1121,7 @@ export async function listaDeCobranza(
       .filter((c) => c.verificadoEn)
       // La referencia va para que el buscador de Cobranza encuentre a alguien
       // por la referencia de un pago ya confirmado (la de la inicial, casi siempre).
-      .map((c) => ({ etiqueta: c.etiqueta, montoUsd: c.montoUsd, referencia: c.referenciaPago }));
+      .map((c) => ({ cuotaId: c.id, etiqueta: c.etiqueta, montoUsd: c.montoUsd, referencia: c.referenciaPago, metodoPago: c.metodoPago, montoBs: c.montoBs, reportadoEn: c.reportadoEn }));
     if (pagadas.length > 0) lista.pagadasPorGrupo[plan.grupoId] = pagadas;
 
     for (const c of plan.cuotas) {

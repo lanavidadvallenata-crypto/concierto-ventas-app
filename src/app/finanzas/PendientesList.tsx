@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { verificarPago, rechazarPago } from "./actions";
+import { verificarPago, rechazarPago, corregirReferenciaCompra } from "./actions";
+import CorregirReferencia from "./CorregirReferencia";
+import { metodosParaCorregir } from "@/lib/correccion-pago";
+import type { MetodoPago } from "@/lib/pagos";
 import { convertirABs } from "@/lib/tasa";
 import { ETIQUETA_CANAL, ETIQUETA_METODO, METODOS_EN_BS, formatoBs, formatoUsd, haceCuanto, horaCaracas } from "@/lib/formato";
 import { conAsiento, resumenCompra, type Tipo } from "@/lib/precios";
@@ -52,6 +55,7 @@ export default function PendientesList({
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [ahora, setAhora] = useState(() => Date.now());
   const [copiado, setCopiado] = useState<string | null>(null);
+  const [corrigiendo, setCorrigiendo] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setAhora(Date.now()), 30_000);
@@ -101,6 +105,27 @@ export default function PendientesList({
     });
   }
 
+  function guardarReferencia(c: CompraPendiente, metodo: MetodoPago, referencia: string) {
+    setAvisoGlobal(null);
+    setErrores((prev) => {
+      const copia = { ...prev };
+      delete copia[c.grupoId];
+      return copia;
+    });
+    setProcesando(c.grupoId);
+    startTransition(async () => {
+      const res = await corregirReferenciaCompra(c.id, metodo, referencia);
+      setProcesando(null);
+      if (!res.ok) {
+        setErrores((prev) => ({ ...prev, [c.grupoId]: res.error }));
+        return;
+      }
+      setCorrigiendo(null);
+      setAvisoGlobal({ tipo: "ok", texto: `${c.compradorNombre}: ${res.aviso ?? "referencia corregida."}` });
+      router.refresh();
+    });
+  }
+
   async function copiar(texto: string, id: string) {
     try {
       await navigator.clipboard.writeText(texto);
@@ -145,6 +170,8 @@ export default function PendientesList({
         const montoBs = enBs ? (c.totalBs ?? (tasaEurVes ? convertirABs(c.total, tasaEurVes) : null)) : null;
         const bsEstimado = enBs && c.totalBs == null;
         const error = errores[c.grupoId];
+        const metodosCorregir = metodosParaCorregir(c.metodoPago, c.canal);
+        const puedeCorregir = !bloqueado && metodosCorregir.length > 0;
         const canal =
           c.canal === "web" ? ETIQUETA_CANAL.web : esMio ? "Vendido por ti" : `Vendido por ${c.vendedorNombre ?? "—"}`;
 
@@ -223,7 +250,7 @@ export default function PendientesList({
               </div>
               <div className="col-span-2 min-w-0">
                 <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Referencia</dt>
-                <dd className="mt-0.5">
+                <dd className="mt-0.5 flex flex-wrap items-center gap-2">
                   {c.referenciaPago ? (
                     <button
                       type="button"
@@ -236,8 +263,30 @@ export default function PendientesList({
                   ) : (
                     <span className="text-red-300 font-medium">sin referencia</span>
                   )}
+                  {puedeCorregir && corrigiendo !== c.grupoId && (
+                    <button
+                      type="button"
+                      onClick={() => setCorrigiendo(c.grupoId)}
+                      disabled={enProceso}
+                      className="h-9 px-3 rounded-md border border-lila/40 text-lila-claro text-xs font-semibold"
+                    >
+                      {c.referenciaPago ? "Corregir" : "Agregar"}
+                    </button>
+                  )}
                 </dd>
               </div>
+              {corrigiendo === c.grupoId && (
+                <div className="col-span-2">
+                  <CorregirReferencia
+                    metodoActual={c.metodoPago}
+                    referenciaActual={c.referenciaPago}
+                    metodos={metodosCorregir}
+                    ocupado={enProceso}
+                    onGuardar={(m, r) => guardarReferencia(c, m, r)}
+                    onCancelar={() => setCorrigiendo(null)}
+                  />
+                </div>
+              )}
               <div className="col-span-2 min-w-0">
                 <dt className="text-[11px] uppercase tracking-[0.12em] text-noche-tenue">Correo</dt>
                 <dd className="break-words">{c.compradorEmail ?? <span className="text-red-300 font-medium">sin correo</span>}</dd>

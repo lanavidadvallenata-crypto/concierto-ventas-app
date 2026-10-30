@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import type { CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
-import { registrarPagoDeCuotas, aprobarCuotas, aprobarConPagoDeMas, anularPorFaltaDePago, rechazarPagoAnotado, anularCompraEnPlan } from "./actions";
+import type { CuotaPagada, CuotaPorCobrar, ListaCobranza } from "@/lib/abona618";
+import { registrarPagoDeCuotas, aprobarCuotas, aprobarConPagoDeMas, anularPorFaltaDePago, rechazarPagoAnotado, anularCompraEnPlan, corregirPagoAnotado } from "./actions";
+import CorregirPago from "./CorregirPago";
+import { montoNoCuadra } from "@/lib/correccion-pago";
 import { ETIQUETA_METODO, METODOS_EN_BS, NOTA_TASA_CORTA, SIN_TASA, cuandoCaracas, formatoBs, formatoBsAprox, formatoUsd, parsearMontoBs } from "@/lib/formato";
 import { convertirABs } from "@/lib/tasa";
 import { fechaCorta } from "@/lib/cuotas";
@@ -106,12 +108,33 @@ type Persona = {
   /** Las cuotas sin cobrar, de la más urgente a la menos. */
   pendientes: CuotaConUrgencia[];
   /** Las que ya están cobradas, para que se vea lo que la persona YA pagó. */
-  pagadas: { etiqueta: string; montoUsd: number; referencia?: string | null }[];
+  pagadas: CuotaPagada[];
   /** Las que ya reportó y están esperando al banco: el trabajo de Finanzas. */
   anotadas: CuotaConUrgencia[];
   /** La cuota que manda en su tarjeta. */
   manda: CuotaConUrgencia;
 };
+
+/** Las cuotas por confirmar que entraron con el mismo pago que `c` (misma
+ *  referencia, anotadas con menos de 5 minutos de diferencia): el mismo
+ *  criterio que usa el servidor al corregir. */
+function mismoPago(p: Persona, c: CuotaConUrgencia): CuotaConUrgencia[] {
+  if (!c.referenciaPago || !c.reportadoEn) return [c];
+  const t0 = Date.parse(c.reportadoEn);
+  return p.anotadas.filter(
+    (x) => x.cuotaId === c.cuotaId || (x.referenciaPago === c.referenciaPago && x.reportadoEn != null && Math.abs(Date.parse(x.reportadoEn) - t0) <= 5 * 60_000)
+  );
+}
+
+/** Lo mismo para un pago ya confirmado: si cubrió dos cuotas, se corrige
+ *  entero (el servidor reparte el total entre las dos). */
+function mismoPagoConfirmado(p: Persona, c: CuotaPagada): CuotaPagada[] {
+  if (!c.referencia || !c.reportadoEn) return [c];
+  const t0 = Date.parse(c.reportadoEn);
+  return p.pagadas.filter(
+    (x) => x.cuotaId === c.cuotaId || (x.referencia === c.referencia && x.reportadoEn != null && Math.abs(Date.parse(x.reportadoEn) - t0) <= 5 * 60_000)
+  );
+}
 
 /** 0414-1234567 → 584141234567, que es lo que wa.me necesita. */
 function paraWhatsApp(telefono: string | null): string | null {
@@ -237,6 +260,8 @@ export default function CobranzaList({
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   // "Llegó más dinero": una persona a la vez.
   const [pagoDeMas, setPagoDeMas] = useState<string | null>(null);
+  // "Corregir" un pago mal anotado (30 oct): una cuota a la vez.
+  const [corrigiendo, setCorrigiendo] = useState<string | null>(null);
   const [montoRecibido, setMontoRecibido] = useState("");
 
   const puedeAprobar = miRol === "finanzas" || miRol === "admin";
@@ -452,6 +477,16 @@ export default function CobranzaList({
               const aviso = avisos[p.grupoId];
               const esteProcesando = procesando === p.grupoId;
               const avance = p.totalUsd > 0 ? Math.round((p.pagado / p.totalUsd) * 100) : 0;
+              // Lo que falta SIN contar lo que ya pagó y espera al banco. Los
+              // Bs van sobre ese mismo número (antes iban sobre todo el saldo
+              // y mostraban el doble: "falta $21 ≈ Bs 41.697").
+              const falta = Math.round((p.saldo - p.anotadas.reduce((s, x) => s + x.montoUsd, 0)) * 100) / 100;
+              // Con un monto en Bs que no cuadra no se confirma: primero se corrige.
+              const montoDudoso = p.anotadas.some(
+                (x) =>
+                  METODOS_EN_BS.has(x.metodoPago ?? "") &&
+                  montoNoCuadra(x.montoBs, x.montoUsd, x.tasaAplicada && x.tasaAplicada > 0 ? x.tasaAplicada : tasaEurVes) != null
+              );
 
               return (
                 <article key={p.grupoId} className={`rounded-xl border px-3 py-3 space-y-2.5 ${sec.tono}`}>
@@ -467,11 +502,9 @@ export default function CobranzaList({
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="font-semibold text-sm tabular-nums">
-                        falta {formatoUsd(Math.round((p.saldo - p.anotadas.reduce((s, x) => s + x.montoUsd, 0)) * 100) / 100)}
-                      </div>
+                      <div className="font-semibold text-sm tabular-nums">falta {formatoUsd(falta)}</div>
                       <div className="text-xs text-noche-suave tabular-nums">
-                        {tasaEurVes ? formatoBsAprox(convertirABs(p.saldo, tasaEurVes)) : SIN_TASA}
+                        {tasaEurVes ? formatoBsAprox(convertirABs(falta, tasaEurVes)) : SIN_TASA}
                       </div>
                     </div>
                   </div>
@@ -498,11 +531,49 @@ export default function CobranzaList({
 
                   <ul className="text-xs rounded-md bg-white/[0.04] border border-white/10 divide-y divide-white/[0.07]">
                     {p.pagadas.map((c) => (
-                      <li key={c.etiqueta} className="flex items-center justify-between gap-2 px-2 py-1.5">
-                        <span className="text-noche-tenue">
-                          <span className="text-emerald-300 font-semibold">✓</span> {c.etiqueta}
-                        </span>
-                        <span className="tabular-nums text-noche-tenue">{formatoUsd(c.montoUsd)} · pagada</span>
+                      <li key={c.etiqueta} className="px-2 py-1.5 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-noche-tenue">
+                            <span className="text-emerald-300 font-semibold">✓</span> {c.etiqueta}
+                          </span>
+                          <span className="tabular-nums text-noche-tenue flex items-center gap-2">
+                            {formatoUsd(c.montoUsd)} · pagada
+                            {/* Un pago ya confirmado solo lo corrige un admin. */}
+                            {esAdmin && c.cuotaId && corrigiendo !== c.cuotaId && (
+                              <button type="button" onClick={() => setCorrigiendo(c.cuotaId!)} className="h-8 px-2 rounded-md border border-white/15 text-[11px] font-semibold text-lila-claro">
+                                Corregir
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                        {esAdmin &&
+                          c.cuotaId &&
+                          corrigiendo === c.cuotaId &&
+                          (() => {
+                            const delPago = mismoPagoConfirmado(p, c);
+                            const bsDelPago = delPago.every((x) => x.montoBs == null)
+                              ? null
+                              : Math.round(delPago.reduce((s, x) => s + (x.montoBs ?? 0), 0) * 100) / 100;
+                            return (
+                              <CorregirPago
+                                cuotaId={c.cuotaId}
+                                etiqueta={delPago.map((x) => x.etiqueta).join(" y ")}
+                                inicial={{ metodoPago: c.metodoPago ?? null, referenciaPago: c.referencia ?? null, montoBs: bsDelPago }}
+                                usdDelPago={Math.round(delPago.reduce((s, x) => s + x.montoUsd, 0) * 100) / 100}
+                                tasa={tasaEurVes}
+                                confirmado
+                                ocupado={esteProcesando}
+                                onGuardar={(d) =>
+                                  correr(p.grupoId, async () => {
+                                    const r = await corregirPagoAnotado(d);
+                                    if (r.ok) setCorrigiendo(null);
+                                    return r;
+                                  })
+                                }
+                                onCancelar={() => setCorrigiendo(null)}
+                              />
+                            );
+                          })()}
                       </li>
                     ))}
                     {p.pendientes.map((c) => (
@@ -568,6 +639,57 @@ export default function CobranzaList({
                             )}
                           </div>
                         )}
+                        {c.reportadoEn &&
+                          (() => {
+                            const delPago = mismoPago(p, c);
+                            const usdDelPago = Math.round(delPago.reduce((s, x) => s + x.montoUsd, 0) * 100) / 100;
+                            const bsDelPago = delPago.every((x) => x.montoBs == null)
+                              ? null
+                              : Math.round(delPago.reduce((s, x) => s + (x.montoBs ?? 0), 0) * 100) / 100;
+                            const tasa = c.tasaAplicada && c.tasaAplicada > 0 ? c.tasaAplicada : tasaEurVes;
+                            // Aviso para Finanzas antes de confirmar (30 oct): un monto
+                            // con la coma corrida (Bs 2.084.880 por una cuota de $21).
+                            const noCuadra = METODOS_EN_BS.has(c.metodoPago ?? "") ? montoNoCuadra(c.montoBs, c.montoUsd, tasa) : null;
+                            return (
+                              <>
+                                {noCuadra && (
+                                  <div className="rounded-md bg-red-500/10 border border-red-400/35 text-red-200 px-2 py-1.5 font-medium">
+                                    El monto no cuadra: {formatoBs(c.montoBs!)} ≈ {formatoUsd(noCuadra.usdEquivalente)} y la cuota es de{" "}
+                                    {formatoUsd(c.montoUsd)} (≈ {formatoBs(noCuadra.esperadoBs)}). Corrígelo antes de confirmar.
+                                  </div>
+                                )}
+                                {corrigiendo === c.cuotaId ? (
+                                  <CorregirPago
+                                    cuotaId={c.cuotaId}
+                                    etiqueta={delPago.map((x) => x.etiqueta).join(" y ")}
+                                    inicial={{ metodoPago: c.metodoPago, referenciaPago: c.referenciaPago, montoBs: bsDelPago }}
+                                    usdDelPago={usdDelPago}
+                                    tasa={tasa}
+                                    confirmado={false}
+                                    ocupado={esteProcesando}
+                                    onGuardar={(d) =>
+                                      correr(p.grupoId, async () => {
+                                        const r = await corregirPagoAnotado(d);
+                                        if (r.ok) setCorrigiendo(null);
+                                        return r;
+                                      })
+                                    }
+                                    onCancelar={() => setCorrigiendo(null)}
+                                  />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCorrigiendo(c.cuotaId)}
+                                    className={`h-9 px-2.5 rounded-md text-xs font-semibold ${
+                                      noCuadra ? "bg-red-600 text-white" : "border border-white/15 bg-white/[0.05] text-lila-claro"
+                                    }`}
+                                  >
+                                    Corregir monto o referencia
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
                         {c.nota && <div className="text-noche-suave italic">“{c.nota}”</div>}
                       </li>
                     ))}
@@ -630,12 +752,14 @@ export default function CobranzaList({
                     {p.anotadas.length > 0 && puedeAprobar && (
                       <button
                         type="button"
-                        disabled={esteProcesando}
+                        disabled={esteProcesando || montoDudoso}
                         onClick={() => correr(p.grupoId, () => aprobarCuotas(p.anotadas.map((c) => c.cuotaId)))}
                         className="h-11 px-3 rounded-lg bg-violeta-hondo text-white text-sm font-semibold disabled:opacity-50"
                       >
                         {esteProcesando
                           ? "Confirmando…"
+                          : montoDudoso
+                          ? "Corrige el monto para confirmar"
                           : `Confirmé ${p.anotadas.length > 1 ? "los pagos" : "el dinero"} en el banco`}
                       </button>
                     )}

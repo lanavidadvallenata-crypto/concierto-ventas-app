@@ -5,6 +5,7 @@ import { reportarMiPago } from "./actions";
 import { CONDICIONES, fechaCorta, fechaLarga } from "@/lib/cuotas";
 import { convertirABs } from "@/lib/tasa";
 import { NOTA_TASA, SIN_TASA, formatoBs, formatoBsAprox, parsearMontoBs } from "@/lib/formato";
+import { bsEsperado, bsParaEscribir, montoNoCuadra } from "@/lib/correccion-pago";
 
 // Lo que ve el comprador en plan cuando abre su compra. Hasta ahora esta
 // página solo sabía de entradas con QR, y a quien está pagando en cuotas le
@@ -65,9 +66,25 @@ export default function PlanComprador({
   const [cubreTodo, setCubreTodo] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
+  // 30 oct: varios compradores escribieron el monto sin la coma (Bs 2.084.880
+  // por una cuota de $21). Ahora el monto viene escrito con lo que le toca, se
+  // ve cómo lo vamos a leer y, si no cuadra, se pregunta antes de enviar.
+  const [montoEditado, setMontoEditado] = useState(false);
+  const [confirmarMonto, setConfirmarMonto] = useState(false);
 
   const proxima = cuotas.find((c) => !c.pagada && !c.reportada) ?? null;
   const enBs = METODOS.find((m) => m.valor === metodo)?.enBs ?? false;
+  // Lo que cubre el aviso: la próxima cuota, o todo lo que falta si lo marca.
+  const usdDelAviso = proxima ? (cubreTodo ? saldo : proxima.monto) : 0;
+  const bsDelAviso = tasaEurVes && usdDelAviso > 0 ? bsEsperado(usdDelAviso, tasaEurVes) : null;
+  const montoLeido = enBs ? parsearMontoBs(montoBs) : null;
+  const montoRaro = enBs ? montoNoCuadra(montoLeido, usdDelAviso, tasaEurVes) : null;
+
+  function abrirAviso() {
+    setAbierto(true);
+    setConfirmarMonto(false);
+    if (!montoEditado && proxima && tasaEurVes) setMontoBs(bsParaEscribir(bsEsperado(proxima.monto, tasaEurVes)));
+  }
   const avance = total > 0 ? Math.min(100, Math.round((pagado / total) * 100)) : 0;
 
   return (
@@ -176,7 +193,7 @@ export default function PlanComprador({
               {!abierto ? (
                 <button
                   type="button"
-                  onClick={() => setAbierto(true)}
+                  onClick={abrirAviso}
                   className="min-h-11 rounded-xl bg-[#3F0A62] text-white font-semibold text-sm"
                 >
                   Ya pagué — avisar
@@ -192,6 +209,12 @@ export default function PlanComprador({
                     if (enBs && bs == null) {
                       setEnviando(false);
                       setAviso({ ok: false, texto: "No entendimos el monto. Escríbelo como en tu comprobante, por ejemplo 23.534,75." });
+                      return;
+                    }
+                    // Si no cuadra con lo que le toca, se pregunta una vez antes de enviar.
+                    if (montoRaro && !confirmarMonto) {
+                      setEnviando(false);
+                      setConfirmarMonto(true);
                       return;
                     }
                     startTransition(async () => {
@@ -211,6 +234,8 @@ export default function PlanComprador({
                       setAbierto(false);
                       setReferencia("");
                       setMontoBs("");
+                      setMontoEditado(false);
+                      setConfirmarMonto(false);
                       setAviso({ ok: true, texto: res.aviso });
                     });
                   }}
@@ -251,13 +276,34 @@ export default function PlanComprador({
                       <span className="text-xs font-medium text-neutral-700">Monto exacto en bolívares</span>
                       <input
                         value={montoBs}
-                        onChange={(e) => setMontoBs(e.target.value)}
+                        onChange={(e) => {
+                          setMontoBs(e.target.value);
+                          setMontoEditado(true);
+                          setConfirmarMonto(false);
+                        }}
                         inputMode="decimal"
                         placeholder="Como en tu comprobante, ej: 23.534,75"
                         className="mt-1 w-full min-h-11 rounded-lg border border-neutral-300 px-2 text-sm"
                         required
                       />
+                      <span className="mt-1 block text-xs text-neutral-500 tabular-nums">
+                        {montoLeido != null ? (
+                          <>
+                            Vamos a registrar <strong className="text-neutral-800">{formatoBs(montoLeido)}</strong>
+                          </>
+                        ) : (
+                          "Escríbelo como en tu comprobante"
+                        )}
+                        {bsDelAviso != null ? ` · te tocan ${formatoBs(bsDelAviso)} hoy` : ""}
+                      </span>
                     </label>
+                  )}
+
+                  {confirmarMonto && montoRaro && (
+                    <p className="text-sm rounded-lg bg-amber-50 border border-amber-300 text-amber-950 px-3 py-2">
+                      Escribiste <strong>{formatoBs(montoLeido!)}</strong>, pero te tocan <strong>{formatoBs(montoRaro.esperadoBs)}</strong>. Revisa la
+                      coma: si el monto está bien, toca de nuevo para enviar.
+                    </p>
                   )}
 
                   {cuotas.filter((c) => !c.pagada && !c.reportada).length > 1 && (
@@ -265,7 +311,13 @@ export default function PlanComprador({
                       <input
                         type="checkbox"
                         checked={cubreTodo}
-                        onChange={(e) => setCubreTodo(e.target.checked)}
+                        onChange={(e) => {
+                          const todo = e.target.checked;
+                          setCubreTodo(todo);
+                          setConfirmarMonto(false);
+                          // Si no escribió el monto a mano, se ajusta a lo que cubre ahora.
+                          if (!montoEditado && proxima && tasaEurVes) setMontoBs(bsParaEscribir(bsEsperado(todo ? saldo : proxima.monto, tasaEurVes)));
+                        }}
                         className="mt-0.5 h-5 w-5 shrink-0 accent-[#3F0A62]"
                       />
                       <span className="text-xs text-neutral-800 leading-relaxed">
@@ -288,7 +340,7 @@ export default function PlanComprador({
                       disabled={enviando}
                       className="min-h-11 rounded-xl bg-[#3F0A62] text-white font-semibold text-sm disabled:opacity-50"
                     >
-                      {enviando ? "Enviando…" : "Enviar aviso"}
+                      {enviando ? "Enviando…" : confirmarMonto && montoRaro ? "Sí, está bien — enviar" : "Enviar aviso"}
                     </button>
                   </div>
                 </form>

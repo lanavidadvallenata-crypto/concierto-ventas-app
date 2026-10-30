@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { corregirPago } from "@/lib/correccion-pago";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { anularPlan, leerPlanPorGrupo, moverExcedente, rechazarReporte, reportarCuota, verificarCuota, type CanalReporte } from "@/lib/abona618";
 import { enviarCorreoCuotaVerificada, enviarCorreoPlanAnulado } from "@/lib/enviar-qr";
@@ -20,14 +21,14 @@ type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
 async function requiereEquipo(rolesPermitidos: string[]) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { user: null, rol: null, error: "Tu sesión expiró — vuelve a entrar." };
+  if (!user) return { user: null, rol: null, nombre: null, error: "Tu sesión expiró — vuelve a entrar." };
 
   const service = createServiceClient();
   const { data: perfil } = await service.from("perfiles").select("rol, activo, nombre").eq("id", user.id).maybeSingle();
   if (!perfil || !perfil.activo || !rolesPermitidos.includes(perfil.rol as string)) {
-    return { user: null, rol: null, error: "No tienes permiso para esta acción." };
+    return { user: null, rol: null, nombre: null, error: "No tienes permiso para esta acción." };
   }
-  return { user, rol: perfil.rol as string, error: null };
+  return { user, rol: perfil.rol as string, nombre: (perfil.nombre as string | null) ?? null, error: null };
 }
 
 function revalidar() {
@@ -687,4 +688,37 @@ export async function rechazarPagoAnotado(input: unknown): Promise<Resultado> {
     ok: true,
     aviso: `${r.etiqueta} vuelve a estar pendiente de pago, con su fecha. Avísale al comprador por WhatsApp qué pasó con su referencia.`,
   };
+}
+
+/**
+ * Corregir un pago mal anotado (Anita, 30 oct): método, referencia o monto en
+ * Bs. Sin rechazar ni volver a anotar: el pago sigue donde estaba. Por
+ * confirmar lo corrige cualquiera del equipo; ya confirmado, solo un admin.
+ * Queda en la nota quién lo corrigió y qué decía antes.
+ */
+const corregirSchema = z.object({
+  cuotaId: z.string().uuid(),
+  metodoPago: z.enum(["pago_movil", "transferencia", "zelle", "binance", "efectivo_usd", "efectivo_bs"]),
+  referenciaPago: z.string().trim().min(1, "Escribe la referencia del pago.").max(80),
+  montoBs: z.number().positive().max(1_000_000_000).nullable().optional(),
+});
+
+export async function corregirPagoAnotado(input: unknown): Promise<Resultado> {
+  const { user, rol, nombre, error } = await requiereEquipo(["ventas", "finanzas", "admin"]);
+  if (!user) return { ok: false, error: error! };
+
+  const parsed = corregirSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Revisa los datos." };
+  const v = parsed.data;
+
+  const r = await corregirPago(createServiceClient(), {
+    cuotaId: v.cuotaId,
+    metodoPago: v.metodoPago,
+    referenciaPago: v.referenciaPago,
+    montoBs: v.montoBs ?? null,
+    quien: { id: user.id, nombre: nombre ?? user.email ?? "alguien del equipo", esAdmin: rol === "admin" },
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+  if (r.cambio) revalidar();
+  return { ok: true, aviso: r.resumen };
 }

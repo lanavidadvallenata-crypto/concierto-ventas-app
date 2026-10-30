@@ -12,6 +12,8 @@ import { guardarTasaManual } from "@/lib/tasa";
 import { lineasDeAsientosDe, obtenerAsiento } from "@/lib/asiento";
 import { ETIQUETA_METODO } from "@/lib/formato";
 import { detalleMixto, zonaPrincipal, type Tipo } from "@/lib/precios";
+import { metodosParaCorregir } from "@/lib/correccion-pago";
+import { normalizarReferencia, validarReferencia, type MetodoPago } from "@/lib/pagos";
 
 type Resultado = { ok: true; aviso?: string } | { ok: false; error: string };
 
@@ -525,6 +527,70 @@ export async function corregirContacto(ticketId: string, email: string, telefono
 
   revalidatePath("/finanzas");
   return { ok: true, aviso: `Datos guardados: ${parsed.data.email} · ${parsed.data.telefono}.` };
+}
+
+// Corregir la referencia (o el método, dentro de la misma moneda) de una
+// compra de contado que sigue por verificar (Anita, 30 oct). Antes la única
+// salida era rechazar —con correo de "pago rechazado" al comprador— y volver
+// a registrar. La compra sigue pendiente: se corrige y se verifica contra el
+// banco como siempre. Las compras en cuotas se corrigen en Cobranza.
+export async function corregirReferenciaCompra(ticketId: string, metodo: string, referencia: string): Promise<Resultado> {
+  const { user, rol, error } = await requiereFinanzas();
+  if (!user) return { ok: false, error: error! };
+
+  const grupo = await obtenerGrupo(ticketId);
+  if ("error" in grupo) return { ok: false, error: grupo.error };
+  const pendientes = grupo.tickets.filter((t) => t.estado_pago === "pendiente");
+  if (pendientes.length === 0) return { ok: false, error: "Esa compra ya no está por verificar. Recarga la pantalla." };
+  const primero = pendientes[0];
+
+  // Control cruzado, igual que al verificar: quien registró la venta no
+  // corrige el dato con el que se busca su pago en el banco.
+  if (primero.vendido_por === user.id && rol !== "admin") {
+    return { ok: false, error: "Esta venta la registraste tú: la corrige otra persona de Finanzas o un admin." };
+  }
+
+  const permitidos = metodosParaCorregir(primero.metodo_pago, primero.canal ?? (primero.vendido_por ? "manual" : "web"));
+  if (!permitidos.includes(metodo as MetodoPago)) {
+    return { ok: false, error: "Solo se puede cambiar a un método de la misma moneda. Si pagó en otra moneda, es otra compra." };
+  }
+  const m = metodo as MetodoPago;
+  const errorRef = validarReferencia(m, referencia);
+  if (errorRef) return { ok: false, error: errorRef };
+  const ref = normalizarReferencia(m, referencia);
+  if (!ref) return { ok: false, error: "Escribe la referencia." };
+  if (m === primero.metodo_pago && ref === primero.referencia_pago) return { ok: true, aviso: "No había nada que cambiar: ya decía eso." };
+
+  const service = createServiceClient();
+  const grupoId = primero.grupo_id ?? primero.id;
+  const { data: planes, error: errorPlan } = await service
+    .from("planes_pago")
+    .select("id")
+    .eq("grupo_id", grupoId)
+    .in("estado", ["al_dia", "en_mora"])
+    .limit(1);
+  if (errorPlan) return { ok: false, error: "No se pudo revisar la compra. Intenta de nuevo." };
+  if (planes && planes.length > 0) return { ok: false, error: "Esa compra va en cuotas: corrígela en Cobranza." };
+
+  const { data: cambiados, error: dbError } = await service
+    .from("tickets")
+    .update({ metodo_pago: m, referencia_pago: ref })
+    .in("id", pendientes.map((t) => t.id))
+    .eq("estado_pago", "pendiente")
+    .select("id");
+  if (dbError) {
+    console.error("Error corrigiendo referencia:", dbError.message);
+    return { ok: false, error: "No se pudo guardar. Intenta de nuevo." };
+  }
+  if (!cambiados || cambiados.length === 0) {
+    return { ok: false, error: "Esa compra se verificó o rechazó mientras la corregías. Recarga la pantalla." };
+  }
+  console.info(
+    `[corregir-referencia] ${user.email ?? user.id} · compra ${grupoId} · ${primero.metodo_pago} ref. ${primero.referencia_pago ?? "—"} → ${m} ref. ${ref}`
+  );
+
+  revalidatePath("/finanzas");
+  return { ok: true, aviso: `Referencia corregida: ${ETIQUETA_METODO[m] ?? m} · ${ref}. Sigue por verificar.` };
 }
 
 export type TicketBuscado = {
